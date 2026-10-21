@@ -283,4 +283,19 @@ ok(strpos($o2, 'Eigener') !== false && strpos($o2, 'button-test') === false, 'ei
 $GLOBALS['opt']['sab_btn_b'] = '';
 $o3 = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es'], 'R');
 ok(strpos($o3, 'button-test') === false, 'nur ein Text: kein Test');
+
+// ---- 0.17.1: Preis-Test ----
+$GLOBALS['opt']['sab_preis_test'] = '1'; $GLOBALS['opt']['sab_slots'] = "karte: B0PRE00001"; $GLOBALS['tr'] = [];
+$ms = ['A' => 0, 'B' => 0];
+for ($pid = 1; $pid <= 40; $pid++) {
+    $GLOBALS['pid'] = $pid;
+    $o = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es'], 'R');
+    $mit = strpos($o, 'sab-preis') !== false; $ms[$mit ? 'B' : 'A']++;
+    if ($mit && strpos($o, 'data-sab-var="B"') === false) { ok(false, 'Preis-Test: B-Variante mit Preis trägt var=B'); }
+    if (!$mit && strpos($o, 'data-sab-var="A"') === false) { ok(false, 'Preis-Test: A-Variante trägt var=A'); }
+}
+ok($ms['A'] > 5 && $ms['B'] > 5, 'Preis-Test: beide Varianten kommen vor (' . $ms['A'] . '/' . $ms['B'] . ')');
+$GLOBALS['opt']['sab_preis_test'] = '0'; $GLOBALS['tr'] = [];
+$o = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es'], 'R');
+ok(strpos($o, 'sab-preis') === false && strpos($o, 'preis-test') === false, 'Preis-Test aus: kein Preis, kein Test');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
