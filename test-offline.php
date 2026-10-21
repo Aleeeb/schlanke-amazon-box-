@@ -298,4 +298,14 @@ ok($ms['A'] > 5 && $ms['B'] > 5, 'Preis-Test: beide Varianten kommen vor (' . $m
 $GLOBALS['opt']['sab_preis_test'] = '0'; $GLOBALS['tr'] = [];
 $o = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es'], 'R');
 ok(strpos($o, 'sab-preis') === false && strpos($o, 'preis-test') === false, 'Preis-Test aus: kein Preis, kein Test');
+
+// ---- 0.18.0: Vorschau ----
+foreach (['sab_marken','sab_tests','sab_tausch','sab_ausfall','sab_bildtests'] as $k) { unset($GLOBALS['opt'][$k]); }
+$GLOBALS['opt']['sab_preis_test'] = '0'; $GLOBALS['opt']['sab_btn_a'] = ''; $GLOBALS['opt']['sab_btn_b'] = ''; $GLOBALS['tr'] = [];
+$o = $GLOBALS['sc']['amz_produkt'](['asin' => 'B0PRE00001', 'land' => 'es'], 'R');
+ok(strpos($o, 'sab-produkt') !== false && strpos($o, 'B0PRE00001') !== false, 'amz_produkt asin= ohne Slot');
+$GLOBALS['opt']['sab_produkte'] = "B0PRE00001 | Beispiel"; $GLOBALS['opt']['sab_slots'] = "karte: B0PRE00001"; $GLOBALS['admin'] = true; $_GET['tab'] = 'vorschau'; $_POST = [];
+ob_start(); SAB::seite(); $h = ob_get_clean();
+ok(strpos($h, 'Slots') !== false && strpos($h, 'Beispiel') !== false && substr_count($h, 'class="sab-produkt"') >= 2, 'Vorschau-Reiter zeigt Slot und Produkt als Karten');
+ok(strpos($h, 'sab-bild') !== false, 'Vorschau-Reiter zeigt Bild-Ausgabe');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Schlanke Amazon-Box
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.17.1
+ * Version: 0.18.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.17.1';
+    const VERSION = '0.18.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -517,9 +517,10 @@ final class SAB {
     }
 
     public static function sc_produkt($a, $inhalt = ''): string {
-        $a = shortcode_atts(['slot' => '', 'land' => '', 'breite' => '', 'text' => ''], $a);
+        $a = shortcode_atts(['slot' => '', 'asin' => '', 'land' => '', 'breite' => '', 'text' => ''], $a);
         $slots = self::slots(); $tests = self::tests();
         $sn = $a['slot'];
+        if ($a['asin'] !== '' && strlen(self::asin($a['asin'])) === 10) { $sn = 'asin-' . self::asin($a['asin']); $slots[$sn] = [self::asin($a['asin'])]; }  // [amz_produkt asin="..."] ohne Slot
         if (!isset($slots[$sn]) && !isset($tests[$sn])) { return (string) $inhalt; }  // Rückfall: bisheriger HTML-Code
         $land = self::land($a['land']);
         $liste = self::nach_marken(array_map([__CLASS__, 'getauscht'], $slots[$sn] ?? []));
@@ -1008,6 +1009,25 @@ final class SAB {
         add_management_page('Schlanke Amazon-Box', 'Schlanke Amazon-Box', 'manage_options', 'sab', [__CLASS__, 'seite']);
     }
 
+    /** Vorschau mit echten Daten: jeder Slot und jedes Produkt als Karte und als Bild, so wie die Besucher es sehen. */
+    private static function vorschau_html(): string {
+        $h = '<p>So sehen Besucher die Karten (echte Bilder und Texte aus dem Zwischenspeicher). Läuft ein A/B-Test, zeigt die Vorschau die Variante, die dieser Seite zugeteilt wäre.</p>';
+        if (get_option('sab_karten_css') !== '0') { $h .= '<style>' . self::KARTEN_CSS . '</style>'; }
+        $land = self::land('');
+        $slots = array_merge(self::slots(), self::tests());
+        if ($slots) {
+            $h .= '<h2>Slots</h2>';
+            foreach (array_keys($slots) as $sn) { $h .= '<h3>' . esc_html($sn) . '</h3>' . self::sc_produkt(['slot' => (string) $sn, 'land' => $land], ''); }
+        }
+        $h .= '<h2>Einzelne Produkte</h2>';
+        foreach (self::produkte() as $asin => $name) {
+            $h .= '<h3>' . esc_html($name !== '' ? $name : $asin) . ' <small>' . esc_html($asin) . '</small></h3>'
+                . self::sc_produkt(['asin' => (string) $asin, 'land' => $land], '')
+                . '<p><small>Nur Bild:</small> ' . self::sc_bild(['asin' => (string) $asin, 'land' => $land, 'breite' => '120'], '') . '</p>';
+        }
+        return $h;
+    }
+
     public static function seite(): void {
         if (!current_user_can('manage_options')) { return; }
         $tabs = [
@@ -1015,6 +1035,7 @@ final class SAB {
             'produkte'      => 'Produkte und Ersatzlisten',
             'ausfaelle'     => 'Ausfälle und Warnungen',
             'umbau'         => 'Umbau',
+            'vorschau'      => 'Vorschau',
             'tests'         => 'A/B-Tests',
             'einstellungen' => 'Einstellungen',
             'hilfe'         => 'Hilfe',
@@ -1141,6 +1162,8 @@ final class SAB {
             echo '<form method="post">'; wp_nonce_field('sab_speichern');
             echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_zurueck">'
                . '<p><label><input type="checkbox" name="sab_bestaetigt" value="1"> Ja, alles auf den Zustand vor dem Umbau zurücksetzen</label> <button class="button">Rückgängig</button></p></form>';
+        } elseif ($tab === 'vorschau') {
+            echo self::vorschau_html();
         } elseif ($tab === 'tests') {
             echo '<form method="post">'; wp_nonce_field('sab_speichern');
             echo '<input type="hidden" name="sab_tab" value="tests"><input type="hidden" name="sab_form" value="tests">'
