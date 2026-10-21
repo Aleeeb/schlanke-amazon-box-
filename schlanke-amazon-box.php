@@ -1,15 +1,15 @@
 <?php
 /**
- * Plugin Name: Amazon-Box schlank
+ * Plugin Name: 1a Amazon Box
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.20.1
+ * Version: 0.20.2
  * Requires PHP: 7.4
  */
 
 if (!defined('ABSPATH')) { exit; }
 
 /*
- * Zugangsdaten: am einfachsten unter Werkzeuge > Schlanke Amazon-Box eintragen.
+ * Zugangsdaten: am einfachsten unter Werkzeuge > 1a Amazon Box eintragen.
  * Sicherer (nicht in der Datenbank) ist die wp-config.php, sie hat dann Vorrang:
  *
  * define('SAB_CLIENT_ID',     'Credential ID');
@@ -27,7 +27,7 @@ if (!defined('ABSPATH')) { exit; }
  * Rückfall: Steht zwischen [amz_produkt]...[/amz_produkt] bzw. [amz_bild]...[/amz_bild] der bisherige HTML-Code,
  * erscheint genau dieser Code, wenn Amazon nicht antwortet oder kein Produkt der Liste brauchbar ist.
  *
- * Einstellungen: Werkzeuge > Schlanke Amazon-Box (Produkte mit Kurznamen, Ersatzlisten, Ausfälle).
+ * Einstellungen: Werkzeuge > 1a Amazon Box (Produkte mit Kurznamen, Ersatzlisten, Ausfälle).
  */
 
 final class SAB {
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.20.1';
+    const VERSION = '0.20.2';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -82,7 +82,7 @@ final class SAB {
 
     // ---------- Zugang ----------
 
-    // Zugangsdaten: wp-config.php hat Vorrang, sonst die Eingabemaske unter Werkzeuge > Schlanke Amazon-Box
+    // Zugangsdaten: wp-config.php hat Vorrang, sonst die Eingabemaske unter Werkzeuge > 1a Amazon Box
 
     private static function zugang(): array {
         return [
@@ -409,8 +409,8 @@ final class SAB {
                 if (!isset($vorher[$asin])) { $neu[] = (self::produkte()[$asin] ?? '') ?: ($p['titel'] ?? '') ?: $asin; }
             }
         }
-        if ($neu) { self::alarm('ausfall', 'Neue Produkte nicht mehr verfügbar', "Seit dem letzten Lauf ausgefallen:\n  " . implode("\n  ", $neu) . "\n\nDas Plugin setzt, wo eine Ersatzliste hinterlegt ist, automatisch den nächsten Ersatz ein.\nÜbersicht: Werkzeuge > Schlanke Amazon-Box > Ausfälle und Warnungen"); }
-        if ($gesamt > 0 && $unerreichbar === $gesamt) { self::alarm('api', 'Amazon-Schnittstelle antwortet nicht', "Beim täglichen Lauf konnte kein einziges Produkt von Amazon abgerufen werden.\nMögliche Ursachen: Zugangsdaten (Credentials) abgelaufen, Amazon-Konto gesperrt oder Amazon vorübergehend nicht erreichbar.\nDie Seiten zeigen weiter die zwischengespeicherten Daten, solange sie vorhanden sind.\nPrüfen: Werkzeuge > Schlanke Amazon-Box > Übersicht."); }
+        if ($neu) { self::alarm('ausfall', 'Neue Produkte nicht mehr verfügbar', "Seit dem letzten Lauf ausgefallen:\n  " . implode("\n  ", $neu) . "\n\nDas Plugin setzt, wo eine Ersatzliste hinterlegt ist, automatisch den nächsten Ersatz ein.\nÜbersicht: Werkzeuge > 1a Amazon Box > Ausfälle und Warnungen"); }
+        if ($gesamt > 0 && $unerreichbar === $gesamt) { self::alarm('api', 'Amazon-Schnittstelle antwortet nicht', "Beim täglichen Lauf konnte kein einziges Produkt von Amazon abgerufen werden.\nMögliche Ursachen: Zugangsdaten (Credentials) abgelaufen, Amazon-Konto gesperrt oder Amazon vorübergehend nicht erreichbar.\nDie Seiten zeigen weiter die zwischengespeicherten Daten, solange sie vorhanden sind.\nPrüfen: Werkzeuge > 1a Amazon Box > Übersicht."); }
         self::wochenmail();
     }
 
@@ -420,7 +420,7 @@ final class SAB {
         if ($an === '') { return; }
         $z = (array) get_option('sab_alarm_zuletzt', []);
         if (time() - (int) ($z[$art] ?? 0) < 20 * HOUR_IN_SECONDS) { return; }
-        if (wp_mail($an, 'Schlanke Amazon-Box: ' . $betreff, $text)) { $z[$art] = time(); update_option('sab_alarm_zuletzt', $z, false); }
+        if (wp_mail($an, '1a Amazon Box: ' . $betreff, $text)) { $z[$art] = time(); update_option('sab_alarm_zuletzt', $z, false); }
     }
 
     /** Wöchentliche Mail (Adresse unter Einstellungen): Klicks der letzten 7 Tage, Ausfälle, Seiten mit vielen Links. Läuft im täglichen Lauf, nie beim Seitenaufruf. */
@@ -435,12 +435,12 @@ final class SAB {
         }
         $warn = array_filter((array) get_option('sab_linkwarnung', []), fn($x) => ($x['n'] ?? 0) >= self::LINK_WARNUNG);
         $text = self::wochenmail_text($k, (array) get_option('sab_ausfall', []), $warn);
-        if (wp_mail($an, 'Schlanke Amazon-Box: Wochenbericht', $text)) { update_option('sab_mail_zuletzt', time(), false); }
+        if (wp_mail($an, '1a Amazon Box: Wochenbericht', $text)) { update_option('sab_mail_zuletzt', time(), false); }
     }
 
     private static function wochenmail_text(array $klicks, array $ausfall, array $warn): string {
         $namen = self::produkte();
-        $z = ['Schlanke Amazon-Box: die letzten 7 Tage', ''];
+        $z = ['1a Amazon Box: die letzten 7 Tage', ''];
         $z[] = 'Klicks auf Amazon-Links: ' . array_sum(array_map(fn($r) => (int) $r['n'], $klicks));
         foreach (array_slice($klicks, 0, 5) as $r) { $z[] = '  ' . (int) $r['n'] . ' x ' . (($namen[$r['asin']] ?? '') ?: $r['asin']); }
         $z[] = '';
@@ -643,7 +643,7 @@ final class SAB {
                 }
             }
             if (function_exists('current_user_can') && current_user_can('manage_options')) {
-                echo '<div style="position:fixed;left:8px;bottom:8px;z-index:99999;background:#fff3cd;border:1px solid #d4a017;color:#000;padding:6px 10px;font:13px sans-serif">Schlanke Amazon-Box: ' . (int) $n . ' Partnerlinks auf dieser Seite (Warnung ab ' . self::LINK_WARNUNG . ')</div>';
+                echo '<div style="position:fixed;left:8px;bottom:8px;z-index:99999;background:#fff3cd;border:1px solid #d4a017;color:#000;padding:6px 10px;font:13px sans-serif">1a Amazon Box: ' . (int) $n . ' Partnerlinks auf dieser Seite (Warnung ab ' . self::LINK_WARNUNG . ')</div>';
             }
         }
     }
@@ -1059,7 +1059,7 @@ final class SAB {
     // ---------- Verwaltung ----------
 
     public static function menue(): void {
-        add_management_page('Schlanke Amazon-Box', 'Schlanke Amazon-Box', 'manage_options', 'sab', [__CLASS__, 'seite']);
+        add_management_page('1a Amazon Box', '1a Amazon Box', 'manage_options', 'sab', [__CLASS__, 'seite']);
     }
 
     /** Vorschau mit echten Daten: jeder Slot und jedes Produkt als Karte und als Bild, so wie die Besucher es sehen. */
@@ -1142,7 +1142,7 @@ final class SAB {
             }
         }
 
-        echo '<div class="wrap"><h1>Schlanke Amazon-Box <small style="font-size:12px;color:#666">Version ' . esc_html(self::VERSION) . '</small></h1>';
+        echo '<div class="wrap"><h1>1a Amazon Box <small style="font-size:12px;color:#666">Version ' . esc_html(self::VERSION) . '</small></h1>';
         if ($meldung) { echo '<div class="notice notice-success"><p>' . esc_html($meldung) . '</p></div>'; }
         echo '<h2 class="nav-tab-wrapper">';
         foreach ($tabs as $k => $name) {
