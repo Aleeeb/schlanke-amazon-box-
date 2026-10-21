@@ -322,4 +322,8 @@ $o = $GLOBALS['sc']['aawp'](['link' => 'B08L4GS81X'], 'Hier');
 ok(strpos($o, '>Hier</a>') !== false, 'aawp link: Textlink');
 $o = $GLOBALS['sc']['aawp'](['fields' => 'B08L4GS81X,B000000001', 'value' => 'thumb'], '');
 ok(substr_count($o, '<img') === 2, 'aawp mehrere ASINs');
+
+$GLOBALS['http']['B09TRSYKZS'] = item('B09TRSYKZS', [$money('7 €')]); $GLOBALS['tr'] = [];
+$o = $GLOBALS['sc']['aawp'](['fields' => 'B09TRSYKZS', 'value' => 'thumb', 'image_size' => 'large', 'image_width' => '420', 'image_height' => '420'], '');
+ok(strpos($o, 'max-width:420px') !== false && strpos($o, '<img') !== false, 'aawp image_width wird übernommen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

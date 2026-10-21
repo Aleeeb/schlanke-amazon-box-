@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Amazon-Box schlank
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.19.1
+ * Version: 0.19.2
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.19.1';
+    const VERSION = '0.19.2';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -645,7 +645,7 @@ final class SAB {
 
     /**
      * AAWP-Kompatibilität: bestehende [aawp ...]-Shortcodes laufen weiter über dieses Plugin.
-     *   [aawp fields="ASIN" value="thumb|image"]  => Bild      (image_size wird ignoriert)
+     *   [aawp fields="ASIN" value="thumb|image"]  => Bild      (image_size wird ignoriert, image_width wird als Höchstbreite übernommen)
      *   [aawp fields="ASIN" value="title"]        => Titel als Link;  value="button" => Button-Link
      *   [aawp box="ASIN"]                          => Karte
      *   [aawp link="ASIN"]Text[/aawp]             => Textlink
@@ -653,7 +653,7 @@ final class SAB {
      * Tippfehler wie ein überzähliges Zeichen am Ende der ASIN werden abgeschnitten.
      */
     public static function sc_aawp($a, $inhalt = ''): string {
-        $a = shortcode_atts(['fields' => '', 'box' => '', 'link' => '', 'value' => 'thumb', 'image_size' => '', 'class' => '', 'land' => '', 'title' => ''], (array) $a);
+        $a = shortcode_atts(['fields' => '', 'box' => '', 'link' => '', 'value' => 'thumb', 'image_size' => '', 'image_width' => '', 'image_height' => '', 'class' => '', 'land' => '', 'title' => ''], (array) $a);
         $quelle = $a['box'] !== '' ? 'box' : ($a['link'] !== '' ? 'link' : 'fields');
         $out = '';
         foreach (explode(',', (string) $a[$quelle]) as $roh) {
@@ -666,7 +666,7 @@ final class SAB {
             } else {
                 $v = strtolower(trim((string) $a['value']));
                 if (in_array($v, ['thumb', 'image', 'thumbnail'], true)) {
-                    $out .= self::sc_bild(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class']], '');
+                    $out .= self::sc_bild(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class'], 'breite' => (string) (int) $a['image_width']], '');
                 } elseif ($v === 'title') {
                     $out .= self::sc_link(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class']], '');
                 } elseif ($v === 'button') {
