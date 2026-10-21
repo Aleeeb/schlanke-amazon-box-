@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.21.1
+ * Plugin Name: 1a Amazon Box 0.25.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.21.1
+ * Version: 0.25.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.21.1';
+    const VERSION = '0.25.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -71,6 +71,8 @@ final class SAB {
         add_shortcode('amz_hinweis', [__CLASS__, 'sc_hinweis']);
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
+        add_action('sab_holen',      [__CLASS__, 'holen'], 10, 2);
+        add_action('sab_bild_holen', [__CLASS__, 'bild_holen'], 10, 3);
         add_action('admin_menu',     [__CLASS__, 'menue']);
         add_action('rest_api_init',  [__CLASS__, 'rest']);
         add_action('wp_footer',      [__CLASS__, 'messskript']);
@@ -234,11 +236,19 @@ final class SAB {
      * @return array{titel:string,bild:string,link:string,weg:bool,verfuegbar:bool}|null
      * null = Amazon gerade nicht erreichbar und nichts Gespeichertes da.
      */
-    private static function produkt(string $asin, string $land, bool $frisch = false): ?array {
+    private static function produkt(string $asin, string $land, bool $frisch = false, bool $warten = false): ?array {
         if (!$asin) { return null; }
         if ($frisch) { delete_transient("sab_{$land}_{$asin}"); }
         $c = get_transient("sab_{$land}_{$asin}");
-        if ($c) { return $c; }
+        if ($c) {
+            // Besucher warten nie auf Amazon: kurz vor Ablauf im Hintergrund auffrischen, bis dahin den Stand zeigen
+            if (!$frisch && !$warten && !defined('SAB_SYNC') && time() - (int) ($c['ts'] ?? 0) > self::TTL - 2 * HOUR_IN_SECONDS) { self::im_hintergrund('sab_holen', [$asin, $land]); }
+            return $c;
+        }
+        if (!$frisch && !$warten && !defined('SAB_SYNC')) { // nichts im Speicher: Hintergrundabruf anstoßen, die Seite nutzt den Rückfall (schlichter Link)
+            self::im_hintergrund('sab_holen', [$asin, $land]);
+            return null;
+        }
 
         $alt = get_option("sab_alt_{$land}_{$asin}");
         $p = self::abrufen($asin, $land, $alt ?: []);
@@ -249,6 +259,25 @@ final class SAB {
         }
         // API gerade nicht erreichbar: letzter Stand nur, solange er höchstens 1 Tag alt ist (Amazon-Caching-Regel)
         return ($alt && (time() - (int) ($alt['ts'] ?? 0)) <= self::TTL) ? $alt : null;
+    }
+
+    /** Plant einen einmaligen Abruf im WP-Cron (ohne Doppelungen), damit Seitenaufrufe nie auf Amazon warten. */
+    private static function im_hintergrund(string $hook, array $args): void {
+        if (!function_exists('wp_schedule_single_event') || wp_next_scheduled($hook, $args)) { return; }
+        wp_schedule_single_event(time(), $hook, $args);
+        if (function_exists('spawn_cron')) { spawn_cron(); }
+    }
+
+    public static function holen($asin, $land): void {
+        $asin = (string) $asin; $land = (string) $land;
+        if (!isset(self::LAENDER[$land]) || !self::asin($asin)) { return; }
+        $p = self::produkt($asin, $land, true);
+        if ($p && !empty($p['bild'])) { self::bild_url($p, $asin, $land, 0, true); }
+    }
+
+    public static function bild_holen($land, $asin, $idx): void {
+        $p = self::produkt((string) $asin, (string) $land, false, true);
+        if ($p) { self::bild_url($p, (string) $asin, (string) $land, (int) $idx, true); }
     }
 
     private static function abrufen(string $asin, string $land, array $alt): ?array {
@@ -486,7 +515,7 @@ final class SAB {
         return wp_upload_dir()['basedir'] . '/sab/' . "{$land}-{$asin}" . ($idx > 0 ? "-{$idx}" : '') . '.jpg';
     }
 
-    private static function bild_url(array $p, string $asin, string $land, int $idx = 0): string {
+    private static function bild_url(array $p, string $asin, string $land, int $idx = 0, bool $laden = false): string {
         $quelle = $idx > 0 ? ($p['bilder'][$idx] ?? '') : ($p['bild'] ?? '');
         if (!$quelle) { return ''; }
         $up   = wp_upload_dir();
@@ -495,7 +524,8 @@ final class SAB {
         $file = "$dir/$name";
         $alter = file_exists($file) ? time() - filemtime($file) : PHP_INT_MAX;
 
-        if ($alter > self::TTL) {
+        if ($alter > self::TTL && !$laden && !defined('SAB_SYNC')) { self::im_hintergrund('sab_bild_holen', [$land, $asin, $idx]); }
+        if ($alter > self::TTL && ($laden || defined('SAB_SYNC'))) {
             wp_mkdir_p($dir);
             $r = wp_remote_get($quelle, ['timeout' => 10]);
             $ok = !is_wp_error($r) && wp_remote_retrieve_response_code($r) === 200

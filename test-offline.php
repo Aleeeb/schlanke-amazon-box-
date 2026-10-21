@@ -1,6 +1,6 @@
 <?php
 // Offline-Test ohne WordPress: php test-offline.php  (Stubs für die benötigten WP-Funktionen)
-define('ABSPATH', __DIR__ . '/');
+define('SAB_SYNC', 1); define('ABSPATH', __DIR__ . '/');
 const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
 $GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
