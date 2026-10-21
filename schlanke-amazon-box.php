@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Schlanke Amazon-Box
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.16.0
+ * Version: 0.16.1
  * Requires PHP: 7.4
  */
 
@@ -45,9 +45,9 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.16.0';
+    const VERSION = '0.16.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
-    const BUTTON_TEXT = ['de' => 'Preis auf Amazon ansehen', 'es' => 'Ver precio en Amazon', 'fr' => 'Voir le prix sur Amazon', 'it' => 'Vedi il prezzo su Amazon', 'co.uk' => 'See price on Amazon', 'com' => 'See price on Amazon'];
+    const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
     // Selbst-Aktualisierung: WordPress fragt zweimal täglich (nur Verwaltung/Cron, nie beim Seitenaufruf) diese Datei ab
     const UPDATE_REPO = 'https://github.com/Aleeeb/schlanke-amazon-box-/';
     const UPDATE_JSON = 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update.json';
