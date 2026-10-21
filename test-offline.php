@@ -241,7 +241,7 @@ foreach (['sab_marken','sab_tests','sab_tausch','sab_ausfall','sab_bildtests'] a
 $GLOBALS['http']['B0PRE00001'] = item('B0PRE00001', [['isBuyBoxWinner' => true, 'availability' => ['type' => 'IN_STOCK']] + $money('19,99 €')]);
 $GLOBALS['opt']['sab_slots'] = "karte: B0PRE00001"; $GLOBALS['opt']['sab_marken'] = ['B0PRE00001' => 'fav']; $GLOBALS['tr'] = [];
 $o = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es'], 'R');
-ok(strpos($o, '19,99 €') !== false && strpos($o, 'a fecha') !== false, 'Karte zeigt Preis mit Stand');
+ok(strpos($o, '19,99') === false && strpos($o, 'Ver precio en Amazon') !== false, 'Karte zeigt keinen Preis, Button „Ver precio en Amazon“');
 ok(strpos($o, 'sab-fav') !== false && strpos($o, 'Nuestra elección') !== false, 'Karte zeigt Favorit-Band');
 ok(substr_count($o, '<a ') === 1, 'Karte hat genau einen Link');
 unset($GLOBALS['opt']['sab_marken']); $GLOBALS['tr'] = [];
