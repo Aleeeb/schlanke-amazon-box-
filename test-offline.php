@@ -308,4 +308,18 @@ $GLOBALS['opt']['sab_produkte'] = "B0PRE00001 | Beispiel"; $GLOBALS['opt']['sab_
 ob_start(); SAB::seite(); $h = ob_get_clean();
 ok(strpos($h, 'Slots') !== false && strpos($h, 'Beispiel') !== false && substr_count($h, 'class="sab-produkt"') >= 2, 'Vorschau-Reiter zeigt Slot und Produkt als Karten');
 ok(strpos($h, 'sab-bild') !== false, 'Vorschau-Reiter zeigt Bild-Ausgabe');
+
+// ---- 0.19.0: AAWP-Kompatibilität ----
+$GLOBALS['http']['B08L4GS81X'] = item('B08L4GS81X', [$money('9 €')]);
+$GLOBALS['tr'] = [];
+$o = $GLOBALS['sc']['aawp'](['fields' => 'B08L4GS81Xx', 'value' => 'thumb', 'image_size' => 'large'], '');
+ok(strpos($o, '<img') !== false && strpos($o, 'B08L4GS81X') !== false && strpos($o, 'rel="nofollow sponsored noopener"') !== false, 'aawp fields thumb: Bild mit Link (Tippfehler-ASIN gekürzt)');
+$o = $GLOBALS['sc']['aawp'](['fields' => 'B08L4GS81X', 'value' => 'price'], '');
+ok($o === '', 'aawp value=price bleibt leer');
+$o = $GLOBALS['sc']['aawp'](['box' => 'B08L4GS81X'], '');
+ok(strpos($o, 'sab-produkt') !== false, 'aawp box: Karte');
+$o = $GLOBALS['sc']['aawp'](['link' => 'B08L4GS81X'], 'Hier');
+ok(strpos($o, '>Hier</a>') !== false, 'aawp link: Textlink');
+$o = $GLOBALS['sc']['aawp'](['fields' => 'B08L4GS81X,B000000001', 'value' => 'thumb'], '');
+ok(substr_count($o, '<img') === 2, 'aawp mehrere ASINs');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
