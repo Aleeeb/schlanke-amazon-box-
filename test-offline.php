@@ -4,7 +4,7 @@ define('ABSPATH', __DIR__ . '/');
 const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
 $GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
-function add_action(...$a) {} function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return 'schlanke-amazon-box/schlanke-amazon-box.php'; } function wp_next_scheduled($x) { return true; }
+function add_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return 'schlanke-amazon-box/schlanke-amazon-box.php'; } function wp_next_scheduled($x) { return true; }
 function get_option($k, $d = false) { return $GLOBALS['opt'][$k] ?? $d; }
 function update_option($k, $v, $a = null) { $GLOBALS['opt'][$k] = $v; return true; }
 function get_transient($k) { return $GLOBALS['tr'][$k] ?? false; }
@@ -341,4 +341,13 @@ unset($GLOBALS['opt']['sab_ausfall'], $GLOBALS['opt']['sab_alarm_zuletzt']); $GL
 unset($GLOBALS['http']['B0NONE0001']); $GLOBALS['mail'] = []; $GLOBALS['tr'] = []; $GLOBALS['opt']['sab_mail_zuletzt'] = time();
 SAB::pruefen();
 ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
+
+// ---- 0.21.0: Seitenleiste ----
+$GLOBALS['menu'] = []; SAB::menue();
+ok(count($GLOBALS['menu']) === 9 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und acht Untermenüs');
+ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
+$GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
+ob_start(); SAB::seite(); $h = ob_get_clean();
+ok(strpos($h, 'nav-tab-active') !== false && preg_match('/nav-tab-active" href="[^"]*sab-hilfe/', $h) === 1, 'Seite: Reiter folgt dem Untermenü');
+ok(strpos($h, 'admin.php?page=sab-produkte') !== false, 'Seite: Reiterlinks über admin.php');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

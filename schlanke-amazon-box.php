@@ -1,15 +1,15 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.20.3
+ * Plugin Name: 1a Amazon Box 0.21.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.20.3
+ * Version: 0.21.0
  * Requires PHP: 7.4
  */
 
 if (!defined('ABSPATH')) { exit; }
 
 /*
- * Zugangsdaten: am einfachsten unter Werkzeuge > 1a Amazon Box eintragen.
+ * Zugangsdaten: am einfachsten unter Seitenleiste > 1a Amazon Box eintragen.
  * Sicherer (nicht in der Datenbank) ist die wp-config.php, sie hat dann Vorrang:
  *
  * define('SAB_CLIENT_ID',     'Credential ID');
@@ -27,7 +27,7 @@ if (!defined('ABSPATH')) { exit; }
  * Rückfall: Steht zwischen [amz_produkt]...[/amz_produkt] bzw. [amz_bild]...[/amz_bild] der bisherige HTML-Code,
  * erscheint genau dieser Code, wenn Amazon nicht antwortet oder kein Produkt der Liste brauchbar ist.
  *
- * Einstellungen: Werkzeuge > 1a Amazon Box (Produkte mit Kurznamen, Ersatzlisten, Ausfälle).
+ * Einstellungen: Seitenleiste > 1a Amazon Box (Produkte mit Kurznamen, Ersatzlisten, Ausfälle).
  */
 
 final class SAB {
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.20.3';
+    const VERSION = '0.21.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -82,7 +82,7 @@ final class SAB {
 
     // ---------- Zugang ----------
 
-    // Zugangsdaten: wp-config.php hat Vorrang, sonst die Eingabemaske unter Werkzeuge > 1a Amazon Box
+    // Zugangsdaten: wp-config.php hat Vorrang, sonst die Eingabemaske unter Seitenleiste > 1a Amazon Box
 
     private static function zugang(): array {
         return [
@@ -409,8 +409,8 @@ final class SAB {
                 if (!isset($vorher[$asin])) { $neu[] = (self::produkte()[$asin] ?? '') ?: ($p['titel'] ?? '') ?: $asin; }
             }
         }
-        if ($neu) { self::alarm('ausfall', 'Neue Produkte nicht mehr verfügbar', "Seit dem letzten Lauf ausgefallen:\n  " . implode("\n  ", $neu) . "\n\nDas Plugin setzt, wo eine Ersatzliste hinterlegt ist, automatisch den nächsten Ersatz ein.\nÜbersicht: Werkzeuge > 1a Amazon Box > Ausfälle und Warnungen"); }
-        if ($gesamt > 0 && $unerreichbar === $gesamt) { self::alarm('api', 'Amazon-Schnittstelle antwortet nicht', "Beim täglichen Lauf konnte kein einziges Produkt von Amazon abgerufen werden.\nMögliche Ursachen: Zugangsdaten (Credentials) abgelaufen, Amazon-Konto gesperrt oder Amazon vorübergehend nicht erreichbar.\nDie Seiten zeigen weiter die zwischengespeicherten Daten, solange sie vorhanden sind.\nPrüfen: Werkzeuge > 1a Amazon Box > Übersicht."); }
+        if ($neu) { self::alarm('ausfall', 'Neue Produkte nicht mehr verfügbar', "Seit dem letzten Lauf ausgefallen:\n  " . implode("\n  ", $neu) . "\n\nDas Plugin setzt, wo eine Ersatzliste hinterlegt ist, automatisch den nächsten Ersatz ein.\nÜbersicht: Seitenleiste > 1a Amazon Box > Ausfälle und Warnungen"); }
+        if ($gesamt > 0 && $unerreichbar === $gesamt) { self::alarm('api', 'Amazon-Schnittstelle antwortet nicht', "Beim täglichen Lauf konnte kein einziges Produkt von Amazon abgerufen werden.\nMögliche Ursachen: Zugangsdaten (Credentials) abgelaufen, Amazon-Konto gesperrt oder Amazon vorübergehend nicht erreichbar.\nDie Seiten zeigen weiter die zwischengespeicherten Daten, solange sie vorhanden sind.\nPrüfen: Seitenleiste > 1a Amazon Box > Übersicht."); }
         self::wochenmail();
     }
 
@@ -1058,8 +1058,23 @@ final class SAB {
 
     // ---------- Verwaltung ----------
 
+    const TABS = [
+        'uebersicht'    => 'Übersicht',
+        'produkte'      => 'Produkte und Ersatzlisten',
+        'ausfaelle'     => 'Ausfälle und Warnungen',
+        'umbau'         => 'Umbau',
+        'vorschau'      => 'Vorschau',
+        'tests'         => 'A/B-Tests',
+        'einstellungen' => 'Einstellungen',
+        'hilfe'         => 'Hilfe',
+    ];
+
+    /** Eigener Punkt "1a Amazon Box" in der Seitenleiste des Backends, mit einem Untermenü je Reiter. */
     public static function menue(): void {
-        add_management_page('1a Amazon Box', '1a Amazon Box', 'manage_options', 'sab', [__CLASS__, 'seite']);
+        add_menu_page('1a Amazon Box', '1a Amazon Box', 'manage_options', 'sab', [__CLASS__, 'seite'], 'dashicons-cart', 58);
+        foreach (self::TABS as $k => $name) {
+            add_submenu_page('sab', $name . ' - 1a Amazon Box', $name, 'manage_options', $k === 'uebersicht' ? 'sab' : 'sab-' . $k, [__CLASS__, 'seite']);
+        }
     }
 
     /** Vorschau mit echten Daten: jeder Slot und jedes Produkt als Karte und als Bild, so wie die Besucher es sehen. */
@@ -1083,17 +1098,9 @@ final class SAB {
 
     public static function seite(): void {
         if (!current_user_can('manage_options')) { return; }
-        $tabs = [
-            'uebersicht'    => 'Übersicht',
-            'produkte'      => 'Produkte und Ersatzlisten',
-            'ausfaelle'     => 'Ausfälle und Warnungen',
-            'umbau'         => 'Umbau',
-            'vorschau'      => 'Vorschau',
-            'tests'         => 'A/B-Tests',
-            'einstellungen' => 'Einstellungen',
-            'hilfe'         => 'Hilfe',
-        ];
-        $tab = sanitize_key((string) ($_POST['sab_tab'] ?? ($_GET['tab'] ?? 'uebersicht')));
+        $tabs = self::TABS;
+        $seite = sanitize_key((string) ($_GET['page'] ?? ''));
+        $tab = sanitize_key((string) ($_POST['sab_tab'] ?? ($_GET['tab'] ?? (strpos($seite, 'sab-') === 0 ? substr($seite, 4) : 'uebersicht'))));
         if (!isset($tabs[$tab])) { $tab = 'uebersicht'; }
 
         $meldung = '';
@@ -1146,7 +1153,7 @@ final class SAB {
         if ($meldung) { echo '<div class="notice notice-success"><p>' . esc_html($meldung) . '</p></div>'; }
         echo '<h2 class="nav-tab-wrapper">';
         foreach ($tabs as $k => $name) {
-            echo '<a class="nav-tab' . ($k === $tab ? ' nav-tab-active' : '') . '" href="' . esc_url('tools.php?page=sab&tab=' . $k) . '">' . esc_html($name) . '</a>';
+            echo '<a class="nav-tab' . ($k === $tab ? ' nav-tab-active' : '') . '" href="' . esc_url('admin.php?page=' . ($k === 'uebersicht' ? 'sab' : 'sab-' . $k)) . '">' . esc_html($name) . '</a>';
         }
         echo '</h2>';
 
