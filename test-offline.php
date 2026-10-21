@@ -350,4 +350,12 @@ $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_PO
 ob_start(); SAB::seite(); $h = ob_get_clean();
 ok(strpos($h, 'nav-tab-active') !== false && preg_match('/nav-tab-active" href="[^"]*sab-hilfe/', $h) === 1, 'Seite: Reiter folgt dem Untermenü');
 ok(strpos($h, 'admin.php?page=sab-produkte') !== false, 'Seite: Reiterlinks über admin.php');
+// ---- 0.21.1: Übersicht aus allen Artikeln ----
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; public function get_col($q) { return [
+  'Text [aawp fields="B0AAAAAAA1" value="thumb"] und [aawp box="B0BBBBBBB2,B0CCCCCCC3x"]',
+  '[amz_produkt asin="B0DDDDDDD4"] [amz_bild asin="B0EEEEEEE5"] [aawp link="B0FFFFFFF6"]' ]; } };
+$GLOBALS['opt']['sab_produkte'] = ''; $GLOBALS['opt']['sab_slots'] = ''; $GLOBALS['opt']['sab_tests'] = ''; $GLOBALS['opt']['sab_tausch'] = ''; $GLOBALS['tr'] = [];
+$rm = new ReflectionMethod('SAB', 'alle_asins'); $rm->setAccessible(true); $liste = $rm->invoke(null);
+foreach (['B0AAAAAAA1', 'B0BBBBBBB2', 'B0CCCCCCC3', 'B0DDDDDDD4', 'B0EEEEEEE5', 'B0FFFFFFF6'] as $a) { ok(in_array($a, $liste, true), "Übersicht enthält $a"); }
+unset($GLOBALS['wpdb']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
