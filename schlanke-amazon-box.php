@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Schlanke Amazon-Box
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.14.0
+ * Version: 0.15.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.14.0';
+    const VERSION = '0.15.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     // Selbst-Aktualisierung: WordPress fragt zweimal täglich (nur Verwaltung/Cron, nie beim Seitenaufruf) diese Datei ab
@@ -401,6 +401,40 @@ final class SAB {
             if (!$p) { continue; } // Amazon nicht erreichbar: nichts ändern
             if (self::brauchbar($p)) { self::ausfall_loeschen($asin); } else { self::ausfall_setzen($asin, $land, $p); }
         }
+        self::wochenmail();
+    }
+
+    /** Wöchentliche Mail (Adresse unter Einstellungen): Klicks der letzten 7 Tage, Ausfälle, Seiten mit vielen Links. Läuft im täglichen Lauf, nie beim Seitenaufruf. */
+    private static function wochenmail(): void {
+        $an = trim((string) get_option('sab_mail_an', ''));
+        if ($an === '' || time() - (int) get_option('sab_mail_zuletzt', 0) < 7 * DAY_IN_SECONDS - HOUR_IN_SECONDS) { return; }
+        global $wpdb;
+        $k = [];
+        if (isset($wpdb)) {
+            $t = self::klicktabelle();
+            $k = (array) $wpdb->get_results($wpdb->prepare("SELECT asin, COUNT(*) n FROM $t WHERE ts >= %s GROUP BY asin ORDER BY n DESC", gmdate('Y-m-d H:i:s', time() - 7 * DAY_IN_SECONDS)), ARRAY_A);
+        }
+        $warn = array_filter((array) get_option('sab_linkwarnung', []), fn($x) => ($x['n'] ?? 0) >= self::LINK_WARNUNG);
+        $text = self::wochenmail_text($k, (array) get_option('sab_ausfall', []), $warn);
+        if (wp_mail($an, 'Schlanke Amazon-Box: Wochenbericht', $text)) { update_option('sab_mail_zuletzt', time(), false); }
+    }
+
+    private static function wochenmail_text(array $klicks, array $ausfall, array $warn): string {
+        $namen = self::produkte();
+        $z = ['Schlanke Amazon-Box: die letzten 7 Tage', ''];
+        $z[] = 'Klicks auf Amazon-Links: ' . array_sum(array_map(fn($r) => (int) $r['n'], $klicks));
+        foreach (array_slice($klicks, 0, 5) as $r) { $z[] = '  ' . (int) $r['n'] . ' x ' . (($namen[$r['asin']] ?? '') ?: $r['asin']); }
+        $z[] = '';
+        if ($ausfall) {
+            $z[] = 'Ausgefallene Produkte (nicht lieferbar oder bei Amazon weg):';
+            foreach ($ausfall as $asin => $x) { $z[] = '  ' . (($x['name'] ?? '') ?: $asin) . ' (' . $asin . ')'; }
+        } else { $z[] = 'Keine ausgefallenen Produkte.'; }
+        if ($warn) {
+            $z[] = '';
+            $z[] = 'Seiten mit ' . self::LINK_WARNUNG . ' oder mehr Partnerlinks:';
+            foreach ($warn as $pid => $x) { $z[] = '  ' . (function_exists('get_permalink') ? get_permalink((int) $pid) : $pid) . ': ' . (int) $x['n'] . ' Links'; }
+        }
+        return implode("\n", $z);
     }
 
     /** Bilder auf dem Server, die älter als 2 Tage sind, werden gelöscht (nichts bleibt dauerhaft gespeichert). */
@@ -992,6 +1026,7 @@ final class SAB {
                 update_option('sab_hinweis_auto', !empty($_POST['sab_hinweis_auto']) ? '1' : '0', false);
                 update_option('sab_karten_css', !empty($_POST['sab_karten_css']) ? '1' : '0', false);
                 update_option('sab_strikt', !empty($_POST['sab_strikt']) ? '1' : '0', false);
+                update_option('sab_mail_an', sanitize_email(wp_unslash($_POST['sab_mail_an'] ?? '')), false);
                 update_option('sab_hinweis_text', sanitize_text_field(wp_unslash($_POST['sab_hinweis_text'] ?? '')), false);
                 delete_transient('sab_token_' . md5(self::LAENDER['de'][1]));
                 delete_transient('sab_token_' . md5(self::LAENDER['com'][1]));
@@ -1120,6 +1155,7 @@ final class SAB {
                . '> kleines Karten-Design für <code>[amz_produkt]</code> laden (weißer Kasten, grüner Button)</label></td></tr>'
                . '<tr><th>Nicht verfügbar</th><td><label><input type="checkbox" name="sab_strikt" value="1"' . (get_option('sab_strikt') === '1' ? ' checked' : '')
                . '> Produkte, die Amazons Schnittstelle als „nicht verfügbar“ meldet, wie ausgefallen behandeln und durch den Ersatz aus der Liste ersetzen</label><p class="description">Aus lassen, wenn Amazon die Lieferbarkeit für einen anderen Lieferort prüft als deinen: Dann würde ein lieferbares Produkt fälschlich ersetzt.</p></td></tr>'
+               . '<tr><th>Wochenbericht</th><td><input type="email" name="sab_mail_an" class="regular-text" placeholder="leer = keine Mail" value="' . esc_attr((string) get_option('sab_mail_an', '')) . '"><p class="description">Einmal pro Woche eine Mail: Klicks, Ausfälle, Seiten mit vielen Partnerlinks.</p></td></tr>'
                . '<tr><th>Standardland</th><td><input type="text" name="sab_default_land" size="6" value="' . esc_attr(self::standardland())
                . '"> <span class="description">de, es, fr, it, co.uk oder com</span></td></tr></table>'
                . '<p class="description">Hinweis: Das Secret wird in der Datenbank gespeichert (und taucht in Datenbank-Sicherungen auf). Sicherer ist die wp-config.php.</p>'
