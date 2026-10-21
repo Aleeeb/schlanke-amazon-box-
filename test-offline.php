@@ -326,4 +326,19 @@ ok(substr_count($o, '<img') === 2, 'aawp mehrere ASINs');
 $GLOBALS['http']['B09TRSYKZS'] = item('B09TRSYKZS', [$money('7 €')]); $GLOBALS['tr'] = [];
 $o = $GLOBALS['sc']['aawp'](['fields' => 'B09TRSYKZS', 'value' => 'thumb', 'image_size' => 'large', 'image_width' => '420', 'image_height' => '420'], '');
 ok(strpos($o, 'max-width:420px') !== false && strpos($o, '<img') !== false, 'aawp image_width wird übernommen');
+
+// ---- 0.20.0: Sofortmeldungen ----
+foreach (['sab_marken','sab_tests','sab_tausch','sab_ausfall','sab_bildtests','sab_alarm_zuletzt','sab_mail_zuletzt'] as $k) { unset($GLOBALS['opt'][$k]); }
+$GLOBALS['opt']['sab_mail_an'] = 'a@b.test'; $GLOBALS['opt']['sab_slots'] = ''; $GLOBALS['opt']['sab_produkte'] = "B0NEW00001 | Neues Ding";
+$GLOBALS['http']['B0NEW00001'] = item('B0NEW00001', []);  // keine Angebote => nicht lieferbar
+$GLOBALS['mail'] = []; $GLOBALS['tr'] = [];
+SAB::pruefen();
+$betr = array_column($GLOBALS['mail'], 1);
+ok(count(array_filter($betr, fn($b) => strpos($b, 'nicht mehr verfügbar') !== false)) === 1, 'Ausfall-Alarm gesendet');
+$GLOBALS['mail'] = []; $GLOBALS['tr'] = []; SAB::pruefen();
+ok(count(array_filter(array_column($GLOBALS['mail'], 1), fn($b) => strpos($b, 'nicht mehr verfügbar') !== false)) === 0, 'Ausfall-Alarm nicht doppelt');
+unset($GLOBALS['opt']['sab_ausfall'], $GLOBALS['opt']['sab_alarm_zuletzt']); $GLOBALS['opt']['sab_produkte'] = "B0NONE0001 | Gibtsnicht";
+unset($GLOBALS['http']['B0NONE0001']); $GLOBALS['mail'] = []; $GLOBALS['tr'] = []; $GLOBALS['opt']['sab_mail_zuletzt'] = time();
+SAB::pruefen();
+ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
