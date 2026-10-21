@@ -271,4 +271,16 @@ SAB::pruefen();
 ok(count($GLOBALS['mail']) === 1, 'Wochenmail nur einmal pro Woche');
 $GLOBALS['opt']['sab_mail_an'] = ''; unset($GLOBALS['opt']['sab_mail_zuletzt']); SAB::pruefen();
 ok(count($GLOBALS['mail']) === 1, 'ohne Adresse keine Mail');
+
+// ---- 0.17.0: Button-Test ----
+$GLOBALS['opt']['sab_btn_a'] = 'Ver oferta en Amazon'; $GLOBALS['opt']['sab_btn_b'] = 'Ver precio en Amazon'; $GLOBALS['tr'] = [];
+foreach (['sab_marken','sab_tests','sab_tausch','sab_ausfall','sab_bildtests'] as $k) { unset($GLOBALS['opt'][$k]); }
+$o = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es'], 'R');
+ok(strpos($o, 'data-sab-slot="button-test"') !== false && preg_match('/data-sab-var="[AB]"/', $o) === 1, 'Button-Test: Variante und Slot gesetzt');
+ok(strpos($o, 'Ver oferta en Amazon') !== false || strpos($o, 'Ver precio en Amazon') !== false, 'Button-Test: Text A oder B');
+$o2 = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es', 'text' => 'Eigener'], 'R');
+ok(strpos($o2, 'Eigener') !== false && strpos($o2, 'button-test') === false, 'eigener Text: kein Test');
+$GLOBALS['opt']['sab_btn_b'] = '';
+$o3 = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es'], 'R');
+ok(strpos($o3, 'button-test') === false, 'nur ein Text: kein Test');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
