@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.25.1
+ * Plugin Name: 1a Amazon Box 0.28.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.25.1
+ * Version: 0.28.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.25.1';
+    const VERSION = '0.28.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -352,9 +352,27 @@ final class SAB {
         return $t;
     }
 
+    /** Zelle „Lieferbar“: klare Aussage aus der Amazon-Verfügbarkeit (type/message), nicht nur „es gibt ein Angebot“. */
+    private static function lieferzelle(array $x): string {
+        $st = (string) ($x['status'] ?? ''); $msg = trim((string) ($x['meldung'] ?? ''));
+        $zusatz = $msg !== '' ? '<br><small>' . esc_html($msg) . '</small>' : '';
+        if (empty($x['lieferbar'])) { return '<strong style="color:#a00">nein</strong><br><small>Amazon liefert kein Angebot</small>'; }
+        if ($st === 'OUT_OF_STOCK') {
+            return '<strong style="color:#a00">nein</strong><br><small>Amazon: nicht auf Lager (Standard-Lieferort)</small>' . $zusatz
+                 . '<details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>';
+        }
+        if ($st === 'IN_STOCK' || $st === '') { return 'ja' . $zusatz; }
+        return '<strong style="color:#b36b00">eingeschränkt</strong><br><small>' . esc_html($st) . '</small>' . $zusatz; // z. B. Lieferzeit, Vorbestellung
+    }
+
     /** Angebot mit Kaufen-Button, sonst das erste mit Preis, sonst das erste. */
     private static function bestes_angebot(array $it): ?array {
         $ls = (array) ($it['offersV2']['listings'] ?? []);
+        // Angebote, die Amazon als nicht auf Lager meldet, nur nehmen, wenn es kein anderes gibt (sonst falsches „nicht verfügbar“)
+        $da = fn($l) => (string) ($l['availability']['type'] ?? '') !== 'OUT_OF_STOCK';
+        foreach ($ls as $l) { if ($da($l) && !empty($l['isBuyBoxWinner']) && !empty($l['price']['money']['displayAmount'])) { return $l; } }
+        foreach ($ls as $l) { if ($da($l) && !empty($l['price']['money']['displayAmount'])) { return $l; } }
+        foreach ($ls as $l) { if ($da($l)) { return $l; } }
         foreach ($ls as $l) { if (!empty($l['isBuyBoxWinner']) && !empty($l['price']['money']['displayAmount'])) { return $l; } }
         foreach ($ls as $l) { if (!empty($l['price']['money']['displayAmount'])) { return $l; } }
         return $ls[0] ?? null;
@@ -899,6 +917,7 @@ final class SAB {
                     'bilder'   => $bilder,
                     'lieferbar'=> (bool) $l,
                     'status'   => (string) ($l['availability']['type'] ?? ''),
+                    'meldung'  => (string) ($l['availability']['message'] ?? ''),
                     'kaufen'   => $l ? (isset($l['isBuyBoxWinner']) ? (bool) $l['isBuyBoxWinner'] : null) : false,
                     'preis'    => self::preis_von($l),
                     'verkaeufer' => self::verkaeufer_von($l),
@@ -933,6 +952,104 @@ final class SAB {
         $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
         if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); }
         return $out;
+    }
+
+    /** Reiter „Statistik“: Klicks pro Tag als Balkengrafik und sortierbare Liste der meistgeklickten Produkte (mit Rückkehr und Zeit). */
+    private static function statistik_html(): string {
+        global $wpdb;
+        if (!isset($wpdb)) { return '<p>Keine Datenbank.</p>'; }
+        $tage = in_array((int) ($_GET['tage'] ?? 30), [7, 30, 90], true) ? (int) ($_GET['tage'] ?? 30) : 30;
+        $t = self::klicktabelle();
+        $ab = gmdate('Y-m-d 00:00:00', time() - ($tage - 1) * DAY_IN_SECONDS);
+        $pro = [];
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT DATE(ts) d, COUNT(*) n FROM $t WHERE ts >= %s GROUP BY DATE(ts)", $ab), ARRAY_A) as $r) { $pro[$r['d']] = (int) $r['n']; }
+        $werte = []; $max = 1; $summe = 0;
+        for ($i = $tage - 1; $i >= 0; $i--) {
+            $d = gmdate('Y-m-d', time() - $i * DAY_IN_SECONDS);
+            $werte[$d] = $pro[$d] ?? 0; $max = max($max, $werte[$d]); $summe += $werte[$d];
+        }
+        $br = 900; $hoch = 160; $bw = $br / $tage;
+        $svg = '<svg viewBox="0 0 ' . $br . ' ' . ($hoch + 22) . '" style="max-width:100%;height:auto;background:#fff;border:1px solid #ccd0d4" role="img" aria-label="Klicks pro Tag">';
+        $svg .= '<text x="4" y="12" font-size="11" fill="#555">max. ' . $max . ' Klicks/Tag</text>';
+        $k = 0;
+        foreach ($werte as $d => $n) {
+            $h = (int) round(($hoch - 18) * $n / $max); $x = $k * $bw;
+            $svg .= '<rect x="' . round($x + 1, 1) . '" y="' . ($hoch - $h) . '" width="' . round(max($bw - 2, 1), 1) . '" height="' . $h . '" fill="#2271b1"><title>' . esc_html(wp_date('d.m.Y', strtotime($d . ' 12:00:00 UTC')) . ': ' . $n . ' Klicks') . '</title></rect>';
+            if ($k % max(1, (int) ceil($tage / 10)) === 0) { $svg .= '<text x="' . round($x, 1) . '" y="' . ($hoch + 14) . '" font-size="10" fill="#555">' . esc_html(wp_date('d.m.', strtotime($d . ' 12:00:00 UTC'))) . '</text>'; }
+            $k++;
+        }
+        $svg .= '</svg>';
+        $namen = self::produkte();
+        $zeilen = (array) $wpdb->get_results($wpdb->prepare("SELECT asin, COUNT(*) n, SUM(typ='bild') b, SUM(typ<>'bild') x, SUM(zurueck_s IS NOT NULL) z, AVG(zurueck_s) m FROM $t WHERE ts >= %s GROUP BY asin ORDER BY n DESC", $ab), ARRAY_A);
+        $h = '<h2>Statistik</h2><p>Zeitraum: ';
+        foreach ([7, 30, 90] as $z) { $h .= ($z === $tage ? '<strong>' . $z . ' Tage</strong>' : '<a href="' . esc_url(add_query_arg(['page' => 'sab-statistik', 'tage' => $z], admin_url('admin.php'))) . '">' . $z . ' Tage</a>') . ' · '; }
+        $h .= '<strong>' . $summe . '</strong> Klicks gesamt. Gezählt werden Klicks auf Plugin-Links; Bots werden ausgelassen.</p>' . $svg;
+        $h .= '<h3 style="margin-top:1.5em">Meistgeklickte Produkte</h3><p class="description">Auf eine Überschrift klicken sortiert die Liste (nochmal klicken: umgekehrt). „Zurück“ = Besucher kam nach dem Klick auf die Webseite zurück.</p>';
+        if (!$zeilen) { return $h . '<p>Noch keine Klicks in diesem Zeitraum.</p>'; }
+        $h .= '<table class="widefat striped sab-sort"><thead><tr><th>Produkt</th><th data-z="1">Klicks</th><th data-z="1">Anteil</th><th data-z="1">auf Bild</th><th data-z="1">auf Text/Button</th><th data-z="1">Zurück</th><th data-z="1">Zurück in %</th><th data-z="1">Ø Zeit bis zurück</th></tr></thead><tbody>';
+        foreach ($zeilen as $r) {
+            $n = (int) $r['n']; $z = (int) $r['z'];
+            $h .= '<tr><td data-v="' . esc_attr(strtolower(($namen[$r['asin']] ?? '') . $r['asin'])) . '"><code>' . esc_html($r['asin']) . '</code> ' . esc_html($namen[$r['asin']] ?? '') . '</td>'
+                . '<td data-v="' . $n . '">' . $n . '</td><td data-v="' . $n / max($summe, 1) . '">' . round(100 * $n / max($summe, 1)) . ' %</td>'
+                . '<td data-v="' . (int) $r['b'] . '">' . (int) $r['b'] . '</td><td data-v="' . (int) $r['x'] . '">' . (int) $r['x'] . '</td>'
+                . '<td data-v="' . $z . '">' . $z . '</td><td data-v="' . ($n ? $z / $n : 0) . '">' . ($n ? round(100 * $z / $n) . ' %' : '–') . '</td>'
+                . '<td data-v="' . ($z ? (float) $r['m'] : -1) . '">' . ($z ? esc_html(round((float) $r['m'] / 60, 1) . ' Min.') : '–') . '</td></tr>';
+        }
+        $h .= '</tbody></table><script>(function(){var T=document.querySelector(".sab-sort");if(!T)return;T.tHead.querySelectorAll("th").forEach(function(th,i){th.style.cursor="pointer";th.addEventListener("click",function(){var b=T.tBodies[0],r=[].slice.call(b.rows),d=th.dataset.d=th.dataset.d==="1"?"-1":"1";'
+            . 'r.sort(function(x,y){var a=x.cells[i].dataset.v,c=y.cells[i].dataset.v,A=parseFloat(a),C=parseFloat(c);var u=isNaN(A)||isNaN(C)?(a<c?-1:a>c?1:0):A-C;return u*d});r.forEach(function(e){b.appendChild(e)})})})})();</script>';
+        return $h;
+    }
+
+    /** Fundstellen je ASIN: Artikel/Seiten dieser Webseite und wie oft das Produkt dort vorkommt (Shortcode, AAWP oder fester Link). */
+    private static function fundstellen(array $asins): array {
+        global $wpdb;
+        $out = [];
+        if (!isset($wpdb) || !$asins) { return $out; }
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%amzn.to%')", ARRAY_A);
+        foreach ((array) $rows as $r) {
+            $c = (string) $r['post_content'];
+            foreach ($asins as $a) {
+                $n = substr_count($c, $a);
+                if ($n > 0) { $out[$a][(int) $r['ID']] = ['titel' => (string) $r['post_title'], 'n' => $n]; }
+            }
+        }
+        return $out;
+    }
+
+    /** Listen: Produkte, die Amazon nicht mehr kennt, und Produkte, die nicht verfügbar sind, je mit Artikeln und Häufigkeit. */
+    private static function problem_html(): string {
+        $land = self::land('');
+        $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
+        $namen = self::produkte();
+        $h = '<h2>Problemprodukte (' . esc_html($land) . ')</h2>'
+           . '<p class="description">Stand höchstens 1 Stunde alt. Gezählt werden die Produkte, die per Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) eingebunden sind, samt allen Stellen in Artikeln dieser Webseite, auch feste Links.</p>'
+           . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><p><button class="button" name="sab_neu" value="1">Neu laden</button></p></form>';
+        if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
+        $weg = []; $nv = [];
+        foreach (self::alle_asins() as $asin) {
+            $x = $d['items'][$asin] ?? null;
+            if (!$x) { $weg[] = $asin; continue; }
+            if (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') { $nv[] = $asin; }
+        }
+        $fund = self::fundstellen(array_merge($weg, $nv));
+        $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
+        $tabelle = function (array $asins, string $leer) use ($fund, $namen, $dp, $d): string {
+            if (!$asins) { return '<p>' . esc_html($leer) . '</p>'; }
+            usort($asins, fn($a, $b) => array_sum(array_column($fund[$b] ?? [], 'n')) <=> array_sum(array_column($fund[$a] ?? [], 'n')));
+            $t = '<table class="widefat striped"><thead><tr><th>ASIN / Name</th><th>Stellen gesamt</th><th>Artikel (Anzahl im Artikel)</th></tr></thead><tbody>';
+            foreach ($asins as $asin) {
+                $f = $fund[$asin] ?? [];
+                $titel = ($namen[$asin] ?? '') ?: ($d['items'][$asin]['titel'] ?? '');
+                $li = '';
+                foreach ($f as $pid => $x) { $li .= '<li><a href="' . esc_url((string) get_permalink($pid)) . '">' . esc_html($x['titel'] ?: ('Beitrag ' . $pid)) . '</a>: ' . (int) $x['n'] . '×</li>'; }
+                $t .= '<tr><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($titel) . '</strong></td>'
+                    . '<td>' . (int) array_sum(array_column($f, 'n')) . '</td><td>' . ($li ? '<ul style="margin:0">' . $li . '</ul>' : '–') . '</td></tr>';
+            }
+            return $t . '</tbody></table>';
+        };
+        $h .= '<h3>Amazon kennt das Produkt nicht mehr (' . count($weg) . ')</h3>' . $tabelle($weg, 'Keine.');
+        $h .= '<h3 style="margin-top:2em">Nicht verfügbar / nicht auf Lager (' . count($nv) . ')</h3>' . $tabelle($nv, 'Keine.');
+        return $h;
     }
 
     private static function markenzellen(string $asin): string {
@@ -973,7 +1090,7 @@ final class SAB {
             $bewzelle = $bw && $bw['anzahl'] !== null ? esc_html(($bw['sterne'] !== null ? $bw['sterne'] . ' ★ ' : '') . '(' . $bw['anzahl'] . ')') : '–';
             $h .= '<tr><td style="width:150px">' . $b . '</td><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($namen[$asin] ?? '') . '</strong><br><small>'
                . '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($x['titel'], 0, 90)) . '</a></small></td>'
-               . self::markenzellen($asin) . '<td>' . (($x['status'] ?? '') === 'OUT_OF_STOCK' ? '<strong>laut API: nein</strong><br><small>Amazon prüft für einen Standard-Lieferort. Auf Amazon mit Lieferadresse Spanien kann es trotzdem lieferbar sein.</small>' : ($x['lieferbar'] ? 'ja' : '<strong>nein</strong>')) . '</td><td>' . $ja($x['kaufen']) . '</td><td>' . esc_html($x['preis'] ?: '–')
+               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])) . '</td><td>' . esc_html($x['preis'] ?: '–')
                . ($x['preis'] === '' || $x['verkaeufer'] === '' ? '<br><small style="color:#a00">' . esc_html($x['diag'] ?? '') . '</small><details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html($x['roh'] ?? '') . '</code></details>' : '') . '</td>'
                . '<td>' . esc_html($x['verkaeufer'] ?: '–') . '</td><td>' . $bewzelle . '</td>'
                . self::klickzellen($kz[$asin] ?? null) . '</tr>';
@@ -1098,6 +1215,8 @@ final class SAB {
         'uebersicht'    => 'Übersicht',
         'produkte'      => 'Produkte und Ersatzlisten',
         'ausfaelle'     => 'Ausfälle und Warnungen',
+        'statistik'     => 'Statistik',
+        'problem'       => 'Problemprodukte',
         'umbau'         => 'Umbau',
         'vorschau'      => 'Vorschau',
         'tests'         => 'A/B-Tests',
@@ -1237,6 +1356,10 @@ final class SAB {
                 }
                 echo '</tbody></table>';
             }
+        } elseif ($tab === 'statistik') {
+            echo self::statistik_html();
+        } elseif ($tab === 'problem') {
+            echo self::problem_html();
         } elseif ($tab === 'umbau') {
             $an = self::umbau_analyse(); $namen = self::produkte();
             echo '<h2>Umbau: feste Amazon-Links in Artikeln durch Plugin-Platzhalter ersetzen</h2>'

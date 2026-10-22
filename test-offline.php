@@ -233,7 +233,7 @@ ok(strpos($o, 'B0AAAAAAA1') !== false && strpos($o, 'B0OOS00001') === false, 'st
 $GLOBALS['opt']['sab_strikt'] = '0'; $GLOBALS['tr'] = [];
 $GLOBALS['opt']['sab_produkte'] = "B0OOS00001 | oos"; $_GET['tab'] = 'uebersicht'; $GLOBALS['admin'] = true; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
-ok(strpos($h, 'laut API: nein') !== false && strpos($h, 'Standard-Lieferort') !== false, 'Übersicht: „laut API: nein“ mit Lieferort-Hinweis');
+ok(strpos($h, 'nicht auf Lager') !== false && strpos($h, 'Standard-Lieferort') !== false, 'Übersicht: nicht auf Lager mit Lieferort-Hinweis');
 ok(strpos($h, 'keine Bewertungen') !== false, 'Übersicht: Hinweis, dass keine Bewertungen geliefert werden');
 
 // ---- 0.13.0: Karten mit Preis und Favorit ----
@@ -344,7 +344,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 9 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und acht Untermenüs');
+ok(count($GLOBALS['menu']) === 11 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und zehn Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -358,4 +358,13 @@ $GLOBALS['opt']['sab_produkte'] = ''; $GLOBALS['opt']['sab_slots'] = ''; $GLOBAL
 $rm = new ReflectionMethod('SAB', 'alle_asins'); $rm->setAccessible(true); $liste = $rm->invoke(null);
 foreach (['B0AAAAAAA1', 'B0BBBBBBB2', 'B0CCCCCCC3', 'B0DDDDDDD4', 'B0EEEEEEE5', 'B0FFFFFFF6'] as $a) { ok(in_array($a, $liste, true), "Übersicht enthält $a"); }
 unset($GLOBALS['wpdb']);
+
+// Angebotswahl: lieferbares Angebot vor „nicht auf Lager“, auch wenn dieses die Buy Box hat
+$mA = new ReflectionMethod('SAB', 'bestes_angebot'); $mA->setAccessible(true);
+$l = $mA->invoke(null, ['offersV2' => ['listings' => [
+    ['isBuyBoxWinner' => true, 'availability' => ['type' => 'OUT_OF_STOCK'], 'price' => ['money' => ['displayAmount' => '9 €']]],
+    ['isBuyBoxWinner' => false, 'availability' => ['type' => 'IN_STOCK'], 'price' => ['money' => ['displayAmount' => '11 €']]]]]]);
+ok(($l['availability']['type'] ?? '') === 'IN_STOCK', 'Angebotswahl: lieferbares vor nicht auf Lager');
+$l = $mA->invoke(null, ['offersV2' => ['listings' => [['availability' => ['type' => 'OUT_OF_STOCK'], 'price' => ['money' => ['displayAmount' => '9 €']]]]]]);
+ok(($l['availability']['type'] ?? '') === 'OUT_OF_STOCK', 'Angebotswahl: nur nicht auf Lager => bleibt nicht auf Lager');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
