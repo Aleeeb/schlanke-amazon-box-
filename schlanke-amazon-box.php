@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.29.0
+ * Plugin Name: 1a Amazon Box 0.30.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.29.0
+ * Version: 0.30.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.29.0';
+    const VERSION = '0.30.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -319,7 +319,7 @@ final class SAB {
             'weg'        => false,
             'status'     => (string) ($l['availability']['type'] ?? ''),
             // Amazon prüft für einen Standard-Lieferort: OUT_OF_STOCK heißt nicht, dass es für Spanien nicht lieferbar ist
-            'verfuegbar' => !empty($it['offersV2']['listings']) && (get_option('sab_strikt') !== '1' || (string) ($l['availability']['type'] ?? '') !== 'OUT_OF_STOCK'),
+            'verfuegbar' => !empty($it['offersV2']['listings']) && (get_option('sab_strikt') !== '1' || isset(((array) get_option('sab_trotz', []))[$asin]) || (string) ($l['availability']['type'] ?? '') !== 'OUT_OF_STOCK'),
         ];
     }
 
@@ -360,6 +360,7 @@ final class SAB {
     /** Zelle „Lieferbar“: klare Aussage aus der Amazon-Verfügbarkeit (type/message), nicht nur „es gibt ein Angebot“. */
     private static function lieferzelle(array $x): string {
         $st = (string) ($x['status'] ?? ''); $msg = trim((string) ($x['meldung'] ?? ''));
+        if (!empty($x['trotz']) && ($st === 'OUT_OF_STOCK' || empty($x['lieferbar']))) { return '<strong style="color:#1a7f37">ja</strong><br><small>von dir auf Amazon geprüft (Schnittstelle meldet: ' . esc_html($msg ?: 'nicht auf Lager') . ')</small>'; }
         $zusatz = $msg !== '' ? '<br><small>' . esc_html($msg) . '</small>' : '';
         if (empty($x['lieferbar'])) { return '<strong style="color:#a00">nein</strong><br><small>Amazon liefert kein Angebot</small>'; }
         if (self::unklar($x)) {
@@ -1042,6 +1043,7 @@ final class SAB {
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if (!$x) { $weg[] = $asin; continue; }
+            if (isset(((array) get_option('sab_trotz', []))[$asin])) { continue; }  // von dir als lieferbar bestätigt
             if (self::unklar($x)) { $uk[] = $asin; } elseif (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') { $nv[] = $asin; }
         }
         $fund = self::fundstellen(array_merge($weg, $nv, $uk));
@@ -1069,7 +1071,8 @@ final class SAB {
     private static function markenzellen(string $asin): string {
         $m = (array) get_option('sab_marken', []); $t = $m[$asin] ?? '';
         return '<td><input type="checkbox" name="sab_fav[' . esc_attr($asin) . ']" value="1"' . ($t === 'fav' ? ' checked' : '') . '></td>'
-             . '<td><input type="checkbox" name="sab_ers[' . esc_attr($asin) . ']" value="1"' . ($t === 'ers' ? ' checked' : '') . '></td>';
+             . '<td><input type="checkbox" name="sab_ers[' . esc_attr($asin) . ']" value="1"' . ($t === 'ers' ? ' checked' : '') . '></td>'
+             . '<td><input type="checkbox" name="sab_trotz[' . esc_attr($asin) . ']" value="1"' . (isset(((array) get_option('sab_trotz', []))[$asin]) ? ' checked' : '') . '></td>';
     }
 
     private static function klickzellen(?array $k): string {
@@ -1093,9 +1096,10 @@ final class SAB {
         }
         if (!empty($d['bewertungen']['fehler'])) { $h .= '<div class="notice notice-info inline"><p>' . esc_html($d['bewertungen']['fehler']) . '</p></div>'; }
         $kz = self::klickzahlen(); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th>Lieferbar</th><th>Kaufen-Button</th><th>Preis</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
+        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Kaufen-Button</th><th>Preis</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
+            if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
             if (!$x) { $h .= '<tr><td>–</td><td>' . esc_html($asin) . '<br>' . esc_html($namen[$asin] ?? '') . '</td>' . self::markenzellen($asin) . '<td colspan="8"><strong>Amazon kennt das Produkt nicht (mehr)</strong></td></tr>'; continue; }
             $b = '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,64px));gap:4px;width:136px">';
             foreach ($x['bilder'] as $k => $u) { $b .= '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener" title="Bild ' . ($k + 1) . '" style="display:inline-block;text-align:center;font-size:11px"><img src="' . esc_url($u) . '" alt="" style="width:60px;height:60px;object-fit:contain;margin:0 4px 4px 0;background:#fff" referrerpolicy="no-referrer"><br>' . ($k + 1) . '</a>'; }
@@ -1104,7 +1108,7 @@ final class SAB {
             $bewzelle = $bw && $bw['anzahl'] !== null ? esc_html(($bw['sterne'] !== null ? $bw['sterne'] . ' ★ ' : '') . '(' . $bw['anzahl'] . ')') : '–';
             $h .= '<tr><td style="width:150px">' . $b . '</td><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($namen[$asin] ?? '') . '</strong><br><small>'
                . '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($x['titel'], 0, 90)) . '</a></small></td>'
-               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen']))) . '</td><td>' . esc_html($x['preis'] ?: '–')
+               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (!empty($x['trotz']) ? 'ja' : (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])))) . '</td><td>' . esc_html($x['preis'] ?: '–')
                . ($x['preis'] === '' || $x['verkaeufer'] === '' ? '<br><small style="color:#a00">' . esc_html($x['diag'] ?? '') . '</small><details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html($x['roh'] ?? '') . '</code></details>' : '') . '</td>'
                . '<td>' . esc_html($x['verkaeufer'] ?: '–') . '</td><td>' . $bewzelle . '</td>'
                . self::klickzellen($kz[$asin] ?? null) . '</tr>';
@@ -1307,6 +1311,9 @@ final class SAB {
                 foreach ((array) ($_POST['sab_fav'] ?? []) as $a => $x) { $a = self::asin((string) $a); if ($a) { $m[$a] = 'fav'; } }
                 foreach ((array) ($_POST['sab_ers'] ?? []) as $a => $x) { $a = self::asin((string) $a); if ($a) { $m[$a] = 'ers'; } } // „Ersetzen“ gewinnt
                 update_option('sab_marken', $m, false);
+                $tr = [];
+                foreach ((array) ($_POST['sab_trotz'] ?? []) as $a => $x) { $a = self::asin((string) $a); if ($a) { $tr[$a] = 1; } }
+                update_option('sab_trotz', $tr, false);
                 $meldung = 'Markierungen gespeichert.';
             } elseif ($form === 'umbau' && !empty($_POST['sab_bestaetigt'])) {
                 $meldung = self::umbau_lauf(self::asin((string) ($_POST['sab_nur'] ?? '')));

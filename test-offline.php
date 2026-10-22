@@ -374,4 +374,7 @@ $z = $mL->invoke(null, ['lieferbar' => true, 'status' => 'OUT_OF_STOCK', 'meldun
 ok(strpos($z, 'unklar') !== false && strpos($z, 'No disponible.') !== false, 'Lieferbar: OUT_OF_STOCK ohne Preis und Verkäufer = unklar');
 $z = $mL->invoke(null, ['lieferbar' => true, 'status' => 'OUT_OF_STOCK', 'meldung' => '', 'preis' => '9 €', 'verkaeufer' => 'X', 'roh' => '{}']);
 ok(strpos($z, '>nein<') !== false && strpos($z, 'unklar') === false, 'Lieferbar: OUT_OF_STOCK mit Preis = nein');
+
+$z = $mL->invoke(null, ['trotz' => true, 'lieferbar' => true, 'status' => 'OUT_OF_STOCK', 'meldung' => 'No disponible.', 'preis' => '', 'verkaeufer' => '', 'roh' => '{}']);
+ok(strpos($z, 'von dir auf Amazon geprüft') !== false && strpos($z, 'unklar') === false, 'Lieferbar: Haken „trotzdem lieferbar“ gewinnt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
