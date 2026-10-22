@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.28.2
+ * Plugin Name: 1a Amazon Box 0.29.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.28.2
+ * Version: 0.29.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.28.2';
+    const VERSION = '0.29.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -352,11 +352,20 @@ final class SAB {
         return $t;
     }
 
+    /** „Nicht auf Lager“ ohne Preis und ohne Verkäufer: Amazons Schnittstelle liefert dann oft nur ein Rest-Angebot, auf Amazon selbst ist das Produkt trotzdem kaufbar. */
+    private static function unklar(array $x): bool {
+        return ($x['status'] ?? '') === 'OUT_OF_STOCK' && ($x['preis'] ?? '') === '' && ($x['verkaeufer'] ?? '') === '';
+    }
+
     /** Zelle „Lieferbar“: klare Aussage aus der Amazon-Verfügbarkeit (type/message), nicht nur „es gibt ein Angebot“. */
     private static function lieferzelle(array $x): string {
         $st = (string) ($x['status'] ?? ''); $msg = trim((string) ($x['meldung'] ?? ''));
         $zusatz = $msg !== '' ? '<br><small>' . esc_html($msg) . '</small>' : '';
         if (empty($x['lieferbar'])) { return '<strong style="color:#a00">nein</strong><br><small>Amazon liefert kein Angebot</small>'; }
+        if (self::unklar($x)) {
+            return '<strong style="color:#b36b00">unklar</strong><br><small>Amazon meldet „' . esc_html($msg ?: 'nicht auf Lager') . '“, aber ohne Preis und Verkäufer. Bitte auf Amazon selbst prüfen; das Plugin zeigt das Produkt weiter.</small>'
+                 . '<details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>';
+        }
         if ($st === 'OUT_OF_STOCK') {
             return '<strong style="color:#a00">nein</strong><br><small>Amazon: nicht auf Lager (Standard-Lieferort)</small>' . $zusatz
                  . '<details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>';
@@ -1029,13 +1038,13 @@ final class SAB {
            . '<p class="description">Stand höchstens 1 Stunde alt. Gezählt werden die Produkte, die per Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) eingebunden sind, samt allen Stellen in Artikeln dieser Webseite, auch feste Links.</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><p><button class="button" name="sab_neu" value="1">Neu laden</button></p></form>';
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
-        $weg = []; $nv = [];
+        $weg = []; $nv = []; $uk = [];
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if (!$x) { $weg[] = $asin; continue; }
-            if (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') { $nv[] = $asin; }
+            if (self::unklar($x)) { $uk[] = $asin; } elseif (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') { $nv[] = $asin; }
         }
-        $fund = self::fundstellen(array_merge($weg, $nv));
+        $fund = self::fundstellen(array_merge($weg, $nv, $uk));
         $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
         $tabelle = function (array $asins, string $leer) use ($fund, $namen, $dp, $d): string {
             if (!$asins) { return '<p>' . esc_html($leer) . '</p>'; }
@@ -1053,6 +1062,7 @@ final class SAB {
         };
         $h .= '<h3>Amazon kennt das Produkt nicht mehr (' . count($weg) . ')</h3>' . $tabelle($weg, 'Keine.');
         $h .= '<h3 style="margin-top:2em">Nicht verfügbar / nicht auf Lager (' . count($nv) . ')</h3>' . $tabelle($nv, 'Keine.');
+        $h .= '<h3 style="margin-top:2em">Unklar: Amazon meldet „nicht auf Lager“, aber ohne Preis und Verkäufer (' . count($uk) . ')</h3><p class="description">Hier stimmt die Schnittstelle oft nicht mit der Amazon-Seite überein (Beispiel: auf Amazon lieferbar, in der Schnittstelle „No disponible“). Bitte auf Amazon selbst nachsehen. Das Plugin zeigt diese Produkte weiter.</p>' . $tabelle($uk, 'Keine.');
         return $h;
     }
 
@@ -1094,7 +1104,7 @@ final class SAB {
             $bewzelle = $bw && $bw['anzahl'] !== null ? esc_html(($bw['sterne'] !== null ? $bw['sterne'] . ' ★ ' : '') . '(' . $bw['anzahl'] . ')') : '–';
             $h .= '<tr><td style="width:150px">' . $b . '</td><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($namen[$asin] ?? '') . '</strong><br><small>'
                . '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($x['titel'], 0, 90)) . '</a></small></td>'
-               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])) . '</td><td>' . esc_html($x['preis'] ?: '–')
+               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen']))) . '</td><td>' . esc_html($x['preis'] ?: '–')
                . ($x['preis'] === '' || $x['verkaeufer'] === '' ? '<br><small style="color:#a00">' . esc_html($x['diag'] ?? '') . '</small><details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html($x['roh'] ?? '') . '</code></details>' : '') . '</td>'
                . '<td>' . esc_html($x['verkaeufer'] ?: '–') . '</td><td>' . $bewzelle . '</td>'
                . self::klickzellen($kz[$asin] ?? null) . '</tr>';

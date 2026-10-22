@@ -367,4 +367,11 @@ $l = $mA->invoke(null, ['offersV2' => ['listings' => [
 ok(($l['availability']['type'] ?? '') === 'IN_STOCK', 'Angebotswahl: lieferbares vor nicht auf Lager');
 $l = $mA->invoke(null, ['offersV2' => ['listings' => [['availability' => ['type' => 'OUT_OF_STOCK'], 'price' => ['money' => ['displayAmount' => '9 €']]]]]]);
 ok(($l['availability']['type'] ?? '') === 'OUT_OF_STOCK', 'Angebotswahl: nur nicht auf Lager => bleibt nicht auf Lager');
+
+// Lieferbar-Zelle: OUT_OF_STOCK ohne Preis/Verkäufer = „unklar“, mit Preis = „nein“
+$mL = new ReflectionMethod('SAB', 'lieferzelle'); $mL->setAccessible(true);
+$z = $mL->invoke(null, ['lieferbar' => true, 'status' => 'OUT_OF_STOCK', 'meldung' => 'No disponible.', 'preis' => '', 'verkaeufer' => '', 'roh' => '{}']);
+ok(strpos($z, 'unklar') !== false && strpos($z, 'No disponible.') !== false, 'Lieferbar: OUT_OF_STOCK ohne Preis und Verkäufer = unklar');
+$z = $mL->invoke(null, ['lieferbar' => true, 'status' => 'OUT_OF_STOCK', 'meldung' => '', 'preis' => '9 €', 'verkaeufer' => 'X', 'roh' => '{}']);
+ok(strpos($z, '>nein<') !== false && strpos($z, 'unklar') === false, 'Lieferbar: OUT_OF_STOCK mit Preis = nein');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
