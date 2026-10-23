@@ -445,4 +445,30 @@ ok(strpos($vh, 'amz_link') !== false && strpos($vh, 'amz_bild') !== false, 'Umba
 $mTh = new ReflectionMethod('SAB', 'tabellenhilfe'); $mTh->setAccessible(true);
 file_put_contents(__DIR__ . '/th_out.html', $mTh->invoke(null));
 ok(strpos($mTh->invoke(null), 'position:sticky') !== false, 'Tabellenhilfe: Kopfzeile fixiert');
+
+// ---- 0.36.0: Produktname beim Austausch ----
+$GLOBALS['opt']['sab_produkte'] = "B0ALT00001 | Alter Zaun\nB0NEU00001 | Neuer Zaun";
+$GLOBALS['opt']['sab_tausch'] = "B0ALT00001 => B0NEU00001";
+$o = $GLOBALS['sc']['amz_link'](['asin' => 'B0ALT00001', 'land' => 'es'], 'Alter Zaun');
+ok(strpos($o, 'Neuer Zaun') !== false && strpos($o, 'Alter Zaun') === false, 'Austausch tauscht den Produktnamen im Linktext');
+$o = $GLOBALS['sc']['amz_link'](['asin' => 'B0ALT00001', 'land' => 'es'], 'Hier ansehen');
+ok(strpos($o, 'Hier ansehen') !== false, 'Sonstiger Linktext bleibt');
+$GLOBALS['opt']['sab_produkte'] = ''; $GLOBALS['opt']['sab_tausch'] = '';
+
+// ---- 0.36.0: Empfehlung ----
+$GLOBALS['opt']['sab_gruppen'] = "Zäune: B0ALT00001, B0NEU00001, B0NEU00002";
+$mE = new ReflectionMethod('SAB', 'empfehlung'); $mE->setAccessible(true);
+$items = [
+  'B0ALT00001' => ['preis' => '', 'rang' => null, 'lieferbar' => false, 'kaufen' => false, 'status' => ''],
+  'B0NEU00001' => ['preis' => '10 €', 'rang' => 30000, 'lieferbar' => true, 'kaufen' => true, 'status' => 'IN_STOCK', 'titel' => 'Zaun gut'],
+  'B0NEU00002' => ['preis' => '9 €', 'rang' => 500, 'lieferbar' => true, 'kaufen' => true, 'status' => 'IN_STOCK', 'titel' => 'Zaun top'],
+];
+$e = $mE->invoke(null, 'B0ALT00001', $items, []);
+ok($e && $e[0] === 'B0NEU00002', 'Empfehlung: höchster Score aus der Gruppe');
+$items['B0NEU00002']['preis'] = '';
+$e = $mE->invoke(null, 'B0ALT00001', $items, []);
+ok($e && $e[0] === 'B0NEU00001', 'Empfehlung: Produkt ohne Preis wird übersprungen');
+$GLOBALS['opt']['sab_gruppen'] = '';
+$e = $mE->invoke(null, 'B0ALT00001', $items, []);
+ok($e === null, 'Keine Gruppe, keine Kategorie: keine Empfehlung');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

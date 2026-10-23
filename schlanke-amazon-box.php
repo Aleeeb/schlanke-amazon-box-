@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.35.1
+ * Plugin Name: 1a Amazon Box 0.36.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.35.1
+ * Version: 0.36.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.35.1';
+    const VERSION = '0.36.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -878,10 +878,26 @@ final class SAB {
         return $out;
     }
 
+    /** Steht im Linktext der Name des alten Produkts (Kurzname oder Amazon-Titel), wird er beim Austausch durch den Namen des neuen ersetzt. Sonstige Texte („Hier ansehen“) bleiben. */
+    private static function name_tauschen(string $text, string $alt, string $neu, string $land, ?array $p): string {
+        $namen = self::produkte(); $altp = (array) get_option("sab_alt_{$land}_{$alt}", []);
+        $alte = array_filter([trim((string) ($namen[$alt] ?? '')), trim((string) ($altp['titel'] ?? ''))]);
+        $nn = trim((string) ($namen[$neu] ?? '')) ?: trim((string) ($p['titel'] ?? ''));
+        if ($nn === '') { return $text; }
+        $t = trim(strip_tags($text));
+        foreach ($alte as $n) {
+            if (mb_strtolower($t) === mb_strtolower($n)) { return $nn; }
+            if (mb_strlen($n) >= 6 && mb_stripos($text, $n) !== false) { return str_ireplace($n, $nn, $text); }
+        }
+        return $text;
+    }
+
     public static function sc_link($a, $inhalt = ''): string {
         $a = shortcode_atts(['asin' => '', 'land' => '', 'class' => ''], $a);
-        $asin = self::getauscht(self::asin($a['asin']));
+        $orig = self::asin($a['asin']);
+        $asin = self::getauscht($orig);
         $p = self::produkt($asin, self::land($a['land']));
+        if ($asin !== $orig && trim((string) $inhalt) !== '') { $inhalt = self::name_tauschen((string) $inhalt, $orig, $asin, self::land($a['land']), $p); }
         if ($p && !empty($p['weg'])) { return esc_html($inhalt); }
         $link = $p['link'] ?? '';
         if (!$link) { // Amazon nicht erreichbar und kein frischer Stand: schlichter Link mit Partner-ID
@@ -1119,6 +1135,31 @@ final class SAB {
         return $h;
     }
 
+    /**
+     * Ersatzvorschlag für ein Produkt: das Produkt mit dem höchsten Score aus derselben Produktgruppe, sonst aus derselben Amazon-Kategorie;
+     * nur Produkte mit Preis, Buy Box und Verfügbarkeit (oder von dir bestätigt).
+     * @return array{0:string,1:int,2:string}|null [ASIN, Score, Name]
+     */
+    private static function empfehlung(string $asin, array $items, array $trotz): ?array {
+        $kandidaten = [];
+        foreach (self::gruppen() as $liste) { if (in_array($asin, $liste, true)) { $kandidaten = array_merge($kandidaten, $liste); } }
+        if (!$kandidaten) {
+            $kat = (string) ($items[$asin]['kategorie'] ?? '');
+            if ($kat !== '') { foreach ($items as $a => $x) { if ((string) ($x['kategorie'] ?? '') === $kat) { $kandidaten[] = (string) $a; } } }
+        }
+        $namen = self::produkte(); $beste = null;
+        foreach (array_unique($kandidaten) as $a) {
+            $x = $items[$a] ?? null;
+            if (!$x || $a === $asin) { continue; }
+            $x['trotz'] = isset($trotz[$a]);
+            $ok = ($x['preis'] ?? '') !== '' && !empty($x['kaufen']) && !empty($x['lieferbar']) && ($x['status'] ?? '') !== 'OUT_OF_STOCK';
+            if (!$ok && empty($x['trotz'])) { continue; }
+            $sc = self::score($x)[0];
+            if ($beste === null || $sc > $beste[1]) { $beste = [(string) $a, $sc, ($namen[$a] ?? '') ?: mb_substr((string) ($x['titel'] ?? ''), 0, 70)]; }
+        }
+        return $beste;
+    }
+
     /** Reiter „Produktgruppen“: ähnliche Produkte nebeneinander, nach Score geordnet, mit Vorschlag für Ersatzliste und A/B-Test. */
     private static function gruppen_html(): string {
         $land = self::land('');
@@ -1189,19 +1230,22 @@ final class SAB {
            . '<p class="description">Stand höchstens 1 Stunde alt. Gezählt werden die Produkte, die per Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) eingebunden sind, samt allen Stellen in Artikeln dieser Webseite, auch feste Links.</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><p><button class="button" name="sab_neu" value="1">Neu laden</button></p></form>';
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
-        $weg = []; $nv = []; $uk = [];
+        $weg = []; $nv = []; $uk = []; $wa = []; $trotz = (array) get_option('sab_trotz', []);
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if (!$x) { $weg[] = $asin; continue; }
             if (isset(((array) get_option('sab_trotz', []))[$asin])) { continue; }  // von dir als lieferbar bestätigt
+            if (($x['preis'] ?? '') === '' && (($x['rang'] ?? null) === null || $x['rang'] > 300000)) { $wa[] = $asin; continue; }   // kein Preis und kein (oder ein sehr schlechter) Rang: wahrscheinlich nicht mehr kaufbar
             if (self::unklar($x)) { $uk[] = $asin; } elseif (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') { $nv[] = $asin; }
         }
-        $fund = self::fundstellen(array_merge($weg, $nv, $uk));
+        $fund = self::fundstellen(array_merge($weg, $nv, $uk, $wa));
+        $empf = [];
+        foreach (array_merge($weg, $wa, $nv, $uk) as $a) { $e = self::empfehlung($a, (array) ($d['items'] ?? []), $trotz); if ($e) { $empf[$a] = $e; } }
         $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $tabelle = function (array $asins, string $leer, bool $tausch = false) use ($fund, $namen, $dp, $d): string {
+        $tabelle = function (array $asins, string $leer, bool $tausch = false) use ($fund, $namen, $dp, $d, $empf): string {
             if (!$asins) { return '<p>' . esc_html($leer) . '</p>'; }
             usort($asins, fn($a, $b) => array_sum(array_column($fund[$b] ?? [], 'n')) <=> array_sum(array_column($fund[$a] ?? [], 'n')));
-            $t = '<table class="widefat striped sab-sort2"><thead><tr><th>ASIN / Name</th><th>Stellen gesamt</th><th>Artikel (Anzahl im Artikel)</th>' . ($tausch ? '<th>Austauschen gegen (neue ASIN)</th>' : '') . '</tr></thead><tbody>';
+            $t = '<table class="widefat striped sab-sort2"><thead><tr><th>ASIN / Name</th><th>Stellen gesamt</th><th>Artikel (Anzahl im Artikel)</th>' . ($tausch ? '<th>Empfehlung (hoher Score, gleiche Gruppe/Kategorie)</th><th>Austauschen gegen (neue ASIN)</th>' : '') . '</tr></thead><tbody>';
             foreach ($asins as $asin) {
                 $f = $fund[$asin] ?? [];
                 $titel = ($namen[$asin] ?? '') ?: ($d['items'][$asin]['titel'] ?? '');
@@ -1209,12 +1253,14 @@ final class SAB {
                 foreach ($f as $pid => $x) { $li .= '<li><a href="' . esc_url((string) get_permalink($pid)) . '">' . esc_html($x['titel'] ?: ('Beitrag ' . $pid)) . '</a>: ' . (int) $x['n'] . '×' . (!empty($x['fest']) ? ' <span style="color:#a00">(davon ' . (int) $x['fest'] . ' feste Links, noch kein Platzhalter)</span>' : '') . '</li>'; }
                 $t .= '<tr><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($titel) . '</strong></td>'
                     . '<td>' . (int) array_sum(array_column($f, 'n')) . (array_sum(array_column($f, 'fest')) ? '<br><small style="color:#a00">' . (int) array_sum(array_column($f, 'fest')) . ' davon feste Links: erst im Reiter „Umbau“ umwandeln</small>' : '') . '</td><td>' . ($li ? '<ul style="margin:0">' . $li . '</ul>' : '–') . '</td>'
-                    . ($tausch ? '<td><input type="text" name="sab_neu_asin[' . esc_attr($asin) . ']" size="12" maxlength="10" placeholder="B0…"></td>' : '') . '</tr>';
+                    . ($tausch ? '<td>' . (isset($empf[$asin]) ? '<a href="' . esc_url($dp . $empf[$asin][0]) . '" target="_blank" rel="noopener"><code>' . esc_html($empf[$asin][0]) . '</code></a> ' . esc_html($empf[$asin][2]) . '<br><small>Score ' . (int) $empf[$asin][1] . '</small><br><label><input type="checkbox" name="sab_empf[' . esc_attr($asin) . ']" value="' . esc_attr($empf[$asin][0]) . '"> Empfehlung übernehmen</label>' : '–') . '</td>'
+                        . '<td><input type="text" name="sab_neu_asin[' . esc_attr($asin) . ']" size="12" maxlength="10" placeholder="B0…"></td>' : '') . '</tr>';
             }
             return $t . '</tbody></table>' . self::tabellenhilfe();
         };
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_neu">'
             . '<h3>Amazon kennt das Produkt nicht mehr (' . count($weg) . ')</h3><p class="description">Neue ASIN eintragen und unten „Austauschen“ klicken: Das Plugin legt eine Austausch-Regel an, danach zeigen alle Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) das neue Produkt mit Bild, Link und Preis. Feste Links erst im Reiter „Umbau“ umwandeln. Rückgängig: Zeile im Reiter „Produkte und Ersatzlisten“ unter „Austausch-Regeln“ löschen.</p>' . $tabelle($weg, 'Keine.', true);
+        $h .= '<h3 style="margin-top:2em">Wahrscheinlich austauschen: kein Preis und kein Verkaufsrang (' . count($wa) . ')</h3><p class="description">Diese Produkte haben weder Preis noch einen brauchbaren Rang (leer oder schlechter als Platz 300.000). Erfahrungsgemäß sind sie bei Amazon nicht mehr kaufbar. Rechts steht, wenn möglich, ein Ersatz mit hohem Score. Bitte vor dem Austausch kurz auf Amazon nachsehen.</p>' . $tabelle($wa, 'Keine.', true);
         $h .= '<h3 style="margin-top:2em">Nicht verfügbar / nicht auf Lager (' . count($nv) . ')</h3>' . $tabelle($nv, 'Keine.', true);
         $h .= '<h3 style="margin-top:2em">Unklar: Amazon meldet „nicht auf Lager“, aber ohne Preis und Verkäufer (' . count($uk) . ')</h3><p class="description">Hier stimmt die Schnittstelle oft nicht mit der Amazon-Seite überein (Beispiel: auf Amazon lieferbar, in der Schnittstelle „No disponible“). Bitte auf Amazon selbst nachsehen. Das Plugin zeigt diese Produkte weiter.</p>' . $tabelle($uk, 'Keine.', true);
         $h .= '<p><button class="button button-primary">Austauschen</button></p></form>';
@@ -1546,7 +1592,9 @@ final class SAB {
                 $meldung = 'Gespeichert.';
             } elseif ($form === 'tausch_neu') {
                 $regeln = self::tausch_regeln(); $neu = []; $fehler = [];
-                foreach ((array) ($_POST['sab_neu_asin'] ?? []) as $alt => $nw) {
+                $eingabe = (array) ($_POST['sab_neu_asin'] ?? []);
+                foreach ((array) ($_POST['sab_empf'] ?? []) as $alt => $nw) { if (trim((string) ($eingabe[$alt] ?? '')) === '') { $eingabe[$alt] = $nw; } }   // angekreuzte Empfehlung, wenn nichts selbst eingetragen
+                foreach ($eingabe as $alt => $nw) {
                     $alt = self::asin((string) $alt); $nw = self::asin((string) $nw);
                     if ($nw === '') { continue; }
                     if (strlen($nw) !== 10 || strlen($alt) !== 10 || $alt === $nw) { $fehler[] = $alt . ' → ' . $nw; continue; }
