@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.31.0
+ * Plugin Name: 1a Amazon Box 0.31.1
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.31.0
+ * Version: 0.31.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.31.0';
+    const VERSION = '0.31.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -286,7 +286,7 @@ final class SAB {
         if (!$token || !$tag) { return null; }
         $mp = self::LAENDER[$land][0];
 
-        $r = wp_remote_post(self::API, [
+        $r = self::api_post([
             'timeout' => 10,
             'headers' => [
                 'Authorization' => 'Bearer ' . $token,
@@ -334,6 +334,20 @@ final class SAB {
         return '';
     }
 
+    /** Amazon erlaubt anfangs 1 Abfrage pro Sekunde (sonst 429): Mindestabstand einhalten und bei 429 einmal nach kurzer Pause wiederholen. */
+    private static function api_post(array $args) {
+        static $zuletzt = 0.0;
+        for ($versuch = 0; $versuch < 2; $versuch++) {
+            $warte = 1.1 - (microtime(true) - $zuletzt);
+            if ($warte > 0 && !defined('SAB_SYNC')) { usleep((int) ($warte * 1000000)); }
+            $r = wp_remote_post(self::API, $args);
+            $zuletzt = microtime(true);
+            if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 429) { break; }
+            if (!defined('SAB_SYNC')) { usleep(2000000); }
+        }
+        return $r;
+    }
+
     /** Streichpreis und Ersparnis aus dem Angebot (Felder price.savingBasis / price.savings). */
     private static function spar_von(?array $l): array {
         $p = (array) ($l['price'] ?? []);
@@ -352,53 +366,26 @@ final class SAB {
         return null;
     }
 
-    /** Zusatzfelder in eigenen Abfragen (jede Gruppe für sich), damit ein unbekannter Feldname nie die Übersicht zerstört. */
-    private static function zusatz(array $asins, string $token, string $tag, string $mp): array {
-        $out = ['werte' => [], 'fehler' => []];
-        $gruppen = [
-            'rang'  => ['browseNodeInfo.browseNodes', 'browseNodeInfo.websiteSalesRank'],
-            'deal'  => ['offersV2.listings.dealDetails', 'offersV2.listings.type'],
-            'prime' => ['offersV2.listings.deliveryInfo'],
-        ];
-        foreach ($gruppen as $name => $res) {
-            foreach (array_chunk($asins, 10) as $paket) {
-                $r = wp_remote_post(self::API, [
-                    'timeout' => 15,
-                    'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
-                    'body'    => wp_json_encode(['itemIds' => $paket, 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag, 'resources' => $res]),
-                ]);
-                if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 200) {
-                    $out['fehler'][$name] = 'Zusatzdaten „' . $name . '“: Amazon antwortete mit Code ' . (is_wp_error($r) ? 'Netz' : wp_remote_retrieve_response_code($r))
-                                          . (is_wp_error($r) ? '' : ': ' . mb_substr((string) wp_remote_retrieve_body($r), 0, 300));
-                    break;
-                }
-                $j = json_decode(wp_remote_retrieve_body($r), true);
-                foreach ((array) ($j['itemsResult']['items'] ?? []) as $it) {
-                    $a = self::asin($it['asin'] ?? '');
-                    if ($name === 'rang') {
-                        $wr = $it['browseNodeInfo']['websiteSalesRank'] ?? [];
-                        $kat = (string) ($wr['contextFreeName'] ?? ($wr['displayName'] ?? ''));
-                        $rang = isset($wr['salesRank']) ? (int) $wr['salesRank'] : null;
-                        if ($kat === '' || $rang === null) {   // Rückfall: Kategorie-Knoten mit Rang
-                            foreach ((array) ($it['browseNodeInfo']['browseNodes'] ?? []) as $bn) {
-                                if ($kat === '') { $kat = (string) ($bn['contextFreeName'] ?? ($bn['displayName'] ?? '')); }
-                                if ($rang === null && isset($bn['salesRank'])) { $rang = (int) $bn['salesRank']; }
-                            }
-                        }
-                        $out['werte'][$a]['kategorie'] = $kat; $out['werte'][$a]['rang'] = $rang;
-                    } elseif ($name === 'deal') {
-                        foreach ((array) ($it['offersV2']['listings'] ?? []) as $l) {
-                            if (!empty($l['dealDetails'])) { $d = (array) $l['dealDetails']; $out['werte'][$a]['deal'] = trim((string) ($d['badge'] ?? '') . ' ' . (string) ($d['accessType'] ?? '')); $out['werte'][$a]['deal_bis'] = (string) ($d['endTime'] ?? ''); break; }
-                        }
-                    } else {
-                        $pr = null;
-                        foreach ((array) ($it['offersV2']['listings'] ?? []) as $l) { $v = self::finde((array) $l, 'isPrimeEligible'); if ($v !== null) { $pr = (bool) $v; if ($pr) { break; } } }
-                        $out['werte'][$a]['prime'] = $pr;
-                    }
-                }
-            }
+    /** Aktion (Deal/Coupon-Typ) aus irgendeinem Angebot des Produkts. */
+    private static function deal_von(array $it): string {
+        foreach ((array) ($it['offersV2']['listings'] ?? []) as $l) {
+            $d = (array) ($l['dealDetails'] ?? []);
+            if ($d) { $t = trim((string) ($d['badge'] ?? '') . ' ' . (string) ($l['type'] ?? '') . ' ' . (string) ($d['accessType'] ?? '')); return $t !== '' ? $t : 'Aktion'; }
+            if (in_array((string) ($l['type'] ?? ''), ['LIGHTNING_DEAL', 'SUBSCRIBE_AND_SAVE'], true)) { return (string) $l['type']; }
         }
-        return $out;
+        return '';
+    }
+
+    /** [Kategorie, Verkaufsrang] aus browseNodeInfo (zuerst der Rang der Webseite, sonst der des ersten Knotens mit Rang). */
+    private static function rang_von(array $it): array {
+        $wr = (array) ($it['browseNodeInfo']['websiteSalesRank'] ?? []);
+        $kat = (string) ($wr['contextFreeName'] ?? ($wr['displayName'] ?? ''));
+        $rang = isset($wr['salesRank']) ? (int) $wr['salesRank'] : null;
+        foreach ((array) ($it['browseNodeInfo']['browseNodes'] ?? []) as $bn) {
+            if ($kat === '') { $kat = (string) ($bn['contextFreeName'] ?? ($bn['displayName'] ?? '')); }
+            if ($rang === null && isset($bn['salesRank'])) { $rang = (int) $bn['salesRank']; }
+        }
+        return [$kat, $rang];
     }
 
     private static function verkaeufer_von(?array $l): string {
@@ -426,9 +413,7 @@ final class SAB {
     }
 
     private static function primezelle(array $x): string {
-        $p = array_key_exists('prime', $x) ? ($x['prime'] ? '<strong style="color:#00a8e1">Prime</strong>' : 'kein Prime') : '–';
-        $d = !empty($x['deal']) ? '<br><strong style="color:#c7511f">' . esc_html($x['deal']) . '</strong>' . (!empty($x['deal_bis']) ? '<br><small>bis ' . esc_html($x['deal_bis']) . '</small>' : '') : '';
-        return $p . $d;
+        return !empty($x['deal']) ? '<strong style="color:#c7511f">' . esc_html($x['deal']) . '</strong>' : '–';
     }
 
     /** Verkaufsrang je Kategorie: niedrig = wird oft gekauft. Grobe Farbe als Hinweis (Rang gilt nur innerhalb der Kategorie). */
@@ -990,14 +975,15 @@ final class SAB {
         if (!$token || !$tag) { return ['fehler' => 'Zugangsdaten oder Partner-ID fehlen.', 'items' => []]; }
         $mp = self::LAENDER[$land][0]; $items = []; $fehler = '';
         foreach (array_chunk(self::alle_asins(), 10) as $paket) {
-            $r = wp_remote_post(self::API, [
+            $r = self::api_post([
                 'timeout' => 15,
                 'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
                 'body'    => wp_json_encode([
                     'itemIds' => $paket, 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag,
                     'resources' => ['images.primary.large', 'images.variants.large', 'itemInfo.title',
                         'offersV2.listings.availability', 'offersV2.listings.price', 'offersV2.listings.isBuyBoxWinner',
-                        'offersV2.listings.merchantInfo'],
+                        'offersV2.listings.merchantInfo', 'offersV2.listings.dealDetails', 'offersV2.listings.type',
+                        'browseNodeInfo.browseNodes', 'browseNodeInfo.websiteSalesRank'],
                 ]),
             ]);
             if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 200) {
@@ -1022,37 +1008,15 @@ final class SAB {
                     'verkaeufer' => self::verkaeufer_von($l),
                     'diag'     => self::diagnose($it),
                     'spar'     => self::spar_von($l),
+                    'deal'     => self::deal_von($it),
+                    'kategorie' => self::rang_von($it)[0], 'rang' => self::rang_von($it)[1],
                     'roh'      => mb_substr((string) wp_json_encode($it['offersV2'] ?? null), 0, 1800),
                 ];
             }
         }
-        $zus = ['werte' => [], 'fehler' => []];
-        if (!$fehler && $items) { $zus = self::zusatz(array_map('strval', array_keys($items)), $token, $tag, $mp); }
-        foreach ($zus['werte'] as $a => $w) { if (isset($items[$a])) { $items[$a] += $w; } }
-        // Bewertungen in einer eigenen Abfrage: ein Fehler hier darf die Übersicht nicht stören
+        // Bewertungen liefert diese Schnittstelle nicht (Antwort immer ohne Werte): keine Abfrage mehr, das spart Abfragen (Limit 1 pro Sekunde)
         $bew = ['fehler' => '', 'werte' => []];
-        if (!$fehler && $items) {
-            foreach (array_chunk(array_map('strval', array_keys($items)), 10) as $paket) {  // rein numerische ASINs (Bücher) wären als PHP-Array-Schlüssel sonst Zahlen und Amazon lehnt sie ab
-                $r = wp_remote_post(self::API, [
-                    'timeout' => 15,
-                    'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
-                    'body'    => wp_json_encode(['itemIds' => $paket, 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag,
-                        'resources' => ['customerReviews.count', 'customerReviews.starRating']]),
-                ]);
-                if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 200) {
-                    $bew['fehler'] = 'Bewertungen: Amazon antwortete mit Code ' . (is_wp_error($r) ? 'Netz' : wp_remote_retrieve_response_code($r))
-                                   . ': ' . (is_wp_error($r) ? '' : mb_substr((string) wp_remote_retrieve_body($r), 0, 400));
-                    break;
-                }
-                $j = json_decode(wp_remote_retrieve_body($r), true);
-                foreach ((array) ($j['itemsResult']['items'] ?? []) as $it) {
-                    $cr = $it['customerReviews'] ?? [];
-                    $stern = $cr['starRating']['value'] ?? ($cr['starRating'] ?? null);
-                    $bew['werte'][self::asin($it['asin'] ?? '')] = ['sterne' => is_array($stern) ? null : $stern, 'anzahl' => $cr['count'] ?? null];
-                }
-            }
-        }
-        $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew, 'zusatzfehler' => $zus['fehler']];
+        $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
         if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); }
         return $out;
     }
@@ -1176,7 +1140,7 @@ final class SAB {
     private static function uebersicht_html(): string {
         $land = self::land('');
         $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
-        $namen = self::produkte(); $ja = fn($v) => $v === null ? '?' : ($v ? 'ja' : 'nein');
+        $namen = self::produkte(); $ja = fn($v) => $v === null ? '?' : ($v ? '<strong style="color:#1a7f37">ja</strong>' : '<strong style="color:#a00">nein</strong>');
         $h = '<h2>Übersicht aller Produkte (' . esc_html($land) . ')</h2>'
            . '<p class="description">Stand höchstens 1 Stunde alt. Bilder kommen hier direkt von Amazon (nur im Admin-Bereich, nicht für Besucher). Die Lieferzeit liefert die API nicht; sie ist nur auf der Amazon-Seite mit spanischer Lieferadresse sichtbar.</p>'
            . '<p><button class="button" name="sab_neu" value="1">Übersicht neu laden</button></p>';
@@ -1186,9 +1150,8 @@ final class SAB {
             $h .= '<div class="notice notice-info inline"><p>Amazon liefert über diese Schnittstelle keine Bewertungen (Sterne und Anzahl): Die Abfrage wird ohne Fehler beantwortet, aber ohne Werte.</p></div>';
         }
         if (!empty($d['bewertungen']['fehler'])) { $h .= '<div class="notice notice-info inline"><p>' . esc_html($d['bewertungen']['fehler']) . '</p></div>'; }
-        foreach ((array) ($d['zusatzfehler'] ?? []) as $zf) { $h .= '<div class="notice notice-info inline"><p>' . esc_html($zf) . '</p></div>'; }
         $kz = self::klickzahlen(); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Kaufen-Button</th><th>Preis / Streichpreis</th><th>Prime / Aktion</th><th>Kategorie / Verkaufsrang</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
+        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Buy Box<br><small>(Kaufen-Button)</small></th><th>Preis / Streichpreis</th><th>Aktion / Deal</th><th>Kategorie / Verkaufsrang</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }

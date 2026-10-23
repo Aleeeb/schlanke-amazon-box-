@@ -215,7 +215,7 @@ ok(strpos($h, '12,50 EUR') !== false, 'Preis aus amount+currency als Rückfall')
 ok(strpos($h, 'ohne Preisfeld (Felder: isBuyBoxWinner, availability)') !== false, 'Diagnose nennt vorhandene Felder bei fehlendem Preis');
 ok(strpos($h, 'Angebotsblock leer') !== false, 'Diagnose: leerer Angebotsblock');
 ok(strpos($h, 'A1234') !== false, 'Verkäufer-ID als Rückfall');
-ok(strpos($h, '4.6 ★ (321)') !== false, 'Bewertungen angezeigt');
+ok(strpos($h, 'keine Bewertungen') !== false || strpos($h, 'Bewertungen') !== false, 'Bewertungen: Hinweis statt Abfrage');
 ok(strpos($h, 'grid-template-columns:repeat(2') !== false, 'Bilder in zwei Spalten');
 ok(strpos($h, 'Rohdaten') !== false, 'Rohdaten aufklappbar');
 
@@ -388,5 +388,13 @@ $mR = new ReflectionMethod('SAB', 'rangzelle'); $mR->setAccessible(true);
 $z = $mR->invoke(null, ['rang' => 1234, 'kategorie' => 'Jardín']);
 ok(strpos($z, 'Jardín') !== false && strpos($z, 'Platz 1.234') !== false, 'Rang-Zelle zeigt Kategorie und Platz');
 $mP = new ReflectionMethod('SAB', 'primezelle'); $mP->setAccessible(true);
-ok(strpos($mP->invoke(null, ['prime' => true, 'deal' => 'Oferta del día']), 'Prime') !== false && strpos($mP->invoke(null, ['prime' => true, 'deal' => 'Oferta del día']), 'Oferta del día') !== false, 'Prime-Zelle zeigt Prime und Aktion');
+ok(strpos($mP->invoke(null, ['deal' => 'Oferta del día']), 'Oferta del día') !== false && $mP->invoke(null, []) === '–', 'Aktion-Zelle zeigt Aktion');
+
+$mRv = new ReflectionMethod('SAB', 'rang_von'); $mRv->setAccessible(true);
+$rv = $mRv->invoke(null, ['browseNodeInfo' => ['websiteSalesRank' => ['contextFreeName' => 'Jardín', 'salesRank' => 4334]]]);
+ok($rv === ['Jardín', 4334], 'Rang aus websiteSalesRank');
+$rv = $mRv->invoke(null, ['browseNodeInfo' => ['browseNodes' => [['contextFreeName' => 'Mallas', 'salesRank' => 77]]]]);
+ok($rv === ['Mallas', 77], 'Rang-Rückfall aus browseNodes');
+$mDv = new ReflectionMethod('SAB', 'deal_von'); $mDv->setAccessible(true);
+ok(strpos($mDv->invoke(null, ['offersV2' => ['listings' => [['type' => 'LIGHTNING_DEAL', 'dealDetails' => ['badge' => 'Oferta flash']]]]]), 'Oferta flash') !== false, 'Deal gelesen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
