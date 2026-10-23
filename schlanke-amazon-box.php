@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.31.1
+ * Plugin Name: 1a Amazon Box 0.34.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.31.1
+ * Version: 0.34.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.31.1';
+    const VERSION = '0.34.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -177,6 +177,18 @@ final class SAB {
     }
 
     /** Zeilen "slot: ASIN1, ASIN2" => [slot => [ASIN1, ASIN2]]. Erste ASIN = bevorzugt, Rest = Ersatz in dieser Reihenfolge. */
+    /** Produktgruppen: Zeilen „Name: ASIN1, ASIN2, …“ (ähnliche Produkte, z. B. alle Kupferbänder). */
+    private static function gruppen(): array {
+        $out = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_gruppen', '')) as $z) {
+            if (strpos($z, ':') === false) { continue; }
+            [$name, $liste] = array_map('trim', explode(':', $z, 2));
+            $asins = array_values(array_unique(array_filter(array_map([__CLASS__, 'asin'], explode(',', $liste)))));
+            if ($name && $asins) { $out[$name] = $asins; }
+        }
+        return $out;
+    }
+
     private static function slots(): array {
         $out = [];
         foreach (preg_split('/\R/', (string) get_option('sab_slots', '')) as $z) {
@@ -406,6 +418,34 @@ final class SAB {
         return $t;
     }
 
+    /**
+     * Produktscore 0 bis 100 aus den Amazon-Daten: Verkaufsrang (bis 45), Buy Box (20), Verfügbarkeit (20), Preis (5), Streichpreis (5), Aktion (5).
+     * Der Rang gilt nur innerhalb der Kategorie, darum ist der Score ein Richtwert zum Vergleichen ähnlicher Produkte, kein Urteil über die Qualität.
+     * @return array{0:int,1:string} [Score, Hinweis]
+     */
+    private static function score(array $x): array {
+        $r = $x['rang'] ?? null; $pkt = 0;
+        if ($r !== null) { $pkt += $r <= 1000 ? 45 : ($r <= 5000 ? 38 : ($r <= 20000 ? 28 : ($r <= 50000 ? 18 : ($r <= 150000 ? 8 : 2)))); }
+        if (!empty($x['kaufen'])) { $pkt += 20; }
+        $st = (string) ($x['status'] ?? '');
+        if (!empty($x['trotz']) || $st === 'IN_STOCK' || ($st === '' && !empty($x['lieferbar']))) { $pkt += 20; }
+        elseif ($st === 'IN_STOCK_SCARCE') { $pkt += 14; }
+        elseif (!empty($x['lieferbar']) && $st !== 'OUT_OF_STOCK') { $pkt += 10; }
+        if (($x['preis'] ?? '') !== '') { $pkt += 5; }
+        if (!empty($x['spar']['streich'])) { $pkt += 5; }
+        if (!empty($x['deal'])) { $pkt += 5; }
+        $hinweis = '';
+        if ($r === null) { $hinweis = 'ohne Verkaufsrang'; }
+        if (self::unklar($x) && empty($x['trotz']) && $r !== null && $r <= 20000) { $hinweis = 'Schnittstelle prüfen: guter Rang, aber kein Angebot'; }
+        return [$pkt, $hinweis];
+    }
+
+    private static function scorezelle(array $x): string {
+        [$p, $h] = self::score($x);
+        $farbe = $p >= 70 ? '#1a7f37' : ($p >= 40 ? '#b36b00' : '#a00');
+        return '<strong style="color:' . $farbe . ';font-size:1.2em">' . $p . '</strong>' . ($h !== '' ? '<br><small>' . esc_html($h) . '</small>' : '');
+    }
+
     private static function sparzeile(array $x): string {
         $sp = (array) ($x['spar'] ?? []);
         if (empty($sp['streich']) && empty($sp['ersparnis'])) { return ''; }
@@ -436,7 +476,7 @@ final class SAB {
         $zusatz = $msg !== '' ? '<br><small>' . esc_html($msg) . '</small>' : '';
         if (empty($x['lieferbar'])) { return '<strong style="color:#a00">nein</strong><br><small>Amazon liefert kein Angebot</small>'; }
         if (self::unklar($x)) {
-            return '<strong style="color:#b36b00">unklar</strong><br><small>Amazon meldet „' . esc_html($msg ?: 'nicht auf Lager') . '“, aber ohne Preis und Verkäufer. Bitte auf Amazon selbst prüfen; das Plugin zeigt das Produkt weiter.</small>'
+            return '<strong style="color:#b36b00">unklar</strong><br><small>Amazon meldet „' . esc_html($msg ?: 'nicht auf Lager') . '“, aber ohne Preis und Verkäufer. Bitte auf Amazon selbst prüfen; das Plugin zeigt das Produkt weiter.' . (isset($x['rang']) && $x['rang'] <= 20000 ? ' Der Verkaufsrang ' . number_format((int) $x['rang'], 0, ',', '.') . ' spricht dafür, dass es lieferbar ist.' : '') . '</small>'
                  . '<details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>';
         }
         if ($st === 'OUT_OF_STOCK') {
@@ -949,6 +989,7 @@ final class SAB {
         foreach (self::slots() as $liste) { $alle = array_merge($alle, $liste); }
         foreach (self::tests() as $liste) { $alle = array_merge($alle, $liste); }
         $alle = array_merge($alle, array_values(self::tausch_regeln()));
+        foreach (self::gruppen() as $liste) { $alle = array_merge($alle, $liste); }
         global $wpdb;
         if (isset($wpdb)) {
             $rows = $wpdb->get_col("SELECT post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%')");
@@ -1069,6 +1110,50 @@ final class SAB {
         return $h;
     }
 
+    /** Reiter „Produktgruppen“: ähnliche Produkte nebeneinander, nach Score geordnet, mit Vorschlag für Ersatzliste und A/B-Test. */
+    private static function gruppen_html(): string {
+        $land = self::land('');
+        $gr = self::gruppen();
+        $h = '<h2>Produktgruppen</h2><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false)
+           . '<input type="hidden" name="sab_tab" value="gruppen"><input type="hidden" name="sab_form" value="gruppen">'
+           . '<p>Pro Zeile: <code>Gruppenname: ASIN1, ASIN2, ASIN3</code>, zum Beispiel <code>Kupferband: B07YCJ4YZJ, B08JLM6JG6</code>. Ein Produkt kann in mehreren Gruppen stehen.</p>'
+           . '<textarea name="sab_gruppen" rows="6" class="large-text code" placeholder="Kupferband: B07YCJ4YZJ, B08JLM6JG6">' . esc_textarea((string) get_option('sab_gruppen', '')) . '</textarea>'
+           . '<p><button class="button button-primary">Gruppen speichern</button></p></form>';
+        if (!$gr) { return $h . '<p>Noch keine Gruppen angelegt.</p>'; }
+        $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
+        if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
+        $namen = self::produkte(); $trotz = (array) get_option('sab_trotz', []);
+        $h .= '<p class="description">Stand höchstens 1 Stunde alt. Der Score (0 bis 100) vergleicht Verkaufsrang, Buy Box, Verfügbarkeit, Preis und Aktion. Der Rang gilt nur innerhalb einer Kategorie, innerhalb einer Gruppe ähnlicher Produkte ist der Vergleich aussagekräftig.</p>';
+        foreach ($gr as $name => $asins) {
+            $zeilen = [];
+            foreach ($asins as $a) {
+                $x = $d['items'][$a] ?? null;
+                if ($x) { $x['trotz'] = isset($trotz[$a]); }
+                $zeilen[] = ['asin' => $a, 'x' => $x, 'score' => $x ? self::score($x)[0] : -1];
+            }
+            usort($zeilen, fn($p, $q) => $q['score'] <=> $p['score']);
+            $h .= '<h3 style="margin-top:1.5em">' . esc_html($name) . ' (' . count($zeilen) . ')</h3><table class="widefat striped"><thead><tr><th>#</th><th>ASIN / Name</th><th>Score</th><th>Lieferbar</th><th>Buy Box</th><th>Preis</th><th>Kategorie / Verkaufsrang</th></tr></thead><tbody>';
+            $gut = [];
+            foreach ($zeilen as $i => $z) {
+                $x = $z['x'];
+                if (!$x) { $h .= '<tr><td>' . ($i + 1) . '</td><td><code>' . esc_html($z['asin']) . '</code> ' . esc_html($namen[$z['asin']] ?? '') . '</td><td colspan="5"><strong>Amazon kennt das Produkt nicht (mehr)</strong></td></tr>'; continue; }
+                $brauchbar = !empty($x['trotz']) || (!empty($x['lieferbar']) && ($x['status'] ?? '') !== 'OUT_OF_STOCK') || (self::unklar($x) && isset($x['rang']) && $x['rang'] <= 20000);
+                if ($brauchbar) { $gut[] = $z['asin']; }
+                $h .= '<tr><td>' . ($i + 1) . '</td><td><code>' . esc_html($z['asin']) . '</code><br><strong>' . esc_html(($namen[$z['asin']] ?? '') ?: mb_substr((string) ($x['titel'] ?? ''), 0, 70)) . '</strong></td><td>' . self::scorezelle($x) . '</td><td>' . self::lieferzelle($x) . '</td><td>'
+                   . (($x['kaufen'] ?? null) === null ? '?' : ($x['kaufen'] ? '<strong style="color:#1a7f37">ja</strong>' : '<strong style="color:#a00">nein</strong>')) . '</td><td>' . esc_html(($x['preis'] ?? '') ?: '–') . self::sparzeile($x) . '</td><td>' . self::rangzelle($x) . '</td></tr>';
+            }
+            $h .= '</tbody></table>';
+            if ($gut) {
+                $slot = strtolower(preg_replace('/[^A-Za-z0-9]+/', '-', $name));
+                $h .= '<p><strong>Vorschlag Ersatzliste (beste zuerst):</strong> <code>' . esc_html($slot . ': ' . implode(', ', $gut)) . '</code>'
+                    . (count($gut) >= 2 ? '<br><strong>A/B-Test mit den zwei Besten:</strong> <code>' . esc_html($gut[0] . ' gegen ' . $gut[1]) . '</code>' : '') . '</p>';
+            } else {
+                $h .= '<p><strong>Kein Produkt dieser Gruppe ist derzeit brauchbar</strong>, bitte neue Produkte suchen.</p>';
+            }
+        }
+        return $h;
+    }
+
     /** Fundstellen je ASIN: Artikel/Seiten dieser Webseite und wie oft das Produkt dort vorkommt (Shortcode, AAWP oder fester Link). */
     private static function fundstellen(array $asins): array {
         global $wpdb;
@@ -1103,22 +1188,25 @@ final class SAB {
         }
         $fund = self::fundstellen(array_merge($weg, $nv, $uk));
         $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $tabelle = function (array $asins, string $leer) use ($fund, $namen, $dp, $d): string {
+        $tabelle = function (array $asins, string $leer, bool $tausch = false) use ($fund, $namen, $dp, $d): string {
             if (!$asins) { return '<p>' . esc_html($leer) . '</p>'; }
             usort($asins, fn($a, $b) => array_sum(array_column($fund[$b] ?? [], 'n')) <=> array_sum(array_column($fund[$a] ?? [], 'n')));
-            $t = '<table class="widefat striped"><thead><tr><th>ASIN / Name</th><th>Stellen gesamt</th><th>Artikel (Anzahl im Artikel)</th></tr></thead><tbody>';
+            $t = '<table class="widefat striped"><thead><tr><th>ASIN / Name</th><th>Stellen gesamt</th><th>Artikel (Anzahl im Artikel)</th>' . ($tausch ? '<th>Austauschen gegen (neue ASIN)</th>' : '') . '</tr></thead><tbody>';
             foreach ($asins as $asin) {
                 $f = $fund[$asin] ?? [];
                 $titel = ($namen[$asin] ?? '') ?: ($d['items'][$asin]['titel'] ?? '');
                 $li = '';
                 foreach ($f as $pid => $x) { $li .= '<li><a href="' . esc_url((string) get_permalink($pid)) . '">' . esc_html($x['titel'] ?: ('Beitrag ' . $pid)) . '</a>: ' . (int) $x['n'] . '×</li>'; }
                 $t .= '<tr><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($titel) . '</strong></td>'
-                    . '<td>' . (int) array_sum(array_column($f, 'n')) . '</td><td>' . ($li ? '<ul style="margin:0">' . $li . '</ul>' : '–') . '</td></tr>';
+                    . '<td>' . (int) array_sum(array_column($f, 'n')) . '</td><td>' . ($li ? '<ul style="margin:0">' . $li . '</ul>' : '–') . '</td>'
+                    . ($tausch ? '<td><input type="text" name="sab_neu_asin[' . esc_attr($asin) . ']" size="12" maxlength="10" placeholder="B0…"></td>' : '') . '</tr>';
             }
             return $t . '</tbody></table>';
         };
-        $h .= '<h3>Amazon kennt das Produkt nicht mehr (' . count($weg) . ')</h3>' . $tabelle($weg, 'Keine.');
-        $h .= '<h3 style="margin-top:2em">Nicht verfügbar / nicht auf Lager (' . count($nv) . ')</h3>' . $tabelle($nv, 'Keine.');
+        $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_neu">'
+            . '<h3>Amazon kennt das Produkt nicht mehr (' . count($weg) . ')</h3><p class="description">Neue ASIN eintragen und unten „Austauschen“ klicken: Das Plugin legt eine Austausch-Regel an, danach zeigen alle Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) das neue Produkt mit Bild, Link und Preis. Feste Links erst im Reiter „Umbau“ umwandeln. Rückgängig: Zeile im Reiter „Produkte und Ersatzlisten“ unter „Austausch-Regeln“ löschen.</p>' . $tabelle($weg, 'Keine.', true);
+        $h .= '<h3 style="margin-top:2em">Nicht verfügbar / nicht auf Lager (' . count($nv) . ')</h3>' . $tabelle($nv, 'Keine.', true);
+        $h .= '<p><button class="button button-primary">Austauschen</button></p></form>';
         $h .= '<h3 style="margin-top:2em">Unklar: Amazon meldet „nicht auf Lager“, aber ohne Preis und Verkäufer (' . count($uk) . ')</h3><p class="description">Hier stimmt die Schnittstelle oft nicht mit der Amazon-Seite überein (Beispiel: auf Amazon lieferbar, in der Schnittstelle „No disponible“). Bitte auf Amazon selbst nachsehen. Das Plugin zeigt diese Produkte weiter.</p>' . $tabelle($uk, 'Keine.');
         return $h;
     }
@@ -1151,11 +1239,11 @@ final class SAB {
         }
         if (!empty($d['bewertungen']['fehler'])) { $h .= '<div class="notice notice-info inline"><p>' . esc_html($d['bewertungen']['fehler']) . '</p></div>'; }
         $kz = self::klickzahlen(); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Buy Box<br><small>(Kaufen-Button)</small></th><th>Preis / Streichpreis</th><th>Aktion / Deal</th><th>Kategorie / Verkaufsrang</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
+        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Buy Box<br><small>(Kaufen-Button)</small></th><th>Preis / Streichpreis</th><th title="0 bis 100: Verkaufsrang, Buy Box, Verfügbarkeit, Preis, Streichpreis, Aktion">Score</th><th>Aktion / Deal</th><th>Kategorie / Verkaufsrang</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
-            if (!$x) { $h .= '<tr><td>–</td><td>' . esc_html($asin) . '<br>' . esc_html($namen[$asin] ?? '') . '</td>' . self::markenzellen($asin) . '<td colspan="10"><strong>Amazon kennt das Produkt nicht (mehr)</strong></td></tr>'; continue; }
+            if (!$x) { $h .= '<tr><td>–</td><td>' . esc_html($asin) . '<br>' . esc_html($namen[$asin] ?? '') . '</td>' . self::markenzellen($asin) . '<td colspan="11"><strong>Amazon kennt das Produkt nicht (mehr)</strong></td></tr>'; continue; }
             $b = '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,64px));gap:4px;width:136px">';
             foreach ($x['bilder'] as $k => $u) { $b .= '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener" title="Bild ' . ($k + 1) . '" style="display:inline-block;text-align:center;font-size:11px"><img src="' . esc_url($u) . '" alt="" style="width:60px;height:60px;object-fit:contain;margin:0 4px 4px 0;background:#fff" referrerpolicy="no-referrer"><br>' . ($k + 1) . '</a>'; }
             $b .= '</div>';
@@ -1165,7 +1253,7 @@ final class SAB {
                . '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($x['titel'], 0, 90)) . '</a></small></td>'
                . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (!empty($x['trotz']) ? 'ja' : (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])))) . '</td><td>' . esc_html($x['preis'] ?: '–') . self::sparzeile($x) . self::sparzeile($x)
                . ($x['preis'] === '' || $x['verkaeufer'] === '' ? '<br><small style="color:#a00">' . esc_html($x['diag'] ?? '') . '</small><details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html($x['roh'] ?? '') . '</code></details>' : '') . '</td>'
-               . '<td>' . self::primezelle($x) . '</td><td>' . self::rangzelle($x) . '</td>'
+               . '<td>' . self::scorezelle($x) . '</td><td>' . self::primezelle($x) . '</td><td>' . self::rangzelle($x) . '</td>'
                . '<td>' . esc_html($x['verkaeufer'] ?: '–') . '</td><td>' . $bewzelle . '</td>'
                . self::klickzellen($kz[$asin] ?? null) . '</tr>';
         }
@@ -1176,8 +1264,31 @@ final class SAB {
 
     const UMBAU_PROSEITE = 15; // Artikel pro Durchgang (kurz genug gegen Zeitlimits)
 
-    private static function umbau_url(string $url): ?array {
+    /** Löst einen Amazon-Kurzlink (Sitestripe, amzn.to / amzn.eu) über seine Weiterleitung auf die Produkt-URL auf; Ergebnis 30 Tage gemerkt. */
+    /** Zähler: Kurzlinks, die in diesem Durchgang wegen der Abruf-Grenze noch nicht aufgelöst wurden. */
+    private static $kurz_offen = 0;
+
+    private static function kurzlink_aufloesen(string $url): string {
+        static $budget = 40;   // höchstens so viele neue Abrufe pro Seitenaufruf, der Rest folgt beim nächsten Klick
+        $key = 'sab_kurz_' . md5($url);
+        $c = get_transient($key);
+        if ($c !== false) { return (string) $c; }
+        if ($budget <= 0) { self::$kurz_offen++; return ''; }
+        $budget--;
+        $r = wp_remote_head($url, ['timeout' => 8, 'redirection' => 6]);
+        $ziel = '';
+        if (!is_wp_error($r)) {
+            $o = $r['http_response'] ?? null;
+            $ziel = ($o && method_exists($o, 'get_response_object') && !empty($o->get_response_object()->url)) ? (string) $o->get_response_object()->url : '';
+        }
+        if ($ziel === '' && !is_wp_error($r)) { return ''; }   // nicht entscheidbar, später nochmal
+        set_transient($key, $ziel, $ziel === '' ? DAY_IN_SECONDS : 30 * DAY_IN_SECONDS);
+        return $ziel;
+    }
+
+    private static function umbau_url(string $url, bool $aufloesen = false): ?array {
         $url = html_entity_decode($url);
+        if ($aufloesen && preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co)/#i', $url)) { $url = self::kurzlink_aufloesen($url); if ($url === '') { return null; } }
         if (!preg_match('#^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com)/(?:[^?\#]*/)?(?:dp|gp/product)/([A-Za-z0-9]{10})#i', $url, $u)) { return null; }
         return [strtolower($u[1]), strtoupper($u[2])];
     }
@@ -1192,7 +1303,7 @@ final class SAB {
         $n = 0; $skip = 0;
         $c = preg_replace_callback('#<a\b([^>]*)>(.*?)</a>#is', function ($m) use (&$n, &$skip, $nur) {
             if (!preg_match('#href=(["\'])(.*?)\1#is', $m[1], $h)) { return $m[0]; }
-            $u = self::umbau_url($h[2]);
+            $u = self::umbau_url($h[2], true);
             if (!$u) { return $m[0]; }
             [$land, $asin] = $u;
             if ($nur !== '' && $asin !== $nur) { return $m[0]; }
@@ -1242,13 +1353,14 @@ final class SAB {
         global $wpdb;
         if (!isset($wpdb)) { return 'Keine Datenbank.'; }
         $ids = $wpdb->get_col($wpdb->prepare(
-            "SELECT p.ID FROM {$wpdb->posts} p WHERE p.post_status='publish' AND p.post_type IN ('post','page') AND p.post_content LIKE %s
+            "SELECT p.ID FROM {$wpdb->posts} p WHERE p.post_status='publish' AND p.post_type IN ('post','page') AND (p.post_content LIKE %s OR p.post_content LIKE %s)
              AND NOT EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id=p.ID AND m.meta_key='_sab_umbau_geprueft' AND m.meta_value=%s) ORDER BY p.ID LIMIT %d",
-            '%amazon.%', $nur !== '' ? $nur : 'alle', self::UMBAU_PROSEITE));
+            '%amazon.%', '%amzn.%', $nur !== '' ? $nur : 'alle', self::UMBAU_PROSEITE));
         $geaendert = 0; $links = 0; $skip = 0;
         foreach ((array) $ids as $id) {
             $post = get_post((int) $id);
             if (!$post) { continue; }
+            self::$kurz_offen = 0;
             [$neu, $n, $sk] = self::umbau_text((string) $post->post_content, $nur);
             $links += $n; $skip += $sk;
             if ($n > 0 && $neu !== $post->post_content) {
@@ -1256,13 +1368,13 @@ final class SAB {
                 wp_update_post(['ID' => (int) $id, 'post_content' => wp_slash($neu)]);
                 $geaendert++;
             }
-            update_post_meta($id, '_sab_umbau_geprueft', $nur !== '' ? $nur : 'alle');
+            if (self::$kurz_offen === 0) { update_post_meta($id, '_sab_umbau_geprueft', $nur !== '' ? $nur : 'alle'); }  // sonst beim nächsten Klick weitermachen
         }
         delete_transient('sab_alle_asins');
         $rest = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_status='publish' AND p.post_type IN ('post','page') AND p.post_content LIKE %s
+            "SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_status='publish' AND p.post_type IN ('post','page') AND (p.post_content LIKE %s OR p.post_content LIKE %s)
              AND NOT EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id=p.ID AND m.meta_key='_sab_umbau_geprueft' AND m.meta_value=%s)",
-            '%amazon.%', $nur !== '' ? $nur : 'alle'));
+            '%amazon.%', '%amzn.%', $nur !== '' ? $nur : 'alle'));
         return count((array) $ids) . ' Artikel geprüft, ' . $geaendert . ' geändert, ' . $links . ' Links umgebaut'
              . ($skip ? ', ' . $skip . ' übersprungen (keine Partner-ID für das Land oder Sonderinhalt)' : '')
              . '. ' . ($rest ? 'Noch ' . $rest . ' Artikel offen: bitte nochmal klicken.' : 'Fertig.');
@@ -1291,6 +1403,7 @@ final class SAB {
         'ausfaelle'     => 'Ausfälle und Warnungen',
         'statistik'     => 'Statistik',
         'problem'       => 'Problemprodukte',
+        'gruppen'       => 'Produktgruppen',
         'umbau'         => 'Umbau',
         'vorschau'      => 'Vorschau',
         'tests'         => 'A/B-Tests',
@@ -1362,6 +1475,26 @@ final class SAB {
                 delete_transient('sab_token_' . md5(self::LAENDER['de'][1]));
                 delete_transient('sab_token_' . md5(self::LAENDER['com'][1]));
                 $meldung = 'Gespeichert.';
+            } elseif ($form === 'tausch_neu') {
+                $regeln = self::tausch_regeln(); $neu = []; $fehler = [];
+                foreach ((array) ($_POST['sab_neu_asin'] ?? []) as $alt => $nw) {
+                    $alt = self::asin((string) $alt); $nw = self::asin((string) $nw);
+                    if ($nw === '') { continue; }
+                    if (strlen($nw) !== 10 || strlen($alt) !== 10 || $alt === $nw) { $fehler[] = $alt . ' → ' . $nw; continue; }
+                    $regeln[$alt] = $nw; $neu[] = $alt . ' => ' . $nw;
+                }
+                if ($neu) {
+                    $zeilen = [];
+                    foreach ($regeln as $a => $b) { $zeilen[] = $a . ' => ' . $b; }
+                    update_option('sab_tausch', implode("\n", $zeilen), false);
+                    delete_transient('sab_alle_asins');
+                }
+                $meldung = $neu ? count($neu) . ' Austausch-Regel(n) angelegt: ' . implode(', ', $neu) . '.' : 'Nichts eingetragen.';
+                if ($fehler) { $meldung .= ' Ungültig (nicht 10 Zeichen oder gleich): ' . implode(', ', $fehler) . '.'; }
+            } elseif ($form === 'gruppen') {
+                update_option('sab_gruppen', sanitize_textarea_field(wp_unslash($_POST['sab_gruppen'] ?? '')), false);
+                delete_transient('sab_alle_asins');
+                $meldung = 'Gruppen gespeichert.';
             } elseif ($form === 'marken' && !empty($_POST['sab_markieren'])) {
                 $m = [];
                 foreach ((array) ($_POST['sab_fav'] ?? []) as $a => $x) { $a = self::asin((string) $a); if ($a) { $m[$a] = 'fav'; } }
@@ -1435,6 +1568,8 @@ final class SAB {
             }
         } elseif ($tab === 'statistik') {
             echo self::statistik_html();
+        } elseif ($tab === 'gruppen') {
+            echo self::gruppen_html();
         } elseif ($tab === 'problem') {
             echo self::problem_html();
         } elseif ($tab === 'umbau') {

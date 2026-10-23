@@ -44,6 +44,11 @@ function do_shortcode_lite($t) {
     }
     return $t;
 }
+
+class FakeResp { public $url; function __construct($u) { $this->url = $u; } }
+class FakeHttp { public $o; function __construct($u) { $this->o = new FakeResp($u); } function get_response_object() { return $this->o; } }
+function wp_remote_head($u, $a = []) { $z = $GLOBALS['kurz'][$u] ?? ''; return ['http_response' => new FakeHttp($z)]; }
+$GLOBALS['kurz'] = ['https://amzn.to/abc' => 'https://www.amazon.es/Producto-Largo/dp/B0AAAAAAA1?tag=x', 'https://amzn.to/start' => 'https://www.amazon.es/'];
 $fail = 0;
 function ok($c, $n) { global $fail; echo ($c ? 'OK   ' : 'FEHLER ') . $n . "\n"; if (!$c) $fail++; }
 function item($asin, $listings) { return ['asin' => $asin, 'detailPageURL' => "https://www.amazon.es/dp/$asin?tag=t-21", 'itemInfo' => ['title' => ['displayValue' => "T$asin"]],
@@ -344,7 +349,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 11 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und zehn Untermenüs');
+ok(count($GLOBALS['menu']) === 12 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und elf Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -397,4 +402,26 @@ $rv = $mRv->invoke(null, ['browseNodeInfo' => ['browseNodes' => [['contextFreeNa
 ok($rv === ['Mallas', 77], 'Rang-Rückfall aus browseNodes');
 $mDv = new ReflectionMethod('SAB', 'deal_von'); $mDv->setAccessible(true);
 ok(strpos($mDv->invoke(null, ['offersV2' => ['listings' => [['type' => 'LIGHTNING_DEAL', 'dealDetails' => ['badge' => 'Oferta flash']]]]]), 'Oferta flash') !== false, 'Deal gelesen');
+
+$mSc = new ReflectionMethod('SAB', 'score'); $mSc->setAccessible(true);
+[$p1, $h1] = $mSc->invoke(null, ['rang' => 800, 'kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '9 €', 'spar' => ['streich' => '12 €'], 'deal' => 'X']);
+ok($p1 === 100 && $h1 === '', 'Score: bestes Produkt = 100');
+[$p2, $h2] = $mSc->invoke(null, ['rang' => 4334, 'kaufen' => true, 'status' => 'OUT_OF_STOCK', 'lieferbar' => true, 'preis' => '', 'verkaeufer' => '']);
+ok($p2 === 58 && strpos($h2, 'Schnittstelle prüfen') !== false, 'Score: guter Rang ohne Angebot = Hinweis');
+[$p3, $h3] = $mSc->invoke(null, ['kaufen' => false, 'status' => 'OUT_OF_STOCK', 'lieferbar' => false]);
+ok($p3 === 0 && $h3 === 'ohne Verkaufsrang', 'Score: nichts = 0');
+
+// Produktgruppen
+$GLOBALS['opt']['sab_gruppen'] = "Kupferband: B0AAAAAAA1, B0BBBBBBB1\nLeer: B0ZZZZZZZ9";
+delete_transient('sab_alle_asins'); delete_transient('sab_uebersicht_' . 'de'); delete_transient('sab_uebersicht_es');
+$mG = new ReflectionMethod('SAB', 'gruppen_html'); $mG->setAccessible(true);
+$g = $mG->invoke(null);
+ok(strpos($g, 'Kupferband (2)') !== false && strpos($g, 'B0AAAAAAA1') !== false && strpos($g, 'Vorschlag Ersatzliste') !== false, 'Gruppen: Tabelle und Ersatzvorschlag');
+ok(strpos($g, 'kupferband: B0AAAAAAA1<') !== false && strpos($g, 'gegen') === false && strpos($g, 'Kein Produkt dieser Gruppe') !== false, 'Gruppen: nur brauchbare in der Ersatzliste, leere Gruppe gemeldet');
+
+// Kurzlinks (Sitestripe) auflösen und umbauen
+$GLOBALS['opt']['sab_tags'] = "es=t-21\nde=t-21";
+[$neu, $n, $sk] = SAB::umbau_text('<p><a href="https://amzn.to/abc" target="_blank">Zum Produkt</a> und <a href="https://amzn.to/start">Startseite</a></p>');
+ok(strpos($neu, '[amz_link asin="B0AAAAAAA1" land="es"]Zum Produkt[/amz_link]') !== false && $n === 1, 'Kurzlink wird zu Platzhalter');
+ok(strpos($neu, 'href="https://amzn.to/start"') !== false, 'Kurzlink auf Startseite bleibt unverändert');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
