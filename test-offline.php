@@ -377,4 +377,16 @@ ok(strpos($z, '>nein<') !== false && strpos($z, 'unklar') === false, 'Lieferbar:
 
 $z = $mL->invoke(null, ['trotz' => true, 'lieferbar' => true, 'status' => 'OUT_OF_STOCK', 'meldung' => 'No disponible.', 'preis' => '', 'verkaeufer' => '', 'roh' => '{}']);
 ok(strpos($z, 'von dir auf Amazon geprüft') !== false && strpos($z, 'unklar') === false, 'Lieferbar: Haken „trotzdem lieferbar“ gewinnt');
+
+// Streichpreis, Prime, Rang
+$mS = new ReflectionMethod('SAB', 'spar_von'); $mS->setAccessible(true);
+$sp = $mS->invoke(null, ['price' => ['money' => ['displayAmount' => '8 €'], 'savingBasis' => ['money' => ['displayAmount' => '10 €']], 'savings' => ['money' => ['displayAmount' => '2 €'], 'percentage' => 20]]]);
+ok($sp['streich'] === '10 €' && $sp['ersparnis'] === '2 €' && $sp['prozent'] === 20, 'Streichpreis und Ersparnis gelesen');
+$mF = new ReflectionMethod('SAB', 'finde'); $mF->setAccessible(true);
+ok($mF->invoke(null, ['a' => ['b' => ['isPrimeEligible' => true]]], 'isPrimeEligible') === true, 'Prime-Feld wird tief gefunden');
+$mR = new ReflectionMethod('SAB', 'rangzelle'); $mR->setAccessible(true);
+$z = $mR->invoke(null, ['rang' => 1234, 'kategorie' => 'Jardín']);
+ok(strpos($z, 'Jardín') !== false && strpos($z, 'Platz 1.234') !== false, 'Rang-Zelle zeigt Kategorie und Platz');
+$mP = new ReflectionMethod('SAB', 'primezelle'); $mP->setAccessible(true);
+ok(strpos($mP->invoke(null, ['prime' => true, 'deal' => 'Oferta del día']), 'Prime') !== false && strpos($mP->invoke(null, ['prime' => true, 'deal' => 'Oferta del día']), 'Oferta del día') !== false, 'Prime-Zelle zeigt Prime und Aktion');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

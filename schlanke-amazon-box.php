@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.30.0
+ * Plugin Name: 1a Amazon Box 0.31.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.30.0
+ * Version: 0.31.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.30.0';
+    const VERSION = '0.31.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -334,6 +334,73 @@ final class SAB {
         return '';
     }
 
+    /** Streichpreis und Ersparnis aus dem Angebot (Felder price.savingBasis / price.savings). */
+    private static function spar_von(?array $l): array {
+        $p = (array) ($l['price'] ?? []);
+        $basis = (string) ($p['savingBasis']['money']['displayAmount'] ?? ($p['savingBasis']['displayAmount'] ?? ''));
+        $ers   = (string) ($p['savings']['money']['displayAmount'] ?? ($p['savings']['displayAmount'] ?? ''));
+        $proz  = isset($p['savings']['percentage']) ? (int) $p['savings']['percentage'] : null;
+        return ['streich' => $basis, 'ersparnis' => $ers, 'prozent' => $proz];
+    }
+
+    /** Sucht einen Schlüssel beliebig tief (für Felder, deren genaue Lage Amazon ändern kann, z. B. isPrimeEligible). */
+    private static function finde(array $a, string $key) {
+        foreach ($a as $k => $v) {
+            if ($k === $key) { return $v; }
+            if (is_array($v) && ($r = self::finde($v, $key)) !== null) { return $r; }
+        }
+        return null;
+    }
+
+    /** Zusatzfelder in eigenen Abfragen (jede Gruppe für sich), damit ein unbekannter Feldname nie die Übersicht zerstört. */
+    private static function zusatz(array $asins, string $token, string $tag, string $mp): array {
+        $out = ['werte' => [], 'fehler' => []];
+        $gruppen = [
+            'rang'  => ['browseNodeInfo.browseNodes', 'browseNodeInfo.websiteSalesRank'],
+            'deal'  => ['offersV2.listings.dealDetails', 'offersV2.listings.type'],
+            'prime' => ['offersV2.listings.deliveryInfo'],
+        ];
+        foreach ($gruppen as $name => $res) {
+            foreach (array_chunk($asins, 10) as $paket) {
+                $r = wp_remote_post(self::API, [
+                    'timeout' => 15,
+                    'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
+                    'body'    => wp_json_encode(['itemIds' => $paket, 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag, 'resources' => $res]),
+                ]);
+                if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 200) {
+                    $out['fehler'][$name] = 'Zusatzdaten „' . $name . '“: Amazon antwortete mit Code ' . (is_wp_error($r) ? 'Netz' : wp_remote_retrieve_response_code($r))
+                                          . (is_wp_error($r) ? '' : ': ' . mb_substr((string) wp_remote_retrieve_body($r), 0, 300));
+                    break;
+                }
+                $j = json_decode(wp_remote_retrieve_body($r), true);
+                foreach ((array) ($j['itemsResult']['items'] ?? []) as $it) {
+                    $a = self::asin($it['asin'] ?? '');
+                    if ($name === 'rang') {
+                        $wr = $it['browseNodeInfo']['websiteSalesRank'] ?? [];
+                        $kat = (string) ($wr['contextFreeName'] ?? ($wr['displayName'] ?? ''));
+                        $rang = isset($wr['salesRank']) ? (int) $wr['salesRank'] : null;
+                        if ($kat === '' || $rang === null) {   // Rückfall: Kategorie-Knoten mit Rang
+                            foreach ((array) ($it['browseNodeInfo']['browseNodes'] ?? []) as $bn) {
+                                if ($kat === '') { $kat = (string) ($bn['contextFreeName'] ?? ($bn['displayName'] ?? '')); }
+                                if ($rang === null && isset($bn['salesRank'])) { $rang = (int) $bn['salesRank']; }
+                            }
+                        }
+                        $out['werte'][$a]['kategorie'] = $kat; $out['werte'][$a]['rang'] = $rang;
+                    } elseif ($name === 'deal') {
+                        foreach ((array) ($it['offersV2']['listings'] ?? []) as $l) {
+                            if (!empty($l['dealDetails'])) { $d = (array) $l['dealDetails']; $out['werte'][$a]['deal'] = trim((string) ($d['badge'] ?? '') . ' ' . (string) ($d['accessType'] ?? '')); $out['werte'][$a]['deal_bis'] = (string) ($d['endTime'] ?? ''); break; }
+                        }
+                    } else {
+                        $pr = null;
+                        foreach ((array) ($it['offersV2']['listings'] ?? []) as $l) { $v = self::finde((array) $l, 'isPrimeEligible'); if ($v !== null) { $pr = (bool) $v; if ($pr) { break; } } }
+                        $out['werte'][$a]['prime'] = $pr;
+                    }
+                }
+            }
+        }
+        return $out;
+    }
+
     private static function verkaeufer_von(?array $l): string {
         if (!$l) { return ''; }
         $m = $l['merchantInfo'] ?? [];
@@ -350,6 +417,26 @@ final class SAB {
         if (self::preis_von($l) === '') { $t .= ', ohne Preisfeld (Felder: ' . implode(', ', array_keys((array) $l)) . ')'; }
         if (self::verkaeufer_von($l) === '') { $t .= ', ohne Verkäufer'; }
         return $t;
+    }
+
+    private static function sparzeile(array $x): string {
+        $sp = (array) ($x['spar'] ?? []);
+        if (empty($sp['streich']) && empty($sp['ersparnis'])) { return ''; }
+        return '<br><small><s>' . esc_html($sp['streich'] ?: '') . '</s> ' . ($sp['ersparnis'] ? 'spart ' . esc_html($sp['ersparnis']) : '') . (isset($sp['prozent']) ? ' (' . (int) $sp['prozent'] . ' %)' : '') . '</small>';
+    }
+
+    private static function primezelle(array $x): string {
+        $p = array_key_exists('prime', $x) ? ($x['prime'] ? '<strong style="color:#00a8e1">Prime</strong>' : 'kein Prime') : '–';
+        $d = !empty($x['deal']) ? '<br><strong style="color:#c7511f">' . esc_html($x['deal']) . '</strong>' . (!empty($x['deal_bis']) ? '<br><small>bis ' . esc_html($x['deal_bis']) . '</small>' : '') : '';
+        return $p . $d;
+    }
+
+    /** Verkaufsrang je Kategorie: niedrig = wird oft gekauft. Grobe Farbe als Hinweis (Rang gilt nur innerhalb der Kategorie). */
+    private static function rangzelle(array $x): string {
+        $r = $x['rang'] ?? null; $k = (string) ($x['kategorie'] ?? '');
+        if ($r === null && $k === '') { return '–'; }
+        $farbe = $r === null ? '#555' : ($r <= 5000 ? '#1a7f37' : ($r <= 50000 ? '#b36b00' : '#a00'));
+        return esc_html($k) . ($r !== null ? '<br><strong style="color:' . $farbe . '">Platz ' . number_format((int) $r, 0, ',', '.') . '</strong>' : '');
     }
 
     /** „Nicht auf Lager“ ohne Preis und ohne Verkäufer: Amazons Schnittstelle liefert dann oft nur ein Rest-Angebot, auf Amazon selbst ist das Produkt trotzdem kaufbar. */
@@ -934,10 +1021,14 @@ final class SAB {
                     'preis'    => self::preis_von($l),
                     'verkaeufer' => self::verkaeufer_von($l),
                     'diag'     => self::diagnose($it),
+                    'spar'     => self::spar_von($l),
                     'roh'      => mb_substr((string) wp_json_encode($it['offersV2'] ?? null), 0, 1800),
                 ];
             }
         }
+        $zus = ['werte' => [], 'fehler' => []];
+        if (!$fehler && $items) { $zus = self::zusatz(array_map('strval', array_keys($items)), $token, $tag, $mp); }
+        foreach ($zus['werte'] as $a => $w) { if (isset($items[$a])) { $items[$a] += $w; } }
         // Bewertungen in einer eigenen Abfrage: ein Fehler hier darf die Übersicht nicht stören
         $bew = ['fehler' => '', 'werte' => []];
         if (!$fehler && $items) {
@@ -961,7 +1052,7 @@ final class SAB {
                 }
             }
         }
-        $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
+        $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew, 'zusatzfehler' => $zus['fehler']];
         if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); }
         return $out;
     }
@@ -1095,12 +1186,13 @@ final class SAB {
             $h .= '<div class="notice notice-info inline"><p>Amazon liefert über diese Schnittstelle keine Bewertungen (Sterne und Anzahl): Die Abfrage wird ohne Fehler beantwortet, aber ohne Werte.</p></div>';
         }
         if (!empty($d['bewertungen']['fehler'])) { $h .= '<div class="notice notice-info inline"><p>' . esc_html($d['bewertungen']['fehler']) . '</p></div>'; }
+        foreach ((array) ($d['zusatzfehler'] ?? []) as $zf) { $h .= '<div class="notice notice-info inline"><p>' . esc_html($zf) . '</p></div>'; }
         $kz = self::klickzahlen(); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Kaufen-Button</th><th>Preis</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
+        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Kaufen-Button</th><th>Preis / Streichpreis</th><th>Prime / Aktion</th><th>Kategorie / Verkaufsrang</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
-            if (!$x) { $h .= '<tr><td>–</td><td>' . esc_html($asin) . '<br>' . esc_html($namen[$asin] ?? '') . '</td>' . self::markenzellen($asin) . '<td colspan="8"><strong>Amazon kennt das Produkt nicht (mehr)</strong></td></tr>'; continue; }
+            if (!$x) { $h .= '<tr><td>–</td><td>' . esc_html($asin) . '<br>' . esc_html($namen[$asin] ?? '') . '</td>' . self::markenzellen($asin) . '<td colspan="10"><strong>Amazon kennt das Produkt nicht (mehr)</strong></td></tr>'; continue; }
             $b = '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,64px));gap:4px;width:136px">';
             foreach ($x['bilder'] as $k => $u) { $b .= '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener" title="Bild ' . ($k + 1) . '" style="display:inline-block;text-align:center;font-size:11px"><img src="' . esc_url($u) . '" alt="" style="width:60px;height:60px;object-fit:contain;margin:0 4px 4px 0;background:#fff" referrerpolicy="no-referrer"><br>' . ($k + 1) . '</a>'; }
             $b .= '</div>';
@@ -1108,8 +1200,9 @@ final class SAB {
             $bewzelle = $bw && $bw['anzahl'] !== null ? esc_html(($bw['sterne'] !== null ? $bw['sterne'] . ' ★ ' : '') . '(' . $bw['anzahl'] . ')') : '–';
             $h .= '<tr><td style="width:150px">' . $b . '</td><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($namen[$asin] ?? '') . '</strong><br><small>'
                . '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($x['titel'], 0, 90)) . '</a></small></td>'
-               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (!empty($x['trotz']) ? 'ja' : (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])))) . '</td><td>' . esc_html($x['preis'] ?: '–')
+               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (!empty($x['trotz']) ? 'ja' : (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])))) . '</td><td>' . esc_html($x['preis'] ?: '–') . self::sparzeile($x) . self::sparzeile($x)
                . ($x['preis'] === '' || $x['verkaeufer'] === '' ? '<br><small style="color:#a00">' . esc_html($x['diag'] ?? '') . '</small><details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html($x['roh'] ?? '') . '</code></details>' : '') . '</td>'
+               . '<td>' . self::primezelle($x) . '</td><td>' . self::rangzelle($x) . '</td>'
                . '<td>' . esc_html($x['verkaeufer'] ?: '–') . '</td><td>' . $bewzelle . '</td>'
                . self::klickzellen($kz[$asin] ?? null) . '</tr>';
         }
