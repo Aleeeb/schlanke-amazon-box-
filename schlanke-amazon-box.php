@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.35.0
+ * Plugin Name: 1a Amazon Box 0.35.1
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.35.0
+ * Version: 0.35.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.35.0';
+    const VERSION = '0.35.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -444,6 +444,15 @@ final class SAB {
         [$p, $h] = self::score($x);
         $farbe = $p >= 70 ? '#1a7f37' : ($p >= 40 ? '#b36b00' : '#a00');
         return '<strong style="color:' . $farbe . ';font-size:1.2em">' . $p . '</strong>' . ($h !== '' ? '<br><small>' . esc_html($h) . '</small>' : '');
+    }
+
+    /** Sortieren per Klick auf die Überschrift und feststehende Kopfzeile für alle Tabellen mit der Klasse „sab-sort2“. */
+    private static function tabellenhilfe(): string {
+        return '<style>table.sab-sort2 thead th{position:sticky;top:32px;z-index:3;background:#f6f7f7;cursor:pointer;box-shadow:0 1px 0 #c3c4c7}table.sab-sort2 thead th.sab-auf:after{content:" \\25B2"}table.sab-sort2 thead th.sab-ab:after{content:" \\25BC"}</style>'
+             . '<script>(function(){function v(c){if(!c)return "";var d=c.getAttribute("data-v");if(d!==null)return d===""?"":parseFloat(d);var i=c.querySelector("input[type=checkbox]");if(i)return i.checked?1:0;var t=c.textContent.trim().toLowerCase();var n=parseFloat(t.replace(/\\./g,"").replace(",",".").replace(/[^0-9.\\-]/g,""));return isNaN(n)||!/^[^a-z]*[0-9]/.test(t)?t:n}'
+             . 'document.querySelectorAll("table.sab-sort2").forEach(function(T){var H=T.tHead&&T.tHead.rows[0];if(!H)return;[].forEach.call(H.cells,function(th,i){th.addEventListener("click",function(){var b=T.tBodies[0],r=[].slice.call(b.rows),d=th.classList.contains("sab-auf")?-1:1;'
+             . '[].forEach.call(H.cells,function(x){x.classList.remove("sab-auf","sab-ab")});th.classList.add(d===1?"sab-auf":"sab-ab");'
+             . 'r.sort(function(x,y){var a=v(x.cells[i]),c=v(y.cells[i]);if(a===""&&c!=="")return 1;if(c===""&&a!=="")return -1;return(a<c?-1:a>c?1:0)*d});r.forEach(function(e){b.appendChild(e)})})})})})();</script>';
     }
 
     private static function sparzeile(array $x): string {
@@ -1096,7 +1105,7 @@ final class SAB {
           . '<p class="description">Update-Prüfung: ' . ($us ? esc_html(wp_date('d.m.Y H:i', (int) $us['ts']) . ', Antwort ' . $us['code'] . ', Version im Repo ' . ($us['version'] ?: '–')) : 'noch nicht gelaufen') . '</p>';
         $h .= '<h3 style="margin-top:1.5em">Meistgeklickte Produkte</h3><p class="description">Auf eine Überschrift klicken sortiert die Liste (nochmal klicken: umgekehrt). „Zurück“ = Besucher kam nach dem Klick auf die Webseite zurück.</p>';
         if (!$zeilen) { return $h . '<p>Noch keine Klicks in diesem Zeitraum.</p>'; }
-        $h .= '<table class="widefat striped sab-sort"><thead><tr><th>Produkt</th><th data-z="1">Klicks</th><th data-z="1">Anteil</th><th data-z="1">auf Bild</th><th data-z="1">auf Text/Button</th><th data-z="1">Zurück</th><th data-z="1">Zurück in %</th><th data-z="1">Ø Zeit bis zurück</th></tr></thead><tbody>';
+        $h .= '<style>table.sab-sort thead th{position:sticky;top:32px;z-index:3;background:#f6f7f7;box-shadow:0 1px 0 #c3c4c7}</style><table class="widefat striped sab-sort"><thead><tr><th>Produkt</th><th data-z="1">Klicks</th><th data-z="1">Anteil</th><th data-z="1">auf Bild</th><th data-z="1">auf Text/Button</th><th data-z="1">Zurück</th><th data-z="1">Zurück in %</th><th data-z="1">Ø Zeit bis zurück</th></tr></thead><tbody>';
         foreach ($zeilen as $r) {
             $n = (int) $r['n']; $z = (int) $r['z'];
             $h .= '<tr><td data-v="' . esc_attr(strtolower(($namen[$r['asin']] ?? '') . $r['asin'])) . '"><code>' . esc_html($r['asin']) . '</code> ' . esc_html($namen[$r['asin']] ?? '') . '</td>'
@@ -1132,7 +1141,7 @@ final class SAB {
                 $zeilen[] = ['asin' => $a, 'x' => $x, 'score' => $x ? self::score($x)[0] : -1];
             }
             usort($zeilen, fn($p, $q) => $q['score'] <=> $p['score']);
-            $h .= '<h3 style="margin-top:1.5em">' . esc_html($name) . ' (' . count($zeilen) . ')</h3><table class="widefat striped"><thead><tr><th>#</th><th>ASIN / Name</th><th>Score</th><th>Lieferbar</th><th>Buy Box</th><th>Preis</th><th>Kategorie / Verkaufsrang</th></tr></thead><tbody>';
+            $h .= '<h3 style="margin-top:1.5em">' . esc_html($name) . ' (' . count($zeilen) . ')</h3><table class="widefat striped sab-sort2"><thead><tr><th>#</th><th>ASIN / Name</th><th>Score</th><th>Lieferbar</th><th>Buy Box</th><th>Preis</th><th>Kategorie / Verkaufsrang</th></tr></thead><tbody>';
             $gut = [];
             foreach ($zeilen as $i => $z) {
                 $x = $z['x'];
@@ -1142,7 +1151,7 @@ final class SAB {
                 $h .= '<tr><td>' . ($i + 1) . '</td><td><code>' . esc_html($z['asin']) . '</code><br><strong>' . esc_html(($namen[$z['asin']] ?? '') ?: mb_substr((string) ($x['titel'] ?? ''), 0, 70)) . '</strong></td><td>' . self::scorezelle($x) . '</td><td>' . self::lieferzelle($x) . '</td><td>'
                    . (($x['kaufen'] ?? null) === null ? '?' : ($x['kaufen'] ? '<strong style="color:#1a7f37">ja</strong>' : '<strong style="color:#a00">nein</strong>')) . '</td><td>' . esc_html(($x['preis'] ?? '') ?: '–') . self::sparzeile($x) . '</td><td>' . self::rangzelle($x) . '</td></tr>';
             }
-            $h .= '</tbody></table>';
+            $h .= '</tbody></table>' . self::tabellenhilfe();
             if ($gut) {
                 $slot = strtolower(preg_replace('/[^A-Za-z0-9]+/', '-', $name));
                 $h .= '<p><strong>Vorschlag Ersatzliste (beste zuerst):</strong> <code>' . esc_html($slot . ': ' . implode(', ', $gut)) . '</code>'
@@ -1192,7 +1201,7 @@ final class SAB {
         $tabelle = function (array $asins, string $leer, bool $tausch = false) use ($fund, $namen, $dp, $d): string {
             if (!$asins) { return '<p>' . esc_html($leer) . '</p>'; }
             usort($asins, fn($a, $b) => array_sum(array_column($fund[$b] ?? [], 'n')) <=> array_sum(array_column($fund[$a] ?? [], 'n')));
-            $t = '<table class="widefat striped"><thead><tr><th>ASIN / Name</th><th>Stellen gesamt</th><th>Artikel (Anzahl im Artikel)</th>' . ($tausch ? '<th>Austauschen gegen (neue ASIN)</th>' : '') . '</tr></thead><tbody>';
+            $t = '<table class="widefat striped sab-sort2"><thead><tr><th>ASIN / Name</th><th>Stellen gesamt</th><th>Artikel (Anzahl im Artikel)</th>' . ($tausch ? '<th>Austauschen gegen (neue ASIN)</th>' : '') . '</tr></thead><tbody>';
             foreach ($asins as $asin) {
                 $f = $fund[$asin] ?? [];
                 $titel = ($namen[$asin] ?? '') ?: ($d['items'][$asin]['titel'] ?? '');
@@ -1202,7 +1211,7 @@ final class SAB {
                     . '<td>' . (int) array_sum(array_column($f, 'n')) . (array_sum(array_column($f, 'fest')) ? '<br><small style="color:#a00">' . (int) array_sum(array_column($f, 'fest')) . ' davon feste Links: erst im Reiter „Umbau“ umwandeln</small>' : '') . '</td><td>' . ($li ? '<ul style="margin:0">' . $li . '</ul>' : '–') . '</td>'
                     . ($tausch ? '<td><input type="text" name="sab_neu_asin[' . esc_attr($asin) . ']" size="12" maxlength="10" placeholder="B0…"></td>' : '') . '</tr>';
             }
-            return $t . '</tbody></table>';
+            return $t . '</tbody></table>' . self::tabellenhilfe();
         };
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_neu">'
             . '<h3>Amazon kennt das Produkt nicht mehr (' . count($weg) . ')</h3><p class="description">Neue ASIN eintragen und unten „Austauschen“ klicken: Das Plugin legt eine Austausch-Regel an, danach zeigen alle Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) das neue Produkt mit Bild, Link und Preis. Feste Links erst im Reiter „Umbau“ umwandeln. Rückgängig: Zeile im Reiter „Produkte und Ersatzlisten“ unter „Austausch-Regeln“ löschen.</p>' . $tabelle($weg, 'Keine.', true);
@@ -1240,7 +1249,7 @@ final class SAB {
         }
         if (!empty($d['bewertungen']['fehler'])) { $h .= '<div class="notice notice-info inline"><p>' . esc_html($d['bewertungen']['fehler']) . '</p></div>'; }
         $kz = self::klickzahlen(); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $h .= '<table class="widefat striped"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Buy Box<br><small>(Kaufen-Button)</small></th><th>Preis / Streichpreis</th><th title="0 bis 100: Verkaufsrang, Buy Box, Verfügbarkeit, Preis, Streichpreis, Aktion">Score</th><th>Aktion / Deal</th><th>Kategorie / Verkaufsrang</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
+        $h .= '<table class="widefat striped sab-sort2"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Buy Box<br><small>(Kaufen-Button)</small></th><th>Preis / Streichpreis</th><th title="0 bis 100: Verkaufsrang, Buy Box, Verfügbarkeit, Preis, Streichpreis, Aktion">Score</th><th>Aktion / Deal</th><th>Kategorie / Verkaufsrang</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
@@ -1252,13 +1261,13 @@ final class SAB {
             $bewzelle = $bw && $bw['anzahl'] !== null ? esc_html(($bw['sterne'] !== null ? $bw['sterne'] . ' ★ ' : '') . '(' . $bw['anzahl'] . ')') : '–';
             $h .= '<tr><td style="width:150px">' . $b . '</td><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($namen[$asin] ?? '') . '</strong><br><small>'
                . '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($x['titel'], 0, 90)) . '</a></small></td>'
-               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (!empty($x['trotz']) ? 'ja' : (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])))) . '</td><td>' . esc_html($x['preis'] ?: '–') . self::sparzeile($x) . self::sparzeile($x)
+               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (!empty($x['trotz']) ? 'ja' : (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])))) . '</td><td data-v="' . (preg_match('/[0-9][0-9.,]*/', (string) $x['preis'], $pm) ? (float) str_replace(',', '.', str_replace('.', '', $pm[0])) : '') . '">' . esc_html($x['preis'] ?: '–') . self::sparzeile($x) . self::sparzeile($x)
                . ($x['preis'] === '' || $x['verkaeufer'] === '' ? '<br><small style="color:#a00">' . esc_html($x['diag'] ?? '') . '</small><details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html($x['roh'] ?? '') . '</code></details>' : '') . '</td>'
-               . '<td>' . self::scorezelle($x) . '</td><td>' . self::primezelle($x) . '</td><td>' . self::rangzelle($x) . '</td>'
+               . '<td data-v="' . self::score($x)[0] . '">' . self::scorezelle($x) . '</td><td>' . self::primezelle($x) . '</td><td data-v="' . (isset($x['rang']) ? (int) $x['rang'] : '') . '">' . self::rangzelle($x) . '</td>'
                . '<td>' . esc_html($x['verkaeufer'] ?: '–') . '</td><td>' . $bewzelle . '</td>'
                . self::klickzellen($kz[$asin] ?? null) . '</tr>';
         }
-        return $h . '</tbody></table><p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Warnungen“.</span></p>';
+        return $h . '</tbody></table>' . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Warnungen“.</span></p>';
     }
 
     // ---------- Umbau-Werkzeug: feste Amazon-Links in Artikeln => Plugin-Platzhalter ----------

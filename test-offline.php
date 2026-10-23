@@ -441,4 +441,8 @@ ok(count($li) === 1 && $li[0]['fest'] === 1 && $li[0]['kurz'] === 1 && $li[0]['f
 $mV = new ReflectionMethod('SAB', 'umbau_vorschau'); $mV->setAccessible(true);
 $vh = $mV->invoke(null, 7);
 ok(strpos($vh, 'amz_link') !== false && strpos($vh, 'amz_bild') !== false, 'Umbau-Vorschau zeigt Platzhalter nachher');
+
+$mTh = new ReflectionMethod('SAB', 'tabellenhilfe'); $mTh->setAccessible(true);
+file_put_contents(__DIR__ . '/th_out.html', $mTh->invoke(null));
+ok(strpos($mTh->invoke(null), 'position:sticky') !== false, 'Tabellenhilfe: Kopfzeile fixiert');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
