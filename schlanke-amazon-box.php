@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.34.2
+ * Plugin Name: 1a Amazon Box 0.35.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.34.2
+ * Version: 0.35.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.34.2';
+    const VERSION = '0.35.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -1361,15 +1361,8 @@ final class SAB {
         foreach ((array) $ids as $id) {
             $post = get_post((int) $id);
             if (!$post) { continue; }
-            self::$kurz_offen = 0;
-            [$neu, $n, $sk] = self::umbau_text((string) $post->post_content, $nur);
-            $links += $n; $skip += $sk;
-            if ($n > 0 && $neu !== $post->post_content) {
-                if (get_post_meta($id, '_sab_umbau_backup', true) === '') { update_post_meta($id, '_sab_umbau_backup', wp_slash($post->post_content)); }
-                wp_update_post(['ID' => (int) $id, 'post_content' => wp_slash($neu)]);
-                $geaendert++;
-            }
-            if (self::$kurz_offen === 0) { update_post_meta($id, '_sab_umbau_geprueft', $nur !== '' ? $nur : 'alle'); }  // sonst beim nächsten Klick weitermachen
+            [$n, $sk, $gea] = self::umbau_artikel((int) $id, $nur);
+            $links += $n; $skip += $sk; $geaendert += $gea;
         }
         delete_transient('sab_alle_asins');
         $rest = (int) $wpdb->get_var($wpdb->prepare(
@@ -1379,6 +1372,72 @@ final class SAB {
         return count((array) $ids) . ' Artikel geprüft, ' . $geaendert . ' geändert, ' . $links . ' Links umgebaut'
              . ($skip ? ', ' . $skip . ' übersprungen (keine Partner-ID für das Land oder Sonderinhalt)' : '')
              . '. ' . ($rest ? 'Noch ' . $rest . ' Artikel offen: bitte nochmal klicken.' : 'Fertig.');
+    }
+
+    /** Baut einen einzelnen Artikel um (Sicherung vorher). @return array{0:int,1:int,2:int} [umgebaute Links, übersprungen, geändert 0/1] */
+    private static function umbau_artikel(int $id, string $nur = ''): array {
+        $post = get_post($id);
+        if (!$post) { return [0, 0, 0]; }
+        self::$kurz_offen = 0;
+        [$neu, $n, $sk] = self::umbau_text((string) $post->post_content, $nur);
+        $gea = 0;
+        if ($n > 0 && $neu !== $post->post_content) {
+            if (get_post_meta($id, '_sab_umbau_backup', true) === '') { update_post_meta($id, '_sab_umbau_backup', wp_slash($post->post_content)); }
+            wp_update_post(['ID' => $id, 'post_content' => wp_slash($neu)]);
+            $gea = 1;
+        }
+        if (self::$kurz_offen === 0) { update_post_meta($id, '_sab_umbau_geprueft', $nur !== '' ? $nur : 'alle'); }  // sonst beim nächsten Klick weitermachen
+        delete_transient('sab_alle_asins');
+        return [$n, $sk, $gea];
+    }
+
+    /** Ein Artikel zurück auf den Zustand vor dem Umbau. */
+    private static function umbau_zurueck_artikel(int $id): string {
+        $alt = get_post_meta($id, '_sab_umbau_backup', true);
+        if ($alt === '' || $alt === false) { return 'Für diesen Artikel gibt es keine Sicherung.'; }
+        wp_update_post(['ID' => $id, 'post_content' => wp_slash($alt)]);
+        delete_post_meta($id, '_sab_umbau_backup'); delete_post_meta($id, '_sab_umbau_geprueft');
+        delete_transient('sab_alle_asins');
+        return 'Artikel wieder auf den Zustand vor dem Umbau gesetzt.';
+    }
+
+    /** Artikel mit festen Amazon-Links (inkl. Kurzlinks): ID, Titel, Anzahl Links, Kurzlinks, umgebaut ja/nein. */
+    private static function umbau_artikelliste(): array {
+        global $wpdb;
+        $out = [];
+        if (!isset($wpdb)) { return $out; }
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%') ORDER BY ID", ARRAY_A);
+        foreach ((array) $rows as $r) {
+            $c = (string) $r['post_content'];
+            $c = preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', $c);
+            $fest = 0; $kurz = 0;
+            if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1#is', $c, $m)) {
+                foreach ($m[2] as $url) {
+                    if (self::umbau_url($url)) { $fest++; } elseif (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co)/#i', html_entity_decode($url))) { $kurz++; }
+                }
+            }
+            $fertig = get_post_meta((int) $r['ID'], '_sab_umbau_backup', true) !== '';
+            if ($fest + $kurz > 0 || $fertig) { $out[] = ['id' => (int) $r['ID'], 'titel' => (string) $r['post_title'], 'fest' => $fest, 'kurz' => $kurz, 'fertig' => $fertig]; }
+        }
+        return $out;
+    }
+
+    /** Vorschau: jeder Amazon-Link des Artikels vorher und nachher (ohne etwas zu speichern). */
+    private static function umbau_vorschau(int $id): string {
+        $post = get_post($id);
+        if (!$post) { return '<p>Artikel nicht gefunden.</p>'; }
+        $c = (string) $post->post_content;
+        $h = '<h3>Vorschau für „' . esc_html($post->post_title) . '“</h3><p class="description">Es wird nichts gespeichert. Links, die hier „bleibt unverändert“ heißen, sind kein Produktlink (z. B. Amazon-Startseite) oder haben keine Partner-ID für das Land.</p><table class="widefat striped"><thead><tr><th>Vorher</th><th>Nachher</th></tr></thead><tbody>';
+        $n = 0;
+        if (preg_match_all('#<a\b[^>]*>.*?</a>#is', preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', $c), $m)) {
+            foreach ($m[0] as $a) {
+                if (!preg_match('#href=(["\'])(.*?)\1#is', $a, $hh) || !preg_match('#amazon\.|amzn\.|a\.co/#i', $hh[2])) { continue; }
+                [$neu] = self::umbau_text($a);
+                $n++;
+                $h .= '<tr><td><code style="word-break:break-all">' . esc_html(mb_substr($a, 0, 300)) . '</code></td><td>' . ($neu === $a ? '<em>bleibt unverändert</em>' : '<code style="word-break:break-all">' . esc_html(mb_substr($neu, 0, 300)) . '</code>') . '</td></tr>';
+            }
+        }
+        return $h . ($n ? '' : '<tr><td colspan="2">Keine Amazon-Links gefunden.</td></tr>') . '</tbody></table>';
     }
 
     /** Alles zurück: Originaltext aus der Sicherung wiederherstellen. */
@@ -1507,6 +1566,11 @@ final class SAB {
                 $meldung = 'Markierungen gespeichert.';
             } elseif ($form === 'umbau' && !empty($_POST['sab_bestaetigt'])) {
                 $meldung = self::umbau_lauf(self::asin((string) ($_POST['sab_nur'] ?? '')));
+            } elseif ($form === 'umbau_einzeln') {
+                [$n, $sk, $gea] = self::umbau_artikel((int) ($_POST['sab_id'] ?? 0));
+                $meldung = $gea ? $n . ' Link(s) in diesem Artikel umgebaut. Bitte den Artikel ansehen; Rückgängig geht in der Liste.' : 'Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: keine Partner-ID für das Land oder Sonderinhalt)' : '') . '.';
+            } elseif ($form === 'umbau_zurueck_einzeln') {
+                $meldung = self::umbau_zurueck_artikel((int) ($_POST['sab_id'] ?? 0));
             } elseif ($form === 'umbau_zurueck' && !empty($_POST['sab_bestaetigt'])) {
                 $meldung = self::umbau_zurueck();
             } elseif ($form === 'jetzt') {
@@ -1574,19 +1638,32 @@ final class SAB {
         } elseif ($tab === 'problem') {
             echo self::problem_html();
         } elseif ($tab === 'umbau') {
-            $an = self::umbau_analyse(); $namen = self::produkte();
-            echo '<h2>Umbau: feste Amazon-Links in Artikeln durch Plugin-Platzhalter ersetzen</h2>'
-               . '<p>Danach lassen sich Produkte zentral tauschen (Austausch-Regeln), testen und prüfen. Bild-Links werden zu <code>[amz_bild]</code>, Textlinks und Buttons zu <code>[amz_link]</code>; der bisherige Code bleibt als Rückfall zwischen den Tags. Vorher wird jeder Artikel einzeln gesichert, und WordPress legt zusätzlich eine Revision an. <strong>Kurzlinks (amzn.to) können nicht umgebaut werden.</strong></p>'
-               . '<p>Gefunden: <strong>' . (int) $an['artikel'] . '</strong> Artikel mit festen Amazon-Links, <strong>' . (int) $an['fertig'] . '</strong> Stellen laufen schon über das Plugin, <strong>' . (int) $an['kurz'] . '</strong> Kurzlinks (amzn.to).</p>';
-            if ($an['asins']) {
-                echo '<table class="widefat striped"><thead><tr><th>ASIN</th><th>Name</th><th>Land</th><th>Stellen</th><th>Artikel</th></tr></thead><tbody>';
-                foreach ($an['asins'] as $r) {
-                    echo '<tr><td><a href="' . esc_url('https://' . self::LAENDER[$r['land']][0] . '/dp/' . $r['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($r['asin']) . '</code></a></td><td>' . esc_html($namen[$r['asin']] ?? '')
-                       . '</td><td>' . esc_html($r['land']) . '</td><td>' . (int) $r['stellen'] . '</td><td>' . count($r['artikel']) . '</td></tr>';
+            $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0;
+            foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; }
+            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>'
+               . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
+               . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
+               . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'
+               . '<p>Tipp: Zuerst <strong>einen einzelnen Artikel</strong> umbauen und im Browser ansehen. Wenn alles stimmt, unten „Alle auf einmal“.</p>'
+               . '<p>Gefunden: <strong>' . count($liste) . '</strong> Artikel mit Amazon-Links, davon <strong>' . $nfertig . '</strong> schon umgebaut; <strong>' . $nf . '</strong> feste Produkt-Links und <strong>' . $nk . '</strong> Kurzlinks (amzn.to) offen.</p>';
+            $vid = (int) ($_GET['vorschau'] ?? 0);
+            if ($vid) { echo self::umbau_vorschau($vid); }
+            if ($liste) {
+                echo '<table class="widefat striped" style="margin-top:1em"><thead><tr><th>Artikel</th><th>feste Links</th><th>Kurzlinks</th><th>Stand</th><th>Aktion</th></tr></thead><tbody>';
+                foreach (array_slice($liste, 0, 200) as $a) {
+                    $vu = add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'));
+                    echo '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . (int) $a['fest'] . '</td><td>' . (int) $a['kurz'] . '</td>'
+                       . '<td>' . ($a['fertig'] ? '<strong style="color:#1a7f37">umgebaut</strong>' : 'offen') . '</td><td><a class="button" href="' . esc_url($vu) . '">Vorschau</a> ';
+                    echo '<form method="post" style="display:inline">'; wp_nonce_field('sab_speichern');
+                    echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_id" value="' . (int) $a['id'] . '">'
+                       . ($a['fertig'] ? '<input type="hidden" name="sab_form" value="umbau_zurueck_einzeln"><button class="button">Rückgängig</button>' : '<input type="hidden" name="sab_form" value="umbau_einzeln"><button class="button button-primary">Umbauen</button>')
+                       . '</form></td></tr>';
                 }
-                echo '</tbody></table>';
+                echo '</tbody></table>' . (count($liste) > 200 ? '<p class="description">Es werden die ersten 200 Artikel gezeigt. „Alle auf einmal“ unten erfasst alle.</p>' : '');
             }
-            echo '<form method="post" style="margin-top:1.5em">'; wp_nonce_field('sab_speichern');
+            $namen = self::produkte(); $an = self::umbau_analyse();
+            echo '<details style="margin-top:1.5em"><summary><strong>Alle auf einmal umbauen oder zurücksetzen</strong></summary>';
+            echo '<form method="post" style="margin-top:1em">'; wp_nonce_field('sab_speichern');
             echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau">'
                . '<p>Nur diese ASIN umbauen (leer = alle): <input type="text" name="sab_nur" size="14"></p>'
                . '<p><label><input type="checkbox" name="sab_bestaetigt" value="1"> Ja, die nächsten ' . self::UMBAU_PROSEITE . ' Artikel jetzt umbauen</label></p>'
@@ -1594,6 +1671,15 @@ final class SAB {
             echo '<form method="post">'; wp_nonce_field('sab_speichern');
             echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_zurueck">'
                . '<p><label><input type="checkbox" name="sab_bestaetigt" value="1"> Ja, alles auf den Zustand vor dem Umbau zurücksetzen</label> <button class="button">Rückgängig</button></p></form>';
+            if ($an['asins']) {
+                echo '<h3>Produkte in festen Links</h3><table class="widefat striped"><thead><tr><th>ASIN</th><th>Name</th><th>Land</th><th>Stellen</th><th>Artikel</th></tr></thead><tbody>';
+                foreach ($an['asins'] as $r) {
+                    echo '<tr><td><a href="' . esc_url('https://' . self::LAENDER[$r['land']][0] . '/dp/' . $r['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($r['asin']) . '</code></a></td><td>' . esc_html($namen[$r['asin']] ?? '')
+                       . '</td><td>' . esc_html($r['land']) . '</td><td>' . (int) $r['stellen'] . '</td><td>' . count($r['artikel']) . '</td></tr>';
+                }
+                echo '</tbody></table>';
+            }
+            echo '</details>';
         } elseif ($tab === 'vorschau') {
             echo self::vorschau_html();
         } elseif ($tab === 'tests') {
