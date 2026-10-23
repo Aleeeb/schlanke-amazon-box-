@@ -496,7 +496,7 @@ $tab = '<table><tbody><tr><td><a href="https://www.amazon.es/dp/B0TABLE001?tag=x
      . '<tr><td><a href="https://www.ebay.es/sch/i.html?_nkw=cubiertas+campana&amp;campid=5338794835&amp;mkcid=1">o en eBay</a></td></tr></tbody></table>';
 SAB::$neue_namen = []; $GLOBALS['opt']['sab_karten_umbau'] = '0';
 [$neu, $n, $sk] = SAB::umbau_text($tab);
-ok(strpos($neu, '[amz_titel asin="B0TABLE001" land="es"]') !== false && strpos($neu, 'Campana de jard') === false, 'Tabelle: Titeltext wird [amz_titel]');
+ok(strpos($neu, '[amz_titel asin="B0TABLE001" land="es" titel="Campana de jardín | Set de 5"]') !== false, 'Tabelle: Titeltext wird [amz_titel] mit deinem Wortlaut');
 ok(strpos($neu, '[amz_ebay asin="B0TABLE001" land="es" host="www.ebay.es" campid="5338794835" suche="cubiertas campana"]o en eBay[/amz_ebay]') !== false, 'Tabelle: eBay-Link wird [amz_ebay]');
 ok((SAB::$neue_namen['B0TABLE001'] ?? '') === 'Campana de jardín | Set de 5', 'Titeltext als Kurzname vorgemerkt');
 [$neu2] = SAB::umbau_text($neu);
@@ -545,4 +545,13 @@ ok(strpos($neu, '[amz_bild asin="B0TABLE001" land="es" breite="360"][/amz_bild]'
 ok(strpos($neu, 'breite="360"') !== false, 'Bildbreite aus aawp wird auf 360 px begrenzt');
 $o = $GLOBALS['sc']['aawp'](['fields' => 'B0TABLE001', 'value' => 'thumb', 'image_width' => '500']);
 ok(strpos($o, 'max-width:360px') !== false, 'sc_aawp begrenzt 500 px auf 360 px');
+$GLOBALS['opt']['sab_karten_umbau']='1'; $GLOBALS['opt']['sab_produkte']=''; $GLOBALS['opt']['sab_tausch']='';
+[$neu,] = SAB::umbau_text('<table><tr><td>[aawp fields="B0TABLE001" value="thumb"]</td></tr><tr><td><p id="title">Valla | Metálico</p></td></tr><tr><td><a href="https://amzn.to/q">Ver en Amazon</a></td></tr></table>');
+ok(strpos($neu, 'titel="Valla | Metálico"') !== false, 'Karte merkt sich deinen Titel im Shortcode');
+$h = SAB::sc_karten([], $neu);
+ok(strpos($h, 'Valla | Metálico') !== false, 'Karte zeigt deinen Titel, nicht den Amazon-Titel');
+$GLOBALS['opt']['sab_tausch'] = 'B0TABLE001 => B0TABLE002'; $GLOBALS['opt']['sab_produkte'] = 'B0TABLE002 | Anillos | 12 uds';
+$h = SAB::sc_karten([], $neu);
+ok(strpos($h, 'Valla') === false && strpos($h, 'Anillos') !== false, 'Nach Austausch kommt der Kurzname des neuen Produkts');
+$GLOBALS['opt']['sab_tausch'] = ''; $GLOBALS['opt']['sab_produkte'] = '';
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

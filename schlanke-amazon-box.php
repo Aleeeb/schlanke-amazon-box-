@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.38.3
+ * Plugin Name: 1a Amazon Box 0.38.4
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.38.3
+ * Version: 0.38.4
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.38.3';
+    const VERSION = '0.38.4';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -901,8 +901,9 @@ final class SAB {
 
     /** [amz_titel asin="…"]: Produktname als reiner Text (Kurzname, sonst Amazon-Titel); folgt automatisch einem Austausch. */
     public static function sc_titel($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'kurz' => ''], $a);
-        $asin = self::getauscht(self::asin($a['asin']));
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'kurz' => '', 'titel' => ''], $a);
+        $orig = self::asin($a['asin']); $asin = self::getauscht($orig);
+        if ($asin === $orig && trim((string) $a['titel']) !== '') { return esc_html(trim((string) $a['titel'])); }
         if (strlen($asin) !== 10) { return esc_html((string) $inhalt); }
         $name = self::produkte()[$asin] ?? '';
         if ($name === '') {
@@ -927,12 +928,13 @@ final class SAB {
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
     public static function sc_karte($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
         if (strlen($asin) !== 10) { return ''; }
         self::$genutzt = true; self::$karten = true;
         $p = self::produkt($asin, $land);
-        $titel = self::sc_titel(['asin' => $asin, 'land' => $land, 'kurz' => 70], '');
+        // dein Titel aus dem Artikel bleibt stehen; nach einem Austausch kommt der Kurzname des neuen Produkts
+        $titel = ($asin === $orig && trim((string) $a['titel']) !== '') ? esc_html(trim((string) $a['titel'])) : self::sc_titel(['asin' => $asin, 'land' => $land, 'kurz' => 70], '');
         $bild = self::brauchbar($p) ? self::sc_bild(['asin' => $asin, 'land' => $land], '') : '';
         $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn'], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
         $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
@@ -1498,7 +1500,7 @@ final class SAB {
                     }
                 }
                 if ($titel !== '') { self::$neue_namen[$asin] = self::$neue_namen[$asin] ?? $titel; }
-                $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($text !== '' ? ' text="' . str_replace(['"', '[', ']'], '', $text) . '"' : '') . ($attr !== '' ? ' ebay="1"' . $attr : '') . ']';
+                $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . ($text !== '' ? ' text="' . str_replace(['"', '[', ']'], '', $text) . '"' : '') . ($attr !== '' ? ' ebay="1"' . $attr : '') . ']';
             }
             self::$karten_n += count($karten);
             return '[amz_karten]' . implode('', $karten) . '[/amz_karten]';
@@ -1551,7 +1553,7 @@ final class SAB {
                         $txt = trim(html_entity_decode(strip_tags($in)));
                         if ($txt !== '' && mb_strlen($txt) <= 140) {
                             self::$neue_namen[$asin] = self::$neue_namen[$asin] ?? $txt;
-                            return '<' . $cm[1] . $cm[2] . '>[amz_titel asin="' . $asin . '" land="' . $land . '"]</' . $cm[1] . '>';
+                            return '<' . $cm[1] . $cm[2] . '>[amz_titel asin="' . $asin . '" land="' . $land . '" titel="' . str_replace(['"', '[', ']'], '', $txt) . '"]</' . $cm[1] . '>';
                         }
                     }
                     return $cm[0];
