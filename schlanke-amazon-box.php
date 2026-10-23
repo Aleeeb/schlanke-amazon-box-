@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.36.0
+ * Plugin Name: 1a Amazon Box 0.36.1
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.36.0
+ * Version: 0.36.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.36.0';
+    const VERSION = '0.36.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -68,6 +68,7 @@ final class SAB {
         add_shortcode('amz_produkt', [__CLASS__, 'sc_produkt']);
         add_shortcode('amz_bild',    [__CLASS__, 'sc_bild']);
         add_shortcode('amz_link',    [__CLASS__, 'sc_link']);
+        add_shortcode('amz_titel',   [__CLASS__, 'sc_titel']);
         add_shortcode('amz_hinweis', [__CLASS__, 'sc_hinweis']);
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
@@ -892,6 +893,21 @@ final class SAB {
         return $text;
     }
 
+    /** [amz_titel asin="…"]: Produktname als reiner Text (Kurzname, sonst Amazon-Titel); folgt automatisch einem Austausch. */
+    public static function sc_titel($a, $inhalt = ''): string {
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'kurz' => ''], $a);
+        $asin = self::getauscht(self::asin($a['asin']));
+        if (strlen($asin) !== 10) { return esc_html((string) $inhalt); }
+        $name = self::produkte()[$asin] ?? '';
+        if ($name === '') {
+            $p = self::produkt($asin, self::land($a['land']));
+            $name = trim((string) ($p['titel'] ?? ''));
+            $n = (int) $a['kurz'];
+            if ($n > 0 && mb_strlen($name) > $n) { $name = rtrim(mb_substr($name, 0, $n), " ,.-–") . '…'; }
+        }
+        return esc_html($name !== '' ? $name : (string) $inhalt);
+    }
+
     public static function sc_link($a, $inhalt = ''): string {
         $a = shortcode_atts(['asin' => '', 'land' => '', 'class' => ''], $a);
         $orig = self::asin($a['asin']);
@@ -1349,6 +1365,41 @@ final class SAB {
         return [strtolower($u[1]), strtoupper($u[2])];
     }
 
+    /**
+     * Tabellen: Lässt sich ein Kurzlink nicht als Produkt auflösen, steht aber in derselben Spalte (z. B. Zeilen darüber) ein Bild-/Textlink
+     * mit /dp/ASIN, wird der Kurzlink auf diese Produktadresse gesetzt. Gibt es in der Spalte mehrere verschiedene ASINs, bleibt er unverändert.
+     */
+    private static function kurzlink_spaltenhilfe(string $c): string {
+        if (stripos($c, '<table') === false || !preg_match('#amzn\.to|amzn\.eu|a\.co/#i', $c)) { return $c; }
+        return preg_replace_callback('#<table\b.*?</table>#is', function ($t) {
+            if (!preg_match_all('#<tr\b.*?</tr>#is', $t[0], $rows)) { return $t[0]; }
+            $spalten = [];   // Spaltennummer => [asin|land => true]
+            $zellen = [];
+            foreach ($rows[0] as $ri => $row) {
+                if (!preg_match_all('#<t[dh]\b.*?</t[dh]>#is', $row, $cs)) { continue; }
+                foreach ($cs[0] as $ci => $cell) {
+                    $zellen[$ri][$ci] = $cell;
+                    if (preg_match_all('#href=(["\'])(.*?)\1#is', $cell, $hs)) {
+                        foreach ($hs[2] as $h) {
+                            if (preg_match('~^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com)/(?:[^?#]*/)?(?:dp|gp/product)/([A-Za-z0-9]{10})~i', html_entity_decode($h), $m)) { $spalten[$ci][strtoupper($m[2]) . '|' . strtolower($m[1])] = true; }
+                        }
+                    }
+                }
+            }
+            $out = $t[0];
+            foreach ($zellen as $ri => $cs) {
+                foreach ($cs as $ci => $cell) {
+                    if (empty($spalten[$ci]) || count($spalten[$ci]) !== 1 || !preg_match('#href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co)/[^"\']*)\1#i', $cell, $k)) { continue; }
+                    if (self::umbau_url($k[2], true)) { continue; }   // lässt sich selbst auflösen: nichts ändern
+                    [$asin, $land] = explode('|', array_key_first($spalten[$ci]));
+                    $neu = str_replace($k[2], 'https://www.amazon.' . $land . '/dp/' . $asin, $cell);
+                    $out = str_replace($cell, $neu, $out);
+                }
+            }
+            return $out;
+        }, $c);
+    }
+
     /** Wandelt feste Amazon-Links eines Textes um. @return array{0:string,1:int,2:int} [neuer Text, umgewandelt, übersprungen] */
     public static function umbau_text(string $c, string $nur = ''): array {
         $fest = [];
@@ -1356,6 +1407,7 @@ final class SAB {
         $c = preg_replace_callback('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', function ($m) use (&$fest) {
             $k = "\0SAB" . count($fest) . "\0"; $fest[$k] = $m[0]; return $k;
         }, $c);
+        $c = self::kurzlink_spaltenhilfe($c);
         $n = 0; $skip = 0;
         $c = preg_replace_callback('#<a\b([^>]*)>(.*?)</a>#is', function ($m) use (&$n, &$skip, $nur) {
             if (!preg_match('#href=(["\'])(.*?)\1#is', $m[1], $h)) { return $m[0]; }

@@ -471,4 +471,16 @@ ok($e && $e[0] === 'B0NEU00001', 'Empfehlung: Produkt ohne Preis wird übersprun
 $GLOBALS['opt']['sab_gruppen'] = '';
 $e = $mE->invoke(null, 'B0ALT00001', $items, []);
 ok($e === null, 'Keine Gruppe, keine Kategorie: keine Empfehlung');
+
+// ---- 0.36.1: Kurzlink in Tabelle + [amz_titel] ----
+$tab = '<table><tr><td><a href="https://www.amazon.es/dp/B0TABLE001"><img src="x.jpg"></a></td><td><a href="https://www.amazon.es/dp/B0TABLE002"><img src="y.jpg"></a></td></tr>'
+     . '<tr><td>Zaun A</td><td>Zaun B</td></tr><tr><td><a href="https://amzn.to/unbekannt1">Kaufen</a></td><td><a href="https://amzn.to/unbekannt2">Kaufen</a></td></tr></table>';
+[$neu, $n, $sk] = SAB::umbau_text($tab);
+ok(strpos($neu, '[amz_link asin="B0TABLE001" land="es"]Kaufen[/amz_link]') !== false && strpos($neu, '[amz_link asin="B0TABLE002" land="es"]Kaufen[/amz_link]') !== false, 'Kurzlink in Tabelle nimmt ASIN aus der Spalte');
+[$neu, $n, $sk] = SAB::umbau_text('<table><tr><td><a href="https://www.amazon.es/dp/B0TABLE001">A</a></td></tr><tr><td><a href="https://www.amazon.es/dp/B0TABLE002">B</a></td></tr><tr><td><a href="https://amzn.to/unbekannt1">Kaufen</a></td></tr></table>');
+ok(strpos($neu, 'amzn.to/unbekannt1') !== false, 'Mehrere ASINs in der Spalte: Kurzlink bleibt');
+$GLOBALS['opt']['sab_produkte'] = "B0ALT00001 | Alter Zaun\nB0NEU00001 | Neuer Zaun";
+$GLOBALS['opt']['sab_tausch'] = "B0ALT00001 => B0NEU00001";
+ok($GLOBALS['sc']['amz_titel'](['asin' => 'B0ALT00001', 'land' => 'es']) === 'Neuer Zaun', 'amz_titel folgt dem Austausch');
+$GLOBALS['opt']['sab_produkte'] = ''; $GLOBALS['opt']['sab_tausch'] = '';
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
