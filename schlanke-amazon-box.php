@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.38.0
+ * Plugin Name: 1a Amazon Box 0.38.1
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.38.0
+ * Version: 0.38.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.38.0';
+    const VERSION = '0.38.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -913,11 +913,14 @@ final class SAB {
     }
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
-    const KARTE_CSS = '.sab-karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr}}';
+    const KARTE_CSS = '.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
-        return '<div class="sab-karten">' . do_shortcode((string) $inhalt) . '</div>';
+        // wpautop macht aus den Zeilenumbrüchen zwischen den Karten <br> und <p>: das würde im Raster zusätzliche Spalten erzeugen
+        $inhalt = preg_replace('#</?p\b[^>]*>|<br\s*/?>#i', '', (string) $inhalt);
+        $n = max(1, min(4, substr_count($inhalt, '[amz_karte')));
+        return '<div class="sab-karten" style="grid-template-columns:repeat(' . $n . ',minmax(0,1fr))">' . do_shortcode(trim($inhalt)) . '</div>';
     }
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
@@ -1496,7 +1499,7 @@ final class SAB {
                 $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($text !== '' ? ' text="' . str_replace(['"', '[', ']'], '', $text) . '"' : '') . ($attr !== '' ? ' ebay="1"' . $attr : '') . ']';
             }
             self::$karten_n += count($karten);
-            return "[amz_karten]\n" . implode("\n", $karten) . "\n[/amz_karten]";
+            return '[amz_karten]' . implode('', $karten) . '[/amz_karten]';
         }, $c);
     }
 

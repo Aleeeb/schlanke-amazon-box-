@@ -535,4 +535,6 @@ $GLOBALS['opt']['sab_karten_umbau'] = '1';
 $GLOBALS['kurz']['https://amzn.to/zeigtandres'] = 'https://www.amazon.es/dp/B0OTHER001';
 [$neu, ] = SAB::umbau_text(str_replace('https://amzn.to/unbekannt1', 'https://amzn.to/zeigtandres', $tab));
 ok(strpos($neu, '[amz_karten]') === false, 'Bild und Kurzlink zu verschiedenen Produkten: Tabelle bleibt');
+$h = SAB::sc_karten([], "<p>[amz_karte asin=\"B0TABLE001\" land=\"es\"]<br />\n[amz_karte asin=\"B0TABLE002\" land=\"es\"]</p>");
+ok(strpos($h, 'repeat(2,minmax(0,1fr))') !== false && strpos($h, '<br') === false && substr_count($h, 'class="sab-karte"') === 2, 'Karten: zwei Spalten, Zeilenumbrüche aus wpautop entfernt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
