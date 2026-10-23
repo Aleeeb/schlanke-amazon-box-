@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.36.1
+ * Plugin Name: 1a Amazon Box 0.37.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.36.1
+ * Version: 0.37.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.36.1';
+    const VERSION = '0.37.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -69,6 +69,7 @@ final class SAB {
         add_shortcode('amz_bild',    [__CLASS__, 'sc_bild']);
         add_shortcode('amz_link',    [__CLASS__, 'sc_link']);
         add_shortcode('amz_titel',   [__CLASS__, 'sc_titel']);
+        add_shortcode('amz_ebay',    [__CLASS__, 'sc_ebay']);
         add_shortcode('amz_hinweis', [__CLASS__, 'sc_hinweis']);
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
@@ -908,6 +909,23 @@ final class SAB {
         return esc_html($name !== '' ? $name : (string) $inhalt);
     }
 
+    /** [amz_ebay asin="…" host="www.ebay.es" campid="…" suche="…"]Text[/amz_ebay]: eBay-Suchlink; nach einem Austausch sucht er mit dem Namen des neuen Produkts. */
+    public static function sc_ebay($a, $inhalt = ''): string {
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => ''], $a);
+        $orig = self::asin($a['asin']); $asin = self::getauscht($orig);
+        $suche = trim((string) $a['suche']);
+        if ($asin !== $orig || $suche === '') {
+            $suche = trim((string) (self::produkte()[$asin] ?? ''));
+            if ($suche === '') { $p = self::produkt($asin, self::land($a['land'])); $suche = trim(mb_substr((string) ($p['titel'] ?? ''), 0, 60)); }
+        }
+        if ($suche === '') { return esc_html((string) $inhalt); }
+        $host = preg_match('/^(?:www\.)?ebay\.[a-z.]+$/i', $a['host']) ? $a['host'] : 'www.ebay.es';
+        $q = ['_nkw' => $suche, 'mkcid' => 1, 'mkevt' => 1, 'toolid' => 10001];
+        if ($a['campid'] !== '') { $q['campid'] = preg_replace('/\D/', '', $a['campid']); }
+        if ($a['customid'] !== '') { $q['customid'] = preg_replace('/[^A-Za-z0-9_-]/', '', $a['customid']); }
+        return '<a href="' . esc_url('https://' . $host . '/sch/i.html?' . http_build_query($q)) . '" target="_blank" rel="nofollow sponsored noopener">' . esc_html((string) ($inhalt !== '' ? $inhalt : 'eBay')) . '</a>';
+    }
+
     public static function sc_link($a, $inhalt = ''): string {
         $a = shortcode_atts(['asin' => '', 'land' => '', 'class' => ''], $a);
         $orig = self::asin($a['asin']);
@@ -1400,14 +1418,72 @@ final class SAB {
         }, $c);
     }
 
+    /** Titel, die der Umbau in [amz_titel] verwandelt hat: ASIN => ursprünglicher Text (wird als Kurzname gespeichert). */
+    public static array $neue_namen = [];
+
+    /**
+     * Tabellen mit Produktspalten (Bild-Link mit ASIN, darunter Titel als reiner Text, dann Kurzlink, dann eBay-Suchlink):
+     * Der Titeltext wird zu [amz_titel], der eBay-Link zu [amz_ebay]; so wechseln beide mit, wenn die ASIN getauscht wird.
+     */
+    private static function tabellen_umbau(string $c, string $nur = ''): string {
+        if (stripos($c, '<table') === false) { return $c; }
+        return preg_replace_callback('#<table\b.*?</table>#is', function ($t) use ($nur) {
+            if (!preg_match_all('#<tr\b.*?</tr>#is', $t[0], $rows)) { return $t[0]; }
+            $spalte = []; $bildzeile = [];
+            foreach ($rows[0] as $ri => $row) {
+                if (!preg_match_all('#<t[dh]\b.*?</t[dh]>#is', $row, $cs)) { continue; }
+                foreach ($cs[0] as $ci => $cell) {
+                    if (!preg_match_all('#href=(["\'])(.*?)\1#is', $cell, $hs)) { continue; }
+                    foreach ($hs[2] as $h) {
+                        $u = self::umbau_url($h);
+                        if ($u) { $spalte[$ci][$u[1] . '|' . $u[0]] = [$u[1], $u[0]]; $bildzeile[$ci] = min($bildzeile[$ci] ?? 99, $ri); }
+                    }
+                }
+            }
+            $ri = -1;
+            return preg_replace_callback('#<tr\b.*?</tr>#is', function ($rm) use (&$ri, $spalte, $bildzeile, $nur) {
+                $ri++; $ci = -1;
+                return preg_replace_callback('#<(t[dh])\b([^>]*)>(.*?)</\1>#is', function ($cm) use (&$ci, $ri, $spalte, $bildzeile, $nur) {
+                    $ci++;
+                    if (empty($spalte[$ci]) || count($spalte[$ci]) !== 1) { return $cm[0]; }
+                    [$asin, $land] = array_values($spalte[$ci])[0];
+                    if ($nur !== '' && $asin !== $nur) { return $cm[0]; }
+                    $in = $cm[3];
+                    if (strpos($in, '[') !== false || !self::tag($land)) { return $cm[0]; }
+                    // eBay-Suchlink
+                    if (preg_match('#^(.*?)<a\b[^>]*href=(["\'])(https?://(?:www\.)?(ebay\.[a-z.]+)/sch/[^"\']*)\2[^>]*>(.*?)</a>(.*)$#is', $in, $e)) {
+                        $url = html_entity_decode($e[3]); parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
+                        $suche = trim((string) ($q['_nkw'] ?? ''));
+                        $attr = ' asin="' . $asin . '" land="' . $land . '" host="www.' . strtolower($e[4]) . '"'
+                              . (!empty($q['campid']) ? ' campid="' . preg_replace('/\D/', '', (string) $q['campid']) . '"' : '')
+                              . (!empty($q['customid']) ? ' customid="' . preg_replace('/[^A-Za-z0-9_-]/', '', (string) $q['customid']) . '"' : '')
+                              . ($suche !== '' ? ' suche="' . str_replace(['"', '[', ']'], '', $suche) . '"' : '');
+                        $txt = trim(strip_tags($e[5])); if ($txt === '') { return $cm[0]; }
+                        return '<' . $cm[1] . $cm[2] . '>' . $e[1] . '[amz_ebay' . $attr . ']' . str_replace(['[', ']'], '', $txt) . '[/amz_ebay]' . $e[6] . '</' . $cm[1] . '>';
+                    }
+                    // Titeltext: reiner Text unter dem Bild-Link, ohne Links und Bilder
+                    if ($cm[1] === 'td' && $ri > ($bildzeile[$ci] ?? 99) && stripos($in, '<a') === false && stripos($in, '<img') === false) {
+                        $txt = trim(html_entity_decode(strip_tags($in)));
+                        if ($txt !== '' && mb_strlen($txt) <= 140) {
+                            self::$neue_namen[$asin] = self::$neue_namen[$asin] ?? $txt;
+                            return '<' . $cm[1] . $cm[2] . '>[amz_titel asin="' . $asin . '" land="' . $land . '"]</' . $cm[1] . '>';
+                        }
+                    }
+                    return $cm[0];
+                }, $rm[0]);
+            }, $t[0]);
+        }, $c);
+    }
+
     /** Wandelt feste Amazon-Links eines Textes um. @return array{0:string,1:int,2:int} [neuer Text, umgewandelt, übersprungen] */
     public static function umbau_text(string $c, string $nur = ''): array {
         $fest = [];
         // bereits vorhandene Plugin-Platzhalter schützen
-        $c = preg_replace_callback('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', function ($m) use (&$fest) {
+        $c = preg_replace_callback('#\[amz_(bild|produkt|link|ebay)\b[^\]]*\].*?\[/amz_\1\]#is', function ($m) use (&$fest) {
             $k = "\0SAB" . count($fest) . "\0"; $fest[$k] = $m[0]; return $k;
         }, $c);
         $c = self::kurzlink_spaltenhilfe($c);
+        $c = self::tabellen_umbau($c, $nur);
         $n = 0; $skip = 0;
         $c = preg_replace_callback('#<a\b([^>]*)>(.*?)</a>#is', function ($m) use (&$n, &$skip, $nur) {
             if (!preg_match('#href=(["\'])(.*?)\1#is', $m[1], $h)) { return $m[0]; }
@@ -1481,14 +1557,29 @@ final class SAB {
              . '. ' . ($rest ? 'Noch ' . $rest . ' Artikel offen: bitte nochmal klicken.' : 'Fertig.');
     }
 
+    /** Bisherige Titeltexte als Kurznamen in der Produktliste merken (nur wo noch keiner steht); so bleibt der Wortlaut des Artikels erhalten. */
+    private static function namen_merken(array $neu): void {
+        if (!$neu) { return; }
+        $vorhanden = self::produkte(); $zeilen = trim((string) get_option('sab_produkte', ''));
+        foreach ($neu as $asin => $name) {
+            if (($vorhanden[$asin] ?? '') !== '') { continue; }
+            $name = trim(str_replace(['|', "\n", "\r"], ' ', $name));
+            $zeilen = preg_replace('/^' . preg_quote($asin, '/') . '\s*(\|.*)?$/m', '', $zeilen);
+            $zeilen = trim($zeilen . "\n" . $asin . ' | ' . $name);
+        }
+        update_option('sab_produkte', trim(preg_replace('/\n{2,}/', "\n", $zeilen)));
+    }
+
     /** Baut einen einzelnen Artikel um (Sicherung vorher). @return array{0:int,1:int,2:int} [umgebaute Links, übersprungen, geändert 0/1] */
     private static function umbau_artikel(int $id, string $nur = ''): array {
         $post = get_post($id);
         if (!$post) { return [0, 0, 0]; }
         self::$kurz_offen = 0;
+        self::$neue_namen = [];
         [$neu, $n, $sk] = self::umbau_text((string) $post->post_content, $nur);
         $gea = 0;
         if ($n > 0 && $neu !== $post->post_content) {
+            self::namen_merken(self::$neue_namen);
             if (get_post_meta($id, '_sab_umbau_backup', true) === '') { update_post_meta($id, '_sab_umbau_backup', wp_slash($post->post_content)); }
             wp_update_post(['ID' => $id, 'post_content' => wp_slash($neu)]);
             $gea = 1;

@@ -483,4 +483,23 @@ $GLOBALS['opt']['sab_produkte'] = "B0ALT00001 | Alter Zaun\nB0NEU00001 | Neuer Z
 $GLOBALS['opt']['sab_tausch'] = "B0ALT00001 => B0NEU00001";
 ok($GLOBALS['sc']['amz_titel'](['asin' => 'B0ALT00001', 'land' => 'es']) === 'Neuer Zaun', 'amz_titel folgt dem Austausch');
 $GLOBALS['opt']['sab_produkte'] = ''; $GLOBALS['opt']['sab_tausch'] = '';
+
+// ---- 0.37.0: Produkttabelle (Bild, Titel, Kurzlink, eBay) ----
+$tab = '<table><tbody><tr><td><a href="https://www.amazon.es/dp/B0TABLE001?tag=x-21"><img src="a.jpg"></a></td></tr>'
+     . '<tr><td>Campana de jardín | Set de 5</td></tr><tr><td><a href="https://amzn.to/unbekannt1">Ver en Amazon</a></td></tr>'
+     . '<tr><td><a href="https://www.ebay.es/sch/i.html?_nkw=cubiertas+campana&amp;campid=5338794835&amp;mkcid=1">o en eBay</a></td></tr></tbody></table>';
+SAB::$neue_namen = [];
+[$neu, $n, $sk] = SAB::umbau_text($tab);
+ok(strpos($neu, '[amz_titel asin="B0TABLE001" land="es"]') !== false && strpos($neu, 'Campana de jard') === false, 'Tabelle: Titeltext wird [amz_titel]');
+ok(strpos($neu, '[amz_ebay asin="B0TABLE001" land="es" host="www.ebay.es" campid="5338794835" suche="cubiertas campana"]o en eBay[/amz_ebay]') !== false, 'Tabelle: eBay-Link wird [amz_ebay]');
+ok((SAB::$neue_namen['B0TABLE001'] ?? '') === 'Campana de jardín | Set de 5', 'Titeltext als Kurzname vorgemerkt');
+[$neu2] = SAB::umbau_text($neu);
+ok($neu2 === $neu, 'Umbau ist wiederholbar (ändert nichts mehr)');
+$GLOBALS['opt']['sab_tausch'] = '';
+$o = $GLOBALS['sc']['amz_ebay'](['asin' => 'B0ALT00001', 'land' => 'es', 'suche' => 'alte suche', 'campid' => '5338794835'], 'o en eBay');
+ok(strpos($o, '_nkw=alte+suche') !== false && strpos($o, 'campid=5338794835') !== false, 'amz_ebay: Suche aus Attribut');
+$GLOBALS['opt']['sab_produkte'] = "B0NEU00001 | Neuer Zaun"; $GLOBALS['opt']['sab_tausch'] = "B0ALT00001 => B0NEU00001";
+$o = $GLOBALS['sc']['amz_ebay'](['asin' => 'B0ALT00001', 'land' => 'es', 'suche' => 'alte suche'], 'o en eBay');
+ok(strpos($o, '_nkw=Neuer+Zaun') !== false, 'amz_ebay: nach Austausch sucht er mit dem neuen Namen');
+$GLOBALS['opt']['sab_produkte'] = ''; $GLOBALS['opt']['sab_tausch'] = '';
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
