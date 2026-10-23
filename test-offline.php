@@ -502,4 +502,16 @@ $GLOBALS['opt']['sab_produkte'] = "B0NEU00001 | Neuer Zaun"; $GLOBALS['opt']['sa
 $o = $GLOBALS['sc']['amz_ebay'](['asin' => 'B0ALT00001', 'land' => 'es', 'suche' => 'alte suche'], 'o en eBay');
 ok(strpos($o, '_nkw=Neuer+Zaun') !== false, 'amz_ebay: nach Austausch sucht er mit dem neuen Namen');
 $GLOBALS['opt']['sab_produkte'] = ''; $GLOBALS['opt']['sab_tausch'] = '';
+
+// ---- 0.37.1: AAWP-Tabelle (Bild als [aawp], Titel in <p>/<span>) ----
+$tab = '<table><tbody><tr valign="top"><td>[aawp fields="B0TABLE001" value="thumb" image_size="large"]</td><td>[aawp fields="B0TABLE002" value="thumb" image_size="large"]</td></tr>'
+     . '<tr><td><p id="title" class="a-size-large">Valla | Metálico</p></td><td><span id="productTitle" class="x">Anillos | 12 unidades</span></td></tr>'
+     . '<tr><td><a href="https://amzn.to/unbekannt1">Ver en Amazon</a></td><td><a href="https://amzn.to/unbekannt2">Ver en Amazon</a></td></tr>'
+     . '<tr><td><a href="https://www.ebay.es/sch/i.html?_from=R40&amp;_nkw=valla+caracol&amp;campid=5338794835&amp;toolid=11800">o en eBay</a></td><td><a href="https://www.ebay.es/sch/i.html?_nkw=anillos&amp;campid=5338794835">o en eBay</a></td></tr></tbody></table>';
+SAB::$neue_namen = [];
+[$neu, $n, $sk] = SAB::umbau_text($tab);
+ok(strpos($neu, '[amz_titel asin="B0TABLE001"') !== false && strpos($neu, '[amz_titel asin="B0TABLE002"') !== false && strpos($neu, 'productTitle') === false, 'AAWP-Tabelle: beide Titel werden [amz_titel]');
+ok(strpos($neu, '[amz_ebay asin="B0TABLE002"') !== false && strpos($neu, 'suche="valla caracol"') !== false, 'AAWP-Tabelle: eBay-Links werden [amz_ebay]');
+ok(strpos($neu, '[amz_link asin="B0TABLE001"') !== false && strpos($neu, '[amz_link asin="B0TABLE002"') !== false, 'AAWP-Tabelle: Kurzlinks über die Spalte zugeordnet');
+ok(strpos($neu, '[aawp fields="B0TABLE001"') !== false, 'AAWP-Bild bleibt unverändert');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.37.0
+ * Plugin Name: 1a Amazon Box 0.37.1
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.37.0
+ * Version: 0.37.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.37.0';
+    const VERSION = '0.37.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -1397,11 +1397,7 @@ final class SAB {
                 if (!preg_match_all('#<t[dh]\b.*?</t[dh]>#is', $row, $cs)) { continue; }
                 foreach ($cs[0] as $ci => $cell) {
                     $zellen[$ri][$ci] = $cell;
-                    if (preg_match_all('#href=(["\'])(.*?)\1#is', $cell, $hs)) {
-                        foreach ($hs[2] as $h) {
-                            if (preg_match('~^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com)/(?:[^?#]*/)?(?:dp|gp/product)/([A-Za-z0-9]{10})~i', html_entity_decode($h), $m)) { $spalten[$ci][strtoupper($m[2]) . '|' . strtolower($m[1])] = true; }
-                        }
-                    }
+                    foreach (self::zelle_asins($cell) as $k => $u) { $spalten[$ci][$k] = true; }
                 }
             }
             $out = $t[0];
@@ -1416,6 +1412,18 @@ final class SAB {
             }
             return $out;
         }, $c);
+    }
+
+    /** Alle Produkte, die in einer Tabellenzelle stehen: Amazon-Links mit /dp/ASIN, [aawp fields="ASIN"], [amz_bild|produkt|link asin="ASIN"]. @return array<string,array{0:string,1:string}> */
+    private static function zelle_asins(string $cell): array {
+        $out = [];
+        if (preg_match_all('#href=(["\'])(.*?)\1#is', $cell, $hs)) {
+            foreach ($hs[2] as $h) { $u = self::umbau_url($h); if ($u) { $out[$u[1] . '|' . $u[0]] = [$u[1], $u[0]]; } }
+        }
+        if (preg_match_all('#\[(?:aawp|amz_(?:bild|produkt|link))\b[^\]]*?(?:fields|asin|box)=(?:"|&\#34;|&quot;)?([A-Za-z0-9]{10})\b[^\]]*\]#i', $cell, $ms)) {
+            foreach ($ms[1] as $a) { $a = strtoupper($a); $l = self::land(''); $out[$a . '|' . $l] = [$a, $l]; }
+        }
+        return $out;
     }
 
     /** Titel, die der Umbau in [amz_titel] verwandelt hat: ASIN => ursprünglicher Text (wird als Kurzname gespeichert). */
@@ -1433,11 +1441,7 @@ final class SAB {
             foreach ($rows[0] as $ri => $row) {
                 if (!preg_match_all('#<t[dh]\b.*?</t[dh]>#is', $row, $cs)) { continue; }
                 foreach ($cs[0] as $ci => $cell) {
-                    if (!preg_match_all('#href=(["\'])(.*?)\1#is', $cell, $hs)) { continue; }
-                    foreach ($hs[2] as $h) {
-                        $u = self::umbau_url($h);
-                        if ($u) { $spalte[$ci][$u[1] . '|' . $u[0]] = [$u[1], $u[0]]; $bildzeile[$ci] = min($bildzeile[$ci] ?? 99, $ri); }
-                    }
+                    foreach (self::zelle_asins($cell) as $k => $u) { $spalte[$ci][$k] = $u; $bildzeile[$ci] = min($bildzeile[$ci] ?? 99, $ri); }
                 }
             }
             $ri = -1;
