@@ -45,6 +45,11 @@ function do_shortcode_lite($t) {
     return $t;
 }
 
+function do_shortcode($t) {
+    return preg_replace_callback('#\[(amz_karte|amz_titel)\b([^\]]*)\]#', function ($m) {
+        preg_match_all('#(\w+)="([^"]*)"#', $m[2], $a); return call_user_func($GLOBALS['sc'][$m[1]], array_combine($a[1], $a[2]), '');
+    }, $t);
+}
 class FakeResp { public $url; function __construct($u) { $this->url = $u; } }
 class FakeHttp { public $o; function __construct($u) { $this->o = new FakeResp($u); } function get_response_object() { return $this->o; } }
 function wp_remote_head($u, $a = []) { $z = $GLOBALS['kurz'][$u] ?? ''; return ['http_response' => new FakeHttp($z)]; }
@@ -473,6 +478,7 @@ $e = $mE->invoke(null, 'B0ALT00001', $items, []);
 ok($e === null, 'Keine Gruppe, keine Kategorie: keine Empfehlung');
 
 // ---- 0.36.1: Kurzlink in Tabelle + [amz_titel] ----
+$GLOBALS['opt']['sab_karten_umbau'] = '0';
 $tab = '<table><tr><td><a href="https://www.amazon.es/dp/B0TABLE001"><img src="x.jpg"></a></td><td><a href="https://www.amazon.es/dp/B0TABLE002"><img src="y.jpg"></a></td></tr>'
      . '<tr><td>Zaun A</td><td>Zaun B</td></tr><tr><td><a href="https://amzn.to/unbekannt1">Kaufen</a></td><td><a href="https://amzn.to/unbekannt2">Kaufen</a></td></tr></table>';
 [$neu, $n, $sk] = SAB::umbau_text($tab);
@@ -488,7 +494,7 @@ $GLOBALS['opt']['sab_produkte'] = ''; $GLOBALS['opt']['sab_tausch'] = '';
 $tab = '<table><tbody><tr><td><a href="https://www.amazon.es/dp/B0TABLE001?tag=x-21"><img src="a.jpg"></a></td></tr>'
      . '<tr><td>Campana de jardín | Set de 5</td></tr><tr><td><a href="https://amzn.to/unbekannt1">Ver en Amazon</a></td></tr>'
      . '<tr><td><a href="https://www.ebay.es/sch/i.html?_nkw=cubiertas+campana&amp;campid=5338794835&amp;mkcid=1">o en eBay</a></td></tr></tbody></table>';
-SAB::$neue_namen = [];
+SAB::$neue_namen = []; $GLOBALS['opt']['sab_karten_umbau'] = '0';
 [$neu, $n, $sk] = SAB::umbau_text($tab);
 ok(strpos($neu, '[amz_titel asin="B0TABLE001" land="es"]') !== false && strpos($neu, 'Campana de jard') === false, 'Tabelle: Titeltext wird [amz_titel]');
 ok(strpos($neu, '[amz_ebay asin="B0TABLE001" land="es" host="www.ebay.es" campid="5338794835" suche="cubiertas campana"]o en eBay[/amz_ebay]') !== false, 'Tabelle: eBay-Link wird [amz_ebay]');
@@ -508,10 +514,25 @@ $tab = '<table><tbody><tr valign="top"><td>[aawp fields="B0TABLE001" value="thum
      . '<tr><td><p id="title" class="a-size-large">Valla | Metálico</p></td><td><span id="productTitle" class="x">Anillos | 12 unidades</span></td></tr>'
      . '<tr><td><a href="https://amzn.to/unbekannt1">Ver en Amazon</a></td><td><a href="https://amzn.to/unbekannt2">Ver en Amazon</a></td></tr>'
      . '<tr><td><a href="https://www.ebay.es/sch/i.html?_from=R40&amp;_nkw=valla+caracol&amp;campid=5338794835&amp;toolid=11800">o en eBay</a></td><td><a href="https://www.ebay.es/sch/i.html?_nkw=anillos&amp;campid=5338794835">o en eBay</a></td></tr></tbody></table>';
-SAB::$neue_namen = [];
+SAB::$neue_namen = []; $GLOBALS['opt']['sab_karten_umbau'] = '0';
 [$neu, $n, $sk] = SAB::umbau_text($tab);
 ok(strpos($neu, '[amz_titel asin="B0TABLE001"') !== false && strpos($neu, '[amz_titel asin="B0TABLE002"') !== false && strpos($neu, 'productTitle') === false, 'AAWP-Tabelle: beide Titel werden [amz_titel]');
 ok(strpos($neu, '[amz_ebay asin="B0TABLE002"') !== false && strpos($neu, 'suche="valla caracol"') !== false, 'AAWP-Tabelle: eBay-Links werden [amz_ebay]');
 ok(strpos($neu, '[amz_link asin="B0TABLE001"') !== false && strpos($neu, '[amz_link asin="B0TABLE002"') !== false, 'AAWP-Tabelle: Kurzlinks über die Spalte zugeordnet');
 ok(strpos($neu, '[aawp fields="B0TABLE001"') !== false, 'AAWP-Bild bleibt unverändert');
+
+// ---- 0.38.0: Karten ----
+$GLOBALS['opt']['sab_karten_umbau'] = '1';
+$GLOBALS['http']['B0TABLE001'] = item('B0TABLE001', [$money('5 €')]); $GLOBALS['http']['B0TABLE002'] = item('B0TABLE002', [$money('6 €')]);
+[$neu, $n, $sk] = SAB::umbau_text($tab);
+ok(strpos($neu, '[amz_karten]') === 0 && substr_count($neu, '[amz_karte ') === 2 && strpos($neu, '<table') === false, 'Tabelle wird zu [amz_karten] mit zwei Karten');
+ok(strpos($neu, 'asin="B0TABLE002"') !== false && strpos($neu, 'suche="anillos"') !== false && strpos($neu, 'text="Ver en Amazon"') !== false, 'Karte übernimmt Kurzlink-Text und eBay-Suche');
+ok($n === 2, 'Umbau zählt die Karten');
+$h = SAB::sc_karten([], '[amz_karte asin="B0TABLE001" land="es" text="Ver en Amazon" ebay="1" suche="x" campid="5338794835"]');
+ok(strpos($h, 'class="sab-karten"') !== false && strpos($h, 'class="sab-karte"') !== false && strpos($h, 'sab-karte-btn') !== false && strpos($h, 'sab-karte-ebay') !== false && strpos($h, '_nkw=x') !== false, 'Karte rendert Button und eBay-Link');
+$GLOBALS['opt']['sab_karten_umbau'] = '1';
+[$neu, ] = SAB::umbau_text(str_replace('https://amzn.to/unbekannt1', 'https://amzn.to/zeigtandres', $tab));
+$GLOBALS['kurz']['https://amzn.to/zeigtandres'] = 'https://www.amazon.es/dp/B0OTHER001';
+[$neu, ] = SAB::umbau_text(str_replace('https://amzn.to/unbekannt1', 'https://amzn.to/zeigtandres', $tab));
+ok(strpos($neu, '[amz_karten]') === false, 'Bild und Kurzlink zu verschiedenen Produkten: Tabelle bleibt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

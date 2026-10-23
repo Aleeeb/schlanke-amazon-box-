@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.37.1
+ * Plugin Name: 1a Amazon Box 0.38.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.37.1
+ * Version: 0.38.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.37.1';
+    const VERSION = '0.38.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -70,6 +70,8 @@ final class SAB {
         add_shortcode('amz_link',    [__CLASS__, 'sc_link']);
         add_shortcode('amz_titel',   [__CLASS__, 'sc_titel']);
         add_shortcode('amz_ebay',    [__CLASS__, 'sc_ebay']);
+        add_shortcode('amz_karten',  [__CLASS__, 'sc_karten']);
+        add_shortcode('amz_karte',   [__CLASS__, 'sc_karte']);
         add_shortcode('amz_hinweis', [__CLASS__, 'sc_hinweis']);
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
@@ -814,6 +816,7 @@ final class SAB {
     public static function fuss(): void {
         if (!self::$genutzt) { return; }
         if (get_option('sab_karten_css') !== '0') { echo '<style id="sab-karten">' . self::KARTEN_CSS . '</style>'; }
+        if (self::$karten && get_option('sab_karten_css') !== '0') { echo '<style id="sab-karte">' . self::KARTE_CSS . '</style>'; }
         if (get_option('sab_hinweis_auto') === '1' && !self::$hinweis_gezeigt) {
             echo '<p class="sab-hinweis"><small>' . esc_html(self::hinweis_text(self::land(''))) . '</small></p>';
         }
@@ -907,6 +910,29 @@ final class SAB {
             if ($n > 0 && mb_strlen($name) > $n) { $name = rtrim(mb_substr($name, 0, $n), " ,.-–") . '…'; }
         }
         return esc_html($name !== '' ? $name : (string) $inhalt);
+    }
+
+    /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
+    const KARTE_CSS = '.sab-karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr}}';
+
+    public static function sc_karten($a, $inhalt = ''): string {
+        self::$genutzt = true; self::$karten = true;
+        return '<div class="sab-karten">' . do_shortcode((string) $inhalt) . '</div>';
+    }
+
+    /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
+    public static function sc_karte($a, $inhalt = ''): string {
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => ''], $a);
+        $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
+        if (strlen($asin) !== 10) { return ''; }
+        self::$genutzt = true; self::$karten = true;
+        $p = self::produkt($asin, $land);
+        $titel = self::sc_titel(['asin' => $asin, 'land' => $land, 'kurz' => 70], '');
+        $bild = self::brauchbar($p) ? self::sc_bild(['asin' => $asin, 'land' => $land], '') : '';
+        $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn'], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
+        $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
+        if ($ebay !== '') { $ebay = str_replace('<a ', '<a class="sab-karte-ebay" ', $ebay); }
+        return '<div class="sab-karte">' . $bild . ($titel !== '' ? '<div class="sab-karte-titel">' . $titel . '</div>' : '') . $btn . $ebay . '</div>';
     }
 
     /** [amz_ebay asin="…" host="www.ebay.es" campid="…" suche="…"]Text[/amz_ebay]: eBay-Suchlink; nach einem Austausch sucht er mit dem Namen des neuen Produkts. */
@@ -1426,8 +1452,58 @@ final class SAB {
         return $out;
     }
 
+    /**
+     * Produkttabelle (Spalten mit je einer ASIN: Bild, Titel, Kurzlink, eBay) => [amz_karten] mit je einer [amz_karte] pro Spalte.
+     * Unverändert bleibt die Tabelle, wenn eine Spalte nicht eindeutig ist oder ein auflösbarer Kurzlink auf ein anderes Produkt zeigt als das Bild.
+     */
+    private static function tabellen_zu_karten(string $c, string $nur = ''): string {
+        if (stripos($c, '<table') === false || get_option('sab_karten_umbau') === '0') { return $c; }
+        return preg_replace_callback('#<table\b.*?</table>#is', function ($t) use ($nur) {
+            if (!preg_match_all('#<tr\b.*?</tr>#is', $t[0], $rows)) { return $t[0]; }
+            $spalten = []; $zellen = [];
+            foreach ($rows[0] as $ri => $row) {
+                if (!preg_match_all('#<t[dh]\b.*?</t[dh]>#is', $row, $cs)) { return $t[0]; }
+                foreach ($cs[0] as $ci => $cell) { $zellen[$ri][$ci] = $cell; foreach (self::zelle_asins($cell) as $k => $u) { $spalten[$ci][$k] = $u; } }
+            }
+            $anz = max(array_map('count', $zellen) ?: [0]);
+            if ($anz < 1 || count($spalten) !== $anz) { return $t[0]; }
+            foreach ($spalten as $sp) { if (count($sp) !== 1) { return $t[0]; } }
+            $karten = [];
+            foreach ($spalten as $ci => $sp) {
+                [$asin, $land] = array_values($sp)[0];
+                if ($nur !== '' && $asin !== $nur) { return $t[0]; }
+                if (!self::tag($land)) { return $t[0]; }
+                $titel = ''; $attr = ''; $text = '';
+                foreach ($zellen as $ri => $zs) {
+                    $cell = $zs[$ci] ?? ''; $in = preg_replace('#^<t[dh]\b[^>]*>|</t[dh]>$#i', '', $cell);
+                    if (strpos($in, '[') !== false && stripos($in, '[amz_') !== false) { return $t[0]; }
+                    if (preg_match('#href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co)/[^"\']*)\1#i', $in, $k)) {
+                        $u = self::umbau_url($k[2], true);
+                        if ($u && $u[1] !== $asin) { return $t[0]; }   // Bild und Kurzlink gehören zu verschiedenen Produkten: erst von Hand klären
+                        $text = trim(strip_tags($in));
+                    } elseif (preg_match('#href=(["\'])(https?://(?:www\.)?(ebay\.[a-z.]+)/sch/[^"\']*)\1[^>]*>(.*?)</a>#is', $in, $e)) {
+                        parse_str((string) parse_url(html_entity_decode($e[2]), PHP_URL_QUERY), $q);
+                        $attr .= ' host="www.' . strtolower($e[3]) . '"' . (!empty($q['campid']) ? ' campid="' . preg_replace('/\D/', '', (string) $q['campid']) . '"' : '')
+                              . (!empty($q['customid']) ? ' customid="' . preg_replace('/[^A-Za-z0-9_-]/', '', (string) $q['customid']) . '"' : '')
+                              . (!empty($q['_nkw']) ? ' suche="' . str_replace(['"', '[', ']'], '', trim((string) $q['_nkw'])) . '"' : '')
+                              . (trim(strip_tags($e[4])) !== '' ? ' ebay_text="' . str_replace(['"', '[', ']'], '', trim(strip_tags($e[4]))) . '"' : '');
+                    } elseif ($titel === '' && stripos($in, '<a') === false && stripos($in, '<img') === false && stripos($in, '[aawp') === false) {
+                        $x = trim(html_entity_decode(strip_tags($in)));
+                        if ($x !== '' && mb_strlen($x) <= 140) { $titel = $x; }
+                    }
+                }
+                if ($titel !== '') { self::$neue_namen[$asin] = self::$neue_namen[$asin] ?? $titel; }
+                $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($text !== '' ? ' text="' . str_replace(['"', '[', ']'], '', $text) . '"' : '') . ($attr !== '' ? ' ebay="1"' . $attr : '') . ']';
+            }
+            self::$karten_n += count($karten);
+            return "[amz_karten]\n" . implode("\n", $karten) . "\n[/amz_karten]";
+        }, $c);
+    }
+
     /** Titel, die der Umbau in [amz_titel] verwandelt hat: ASIN => ursprünglicher Text (wird als Kurzname gespeichert). */
     public static array $neue_namen = [];
+    private static bool $karten = false;
+    private static int $karten_n = 0;
 
     /**
      * Tabellen mit Produktspalten (Bild-Link mit ASIN, darunter Titel als reiner Text, dann Kurzlink, dann eBay-Suchlink):
@@ -1486,6 +1562,8 @@ final class SAB {
         $c = preg_replace_callback('#\[amz_(bild|produkt|link|ebay)\b[^\]]*\].*?\[/amz_\1\]#is', function ($m) use (&$fest) {
             $k = "\0SAB" . count($fest) . "\0"; $fest[$k] = $m[0]; return $k;
         }, $c);
+        self::$karten_n = 0;
+        $c = self::tabellen_zu_karten($c, $nur);
         $c = self::kurzlink_spaltenhilfe($c);
         $c = self::tabellen_umbau($c, $nur);
         $n = 0; $skip = 0;
@@ -1505,7 +1583,7 @@ final class SAB {
             $n++;
             return '[amz_link' . $attr . ']' . str_replace(['[', ']'], '', $text) . '[/amz_link]';
         }, $c);
-        return [strtr($c, $fest), $n, $skip];
+        return [strtr($c, $fest), $n + self::$karten_n, $skip];
     }
 
     /** Analyse (nur Lesen): je ASIN Anzahl Stellen und Artikel, und was bereits im Plugin läuft. */
