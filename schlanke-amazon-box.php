@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.38.1
+ * Plugin Name: 1a Amazon Box 0.38.2
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.38.1
+ * Version: 0.38.2
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.38.1';
+    const VERSION = '0.38.2';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
@@ -1567,6 +1567,18 @@ final class SAB {
         }, $c);
         self::$karten_n = 0;
         $c = self::tabellen_zu_karten($c, $nur);
+        // übrige [aawp fields="ASIN" value="thumb"]-Bilder (Einzelprodukt-Boxen) => [amz_bild]
+        $c = preg_replace_callback('#\[aawp\b([^\]]*)\]#i', function ($m) use ($nur) {
+            $x = html_entity_decode($m[1]);
+            if (!preg_match('#\bfields=["\']?([A-Za-z0-9]{10})["\'\s]#i', $x . ' ', $f) || !preg_match('#\bvalue=["\']?(thumb|image|thumbnail)\b#i', $x)) { return $m[0]; }
+            $asin = strtoupper($f[1]);
+            if ($nur !== '' && $asin !== $nur) { return $m[0]; }
+            $land = self::land('');
+            if (!self::tag($land)) { return $m[0]; }
+            $w = preg_match('#\bimage_width=["\']?(\d{2,4})#i', $x, $bw) ? ' breite="' . (int) $bw[1] . '"' : '';
+            self::$karten_n++;
+            return '[amz_bild asin="' . $asin . '" land="' . $land . '"' . $w . '][/amz_bild]';
+        }, $c);
         $c = self::kurzlink_spaltenhilfe($c);
         $c = self::tabellen_umbau($c, $nur);
         $n = 0; $skip = 0;

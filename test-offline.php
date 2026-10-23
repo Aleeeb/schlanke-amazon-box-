@@ -519,7 +519,7 @@ SAB::$neue_namen = []; $GLOBALS['opt']['sab_karten_umbau'] = '0';
 ok(strpos($neu, '[amz_titel asin="B0TABLE001"') !== false && strpos($neu, '[amz_titel asin="B0TABLE002"') !== false && strpos($neu, 'productTitle') === false, 'AAWP-Tabelle: beide Titel werden [amz_titel]');
 ok(strpos($neu, '[amz_ebay asin="B0TABLE002"') !== false && strpos($neu, 'suche="valla caracol"') !== false, 'AAWP-Tabelle: eBay-Links werden [amz_ebay]');
 ok(strpos($neu, '[amz_link asin="B0TABLE001"') !== false && strpos($neu, '[amz_link asin="B0TABLE002"') !== false, 'AAWP-Tabelle: Kurzlinks über die Spalte zugeordnet');
-ok(strpos($neu, '[aawp fields="B0TABLE001"') !== false, 'AAWP-Bild bleibt unverändert');
+ok(strpos($neu, '[amz_bild asin="B0TABLE001"') !== false, 'AAWP-Bild wird [amz_bild]');
 
 // ---- 0.38.0: Karten ----
 $GLOBALS['opt']['sab_karten_umbau'] = '1';
@@ -537,4 +537,8 @@ $GLOBALS['kurz']['https://amzn.to/zeigtandres'] = 'https://www.amazon.es/dp/B0OT
 ok(strpos($neu, '[amz_karten]') === false, 'Bild und Kurzlink zu verschiedenen Produkten: Tabelle bleibt');
 $h = SAB::sc_karten([], "<p>[amz_karte asin=\"B0TABLE001\" land=\"es\"]<br />\n[amz_karte asin=\"B0TABLE002\" land=\"es\"]</p>");
 ok(strpos($h, 'repeat(2,minmax(0,1fr))') !== false && strpos($h, '<br') === false && substr_count($h, 'class="sab-karte"') === 2, 'Karten: zwei Spalten, Zeilenumbrüche aus wpautop entfernt');
+[$neu, ] = SAB::umbau_text('<strong>Vasos</strong>
+[aawp fields="B0TABLE001" value="thumb" image_size="large" image_width="420" image_height="420"]
+Haga clic en la imagen');
+ok(strpos($neu, '[amz_bild asin="B0TABLE001" land="es" breite="420"][/amz_bild]') !== false && strpos($neu, 'aawp') === false, 'Einzelprodukt: [aawp thumb] wird [amz_bild]');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
