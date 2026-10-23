@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.38.2
+ * Plugin Name: 1a Amazon Box 0.38.3
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.38.2
+ * Version: 0.38.3
  * Requires PHP: 7.4
  */
 
@@ -45,9 +45,11 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.38.2';
+    const VERSION = '0.38.3';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
+    /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
+    const AAWP_BILD_MAX = 360;
     const BUTTON_TEXT = ['de' => 'Angebot bei Amazon ansehen', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vedi l'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'];
     // Selbst-Aktualisierung: WordPress fragt zweimal täglich (nur Verwaltung/Cron, nie beim Seitenaufruf) diese Datei ab
     const UPDATE_REPO = 'https://github.com/Aleeeb/schlanke-amazon-box-/';
@@ -872,7 +874,7 @@ final class SAB {
             } else {
                 $v = strtolower(trim((string) $a['value']));
                 if (in_array($v, ['thumb', 'image', 'thumbnail'], true)) {
-                    $out .= self::sc_bild(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class'], 'breite' => (string) (int) $a['image_width']], '');
+                    $out .= self::sc_bild(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class'], 'breite' => (string) min(self::AAWP_BILD_MAX, (int) $a['image_width'])], '');
                 } elseif ($v === 'title') {
                     $out .= self::sc_link(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class']], '');
                 } elseif ($v === 'button') {
@@ -1575,7 +1577,7 @@ final class SAB {
             if ($nur !== '' && $asin !== $nur) { return $m[0]; }
             $land = self::land('');
             if (!self::tag($land)) { return $m[0]; }
-            $w = preg_match('#\bimage_width=["\']?(\d{2,4})#i', $x, $bw) ? ' breite="' . (int) $bw[1] . '"' : '';
+            $w = preg_match('#\bimage_width=["\']?(\d{2,4})#i', $x, $bw) ? ' breite="' . min(self::AAWP_BILD_MAX, (int) $bw[1]) . '"' : '';
             self::$karten_n++;
             return '[amz_bild asin="' . $asin . '" land="' . $land . '"' . $w . '][/amz_bild]';
         }, $c);

@@ -335,7 +335,7 @@ ok(substr_count($o, '<img') === 2, 'aawp mehrere ASINs');
 
 $GLOBALS['http']['B09TRSYKZS'] = item('B09TRSYKZS', [$money('7 €')]); $GLOBALS['tr'] = [];
 $o = $GLOBALS['sc']['aawp'](['fields' => 'B09TRSYKZS', 'value' => 'thumb', 'image_size' => 'large', 'image_width' => '420', 'image_height' => '420'], '');
-ok(strpos($o, 'max-width:420px') !== false && strpos($o, '<img') !== false, 'aawp image_width wird übernommen');
+ok(strpos($o, 'max-width:360px') !== false && strpos($o, '<img') !== false, 'aawp image_width wird übernommen');
 
 // ---- 0.20.0: Sofortmeldungen ----
 foreach (['sab_marken','sab_tests','sab_tausch','sab_ausfall','sab_bildtests','sab_alarm_zuletzt','sab_mail_zuletzt'] as $k) { unset($GLOBALS['opt'][$k]); }
@@ -540,5 +540,9 @@ ok(strpos($h, 'repeat(2,minmax(0,1fr))') !== false && strpos($h, '<br') === fals
 [$neu, ] = SAB::umbau_text('<strong>Vasos</strong>
 [aawp fields="B0TABLE001" value="thumb" image_size="large" image_width="420" image_height="420"]
 Haga clic en la imagen');
-ok(strpos($neu, '[amz_bild asin="B0TABLE001" land="es" breite="420"][/amz_bild]') !== false && strpos($neu, 'aawp') === false, 'Einzelprodukt: [aawp thumb] wird [amz_bild]');
+ok(strpos($neu, '[amz_bild asin="B0TABLE001" land="es" breite="360"][/amz_bild]') !== false && strpos($neu, 'aawp') === false, 'Einzelprodukt: [aawp thumb] wird [amz_bild]');
+[$neu, ] = SAB::umbau_text('[aawp fields="B0TABLE001" value="thumb" image_width="500" image_height="500"]');
+ok(strpos($neu, 'breite="360"') !== false, 'Bildbreite aus aawp wird auf 360 px begrenzt');
+$o = $GLOBALS['sc']['aawp'](['fields' => 'B0TABLE001', 'value' => 'thumb', 'image_width' => '500']);
+ok(strpos($o, 'max-width:360px') !== false, 'sc_aawp begrenzt 500 px auf 360 px');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
