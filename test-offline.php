@@ -424,4 +424,10 @@ $GLOBALS['opt']['sab_tags'] = "es=t-21\nde=t-21";
 [$neu, $n, $sk] = SAB::umbau_text('<p><a href="https://amzn.to/abc" target="_blank">Zum Produkt</a> und <a href="https://amzn.to/start">Startseite</a></p>');
 ok(strpos($neu, '[amz_link asin="B0AAAAAAA1" land="es"]Zum Produkt[/amz_link]') !== false && $n === 1, 'Kurzlink wird zu Platzhalter');
 ok(strpos($neu, 'href="https://amzn.to/start"') !== false, 'Kurzlink auf Startseite bleibt unverändert');
+
+if (!defined('ARRAY_A')) define('ARRAY_A', 'ARRAY_A');
+$mFd = new ReflectionMethod('SAB', 'fundstellen'); $mFd->setAccessible(true);
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 5, 'post_title' => 'T', 'post_content' => '[amz_link asin="B0AAAAAAA1" land="es"]Zaun[/amz_link] und <a href="https://www.amazon.es/dp/B0AAAAAAA1?tag=x">fest</a>']]; } function prepare($q, ...$a) { return $q; } function get_col($q) { return []; } };
+$fd = $mFd->invoke(null, ['B0AAAAAAA1']);
+ok(($fd['B0AAAAAAA1'][5]['n'] ?? 0) === 2 && ($fd['B0AAAAAAA1'][5]['fest'] ?? -1) === 1, 'Fundstellen: gesamt 2, davon 1 fester Link');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
