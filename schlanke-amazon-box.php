@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.42.0
+ * Plugin Name: 1a Amazon Box 0.43.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.42.0
+ * Version: 0.43.0
  * Requires PHP: 7.4
  */
 
@@ -428,7 +428,9 @@ final class SAB {
     }
 
     /** Standard-Gewichte des Scores (Summe 100). „prime“ bleibt 0, solange die Schnittstelle Prime nicht liefert. */
-    const SCORE_STANDARD = ['rang' => 30, 'buybox' => 20, 'angebot' => 15, 'preis' => 10, 'streich' => 10, 'deal' => 5, 'bewertung' => 10, 'prime' => 0, 'liefer' => 0];
+    const SCORE_STANDARD = ['rang' => 27, 'buybox' => 18, 'angebot' => 13, 'preis' => 9, 'streich' => 9, 'deal' => 4, 'bewertung' => 10, 'konstanz' => 10, 'prime' => 0, 'liefer' => 0];
+    /** Kategorien, in denen ein Verkaufsrang für Garten-Produkte zählt (Hauptkategorie und typische Unterkategorien). */
+    const GARTEN_KAT = '/jard[ií]n|garten|giardin|garden|lawn|c[eé]sped|outdoor|plaga|control de (?:aves|animales|plagas|insectos|roedores|caracoles)|babosa|caracol|\baves?\b|cerca|valla|huerto|plantas?\b|riego|cultivo|abono|maceta|invernadero|semill|poda|jardiner/iu';
     const SCORE_NAMEN = [
         'rang'    => 'Verkaufsrang',
         'buybox'  => 'Buy Box (Kaufen-Button)',
@@ -437,6 +439,7 @@ final class SAB {
         'streich' => 'Streichpreis / Ersparnis',
         'deal'    => 'Aktion / Deal',
         'bewertung' => 'Bewertung (Sterne und Anzahl, von Hand)',
+        'konstanz' => 'Konstanz (Tage mit gutem Score)',
         'prime'   => 'Prime (von Hand)',
         'liefer'  => 'Lieferzeit (von Hand, Ø Hauptstädte)',
     ];
@@ -446,6 +449,64 @@ final class SAB {
         $w = (array) get_option('sab_score_w', []); $out = [];
         foreach (self::SCORE_STANDARD as $k => $std) { $out[$k] = isset($w[$k]) && is_numeric($w[$k]) ? max(0, min(100, (int) $w[$k])) : $std; }
         return array_sum($out) > 0 ? $out : self::SCORE_STANDARD;
+    }
+
+    const K_SCHWELLE = 60;   // ab diesem Score gilt ein Tag als „gut“
+    const K_MIN = 5;         // so viele aufgezeichnete Tage braucht die Konstanz
+    const K_FENSTER = 30;    // Tage, die zählen
+
+    /** Hält pro Produkt und Tag den Score (ohne Konstanz) fest, höchstens 60 Tage; Anteil guter Tage der letzten 30 Tage kommt zurück in die Daten. */
+    private static function mit_verlauf(array $d, bool $speichern = false): array {
+        if (empty($d['items'])) { return $d; }
+        $v = (array) get_option('sab_verlauf', []); $heute = gmdate('Y-m-d'); $neu = false;
+        foreach ($d['items'] as $a => $x) {
+            $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$a]);
+            if ($speichern && empty($d['fehler'])) {
+                $sc = self::score($x, true)[0];
+                if (($v[$a][$heute] ?? null) !== $sc) { $v[$a][$heute] = $sc; $neu = true; }
+                if (count($v[$a]) > 60) { ksort($v[$a]); $v[$a] = array_slice($v[$a], -60, null, true); }
+            }
+            $tage = array_filter((array) ($v[$a] ?? []), fn($k) => $k >= gmdate('Y-m-d', time() - (self::K_FENSTER - 1) * DAY_IN_SECONDS), ARRAY_FILTER_USE_KEY);
+            unset($d['items'][$a]['k_anteil'], $d['items'][$a]['k_tage'], $d['items'][$a]['k_reihe']);
+            if (count($tage) >= self::K_MIN) {
+                $gut = count(array_filter($tage, fn($t) => $t >= self::K_SCHWELLE));
+                $d['items'][$a]['k_anteil'] = $gut / count($tage); $d['items'][$a]['k_tage'] = count($tage);
+            }
+            if ($tage) { ksort($tage); $d['items'][$a]['k_reihe'] = array_values($tage); }
+        }
+        if ($neu) { update_option('sab_verlauf', $v, false); }
+        return $d;
+    }
+
+    /** Produkte ohne Handdaten oder mit Handdaten älter als 30 Tage: [ASIN => Hinweis]. */
+    private static function handdaten_fehlen(array $d): array {
+        $m = self::manuell_daten(); $out = [];
+        foreach (self::alle_asins() as $a) {
+            if (!isset($m[$a])) { $out[$a] = 'keine Handdaten'; continue; }
+            $st = (string) ($m[$a]['manuell_stand'] ?? ''); $t = $st !== '' ? strtotime($st) : false;
+            if (!$t) { $out[$a] = 'ohne Datum'; }
+            elseif (time() - $t > 30 * DAY_IN_SECONDS) { $out[$a] = 'Stand ' . $st . ', älter als 30 Tage'; }
+            else {
+                $fehlt = [];
+                if ($m[$a]['sterne'] === null) { $fehlt[] = 'Sterne'; }
+                if ($m[$a]['liefertage'] === null) { $fehlt[] = 'Lieferzeit'; }
+                if ($fehlt) { $out[$a] = 'es fehlen: ' . implode(', ', $fehlt); }
+            }
+        }
+        return $out;
+    }
+
+    /** Zeichnet den Verlauf der Scores als kleine Balken (Sparkline) nach Farbe. */
+    private static function sparkline(array $reihe): string {
+        if (!$reihe) { return ''; }
+        $h = '<span class="sab-spark" title="Score pro Tag, letzte ' . count($reihe) . ' Tage">';
+        foreach (array_slice($reihe, -30) as $v) { $h .= '<i style="height:' . max(2, (int) round($v * 0.16)) . 'px;background:' . self::score_farbe((int) $v) . '"></i>'; }
+        return $h . '</span>';
+    }
+
+    /** Farbverlauf des Scores: rot bis 39, orange bis 59, gelbgrün bis 79, grün ab 80. */
+    private static function score_farbe(int $p): string {
+        return $p >= 80 ? '#1a7f37' : ($p >= 60 ? '#6a9a1f' : ($p >= 40 ? '#b36b00' : '#a00'));
     }
 
     /** Zahl aus einem Preistext wie „12,99 €“ oder „€1.299,00“. */
@@ -515,11 +576,11 @@ final class SAB {
      * Der Rang zählt nur in Garten-Kategorien. Ohne Rang ist der Score auf 60 begrenzt.
      * @return array{0:int,1:string,2:array} [Score, Hinweis, Einzelposten [Name, Gewicht, Faktor 0..1, Punkte, Erklärung]]
      */
-    private static function score(array $x): array {
-        $w = self::score_gewichte(); $summe = array_sum($w);
+    private static function score(array $x, bool $ohne_k = false): array {
+        $w = self::score_gewichte(); if ($ohne_k || !isset($x['k_anteil'])) { $w['konstanz'] = 0; } $summe = array_sum($w);   // ohne genug Verlauf zählt die Konstanz nicht
         $r = $x['rang'] ?? null; $fremd = false;
         $kat = (string) ($x['kategorie'] ?? '');
-        if ($r !== null && $kat !== '' && !preg_match('/jard[ií]n|garten|giardin|garden|lawn|c[eé]sped|outdoor/iu', $kat)) { $r = null; $fremd = true; }
+        if ($r !== null && $kat !== '' && !preg_match(self::GARTEN_KAT, $kat)) { $r = null; $fremd = true; }
         $f = [];
         $f['rang'] = $r === null ? [0.0, $fremd ? 'Rang nur in Fremdkategorie (' . $kat . '), zählt nicht' : 'ohne Verkaufsrang'] : [max(0.0, min(1.0, 1 - log10(max(1, $r) / 100) / log10(5000))), 'Platz ' . number_format((int) $r, 0, ',', '.')];
         $f['buybox'] = !empty($x['kaufen']) ? [1.0, 'ja'] : [0.0, 'nein'];
@@ -537,6 +598,7 @@ final class SAB {
             $n = (int) ($x['anzahl'] ?? 0); $st5 = ((float) $x['sterne'] * $n + 4.0 * 20) / ($n + 20);
             $f['bewertung'] = [max(0.0, min(1.0, ($st5 - 3.0) / 2.0)), str_replace('.', ',', (string) $x['sterne']) . ' ★ (' . $n . ')'];
         } else { $f['bewertung'] = [0.5, 'unbekannt']; }
+        $f['konstanz'] = isset($x['k_anteil']) ? [max(0.0, min(1.0, (float) $x['k_anteil'])), round(100 * (float) $x['k_anteil']) . ' % der letzten ' . (int) ($x['k_tage'] ?? 0) . ' Tage mit Score ab ' . self::K_SCHWELLE] : [0.5, 'noch zu wenig Daten (ab ' . self::K_MIN . ' Tagen)'];
         $f['prime'] = isset($x['prime']) && $x['prime'] !== null ? [$x['prime'] ? 1.0 : 0.0, $x['prime'] ? 'ja' : 'nein'] : [0.5, 'unbekannt'];
         $f['liefer'] = isset($x['liefertage']) && $x['liefertage'] !== null ? [max(0.0, min(1.0, (7 - (float) $x['liefertage']) / 6)), 'Ø ' . str_replace('.', ',', (string) round((float) $x['liefertage'], 1)) . ' Tage'] : [0.5, 'unbekannt'];
         $roh = 0.0; $det = [];
@@ -554,7 +616,7 @@ final class SAB {
 
     private static function scorezelle(array $x): string {
         [$p, $h] = self::score($x);
-        $farbe = $p >= 70 ? '#1a7f37' : ($p >= 40 ? '#b36b00' : '#a00');
+        $farbe = self::score_farbe($p);
         return '<strong style="color:' . $farbe . ';font-size:1.2em">' . $p . '</strong>' . ($h !== '' ? '<br><small>' . esc_html($h) . '</small>' : '');
     }
 
@@ -684,6 +746,7 @@ final class SAB {
     public static function pruefen(): void {
         self::alte_bilder_loeschen();
         $land = self::land('');
+        self::uebersicht_holen($land);   // hält den täglichen Score-Verlauf fest
         $alle = array_keys(self::produkte());
         foreach (self::slots() as $liste) { $alle = array_merge($alle, $liste); }
         foreach (self::tests() as $liste) { $alle = array_merge($alle, $liste); }
@@ -1210,7 +1273,7 @@ final class SAB {
      * „Neu laden“ geklickt, holt ein Hintergrundauftrag (WP-Cron) die neuen Daten. Nur beim allerersten Mal wartet die Seite auf Amazon.
      */
     private static function uebersicht_daten(string $land, bool $frisch = false): array {
-        return self::mit_preisindex(self::mit_manuell(self::uebersicht_daten_roh($land, $frisch)));
+        return self::mit_verlauf(self::mit_preisindex(self::mit_manuell(self::uebersicht_daten_roh($land, $frisch))));
     }
 
     private static function uebersicht_daten_roh(string $land, bool $frisch = false): array {
@@ -1279,7 +1342,7 @@ final class SAB {
         $bew = ['fehler' => '', 'werte' => []];
         $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
         $out['ts'] = time();
-        if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); }
+        if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); self::mit_verlauf(self::mit_preisindex(self::mit_manuell($out)), true); }
         return $out;
     }
 
@@ -1297,13 +1360,20 @@ final class SAB {
             'streich' => '1, wenn Amazon einen durchgestrichenen Preis (Ersparnis) zeigt.',
             'deal'    => '1 bei einer Aktion, einem Coupon oder einem Deal.',
             'bewertung' => 'Sterne und Anzahl von Hand eingetragen (unten). Wenige Bewertungen zählen vorsichtig: 4,0 Sterne ist der Mittelwert. 3 Sterne ergibt 0, 5 Sterne 1. Ohne Angabe 0,5.',
+            'konstanz' => 'Das Plugin hält jeden Tag den Score (ohne diesen Posten) fest. Zählt der Anteil der Tage mit Score ab 60 in den letzten 30 Tagen: 100 % ergibt 1, 0 % ergibt 0. Ein Produkt, das nur an einem guten Tag glänzt, kommt so nicht nach oben. Erst ab 5 aufgezeichneten Tagen, vorher 0,5.',
             'prime'   => 'Prime von Hand eingetragen (die Amazon-Schnittstelle liefert es nicht): ja 1, nein 0, unbekannt 0,5. Gewicht standardmäßig 0.',
             'liefer'  => 'Durchschnittliche Lieferzeit in Tagen zu den eingetragenen Hauptstädten: 1 Tag oder weniger ergibt 1, 7 Tage oder mehr 0. Ohne Angabe 0,5. Gewicht standardmäßig 0.',
         ];
         foreach (self::SCORE_NAMEN as $k => $name) {
             $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="100" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:70px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
         }
-        $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 30, Buy Box 20, Angebot 15, Preis 10, Streichpreis 10, Deal 5, Bewertung 10.</span></p></form>';
+        $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 27, Buy Box 18, Angebot 13, Preis 9, Streichpreis 9, Deal 4, Bewertung 10, Konstanz 10.</span></p></form>';
+        $d0 = self::uebersicht_daten($land, false); $fehlt = self::handdaten_fehlen($d0); $nm0 = self::produkte();
+        if ($fehlt) {
+            $h .= '<h3 style="margin-top:2em">Handdaten fehlen (' . count($fehlt) . ')</h3><p class="description">Für diese Produkte fehlen Sterne, Prime oder Lieferzeit oder sie sind älter als 30 Tage. Der montägliche Rundgang sammelt sie für Madrid und Barcelona.</p><ul style="columns:2;max-width:860px">';
+            foreach ($fehlt as $a => $t) { $h .= '<li><code>' . esc_html($a) . '</code> ' . esc_html(($nm0[$a] ?? '') ?: mb_substr((string) ($d0['items'][$a]['titel'] ?? ''), 0, 40)) . ' <small>(' . esc_html($t) . ')</small></li>'; }
+            $h .= '</ul>';
+        }
         $h .= '<h3 style="margin-top:2em">Von Hand gepflegte Daten</h3><p class="description">Die Amazon-Schnittstelle liefert keine Sterne, kein Prime und keine Lieferzeit. Trag sie hier ein, eine Zeile pro Produkt: <code>ASIN | Sterne | Anzahl Bewertungen | Prime (ja/nein) | Lieferzeit in Tagen je Hauptstadt | Datum</code>, zum Beispiel <code>B001AUKTYG | 4,1 | 588 | ja | Madrid 2, Barcelona 3, Sevilla 2 | 2026-10-24</code>. Leere Felder sind erlaubt. Die Angaben erscheinen als Chips in der Übersicht und fließen in den Score ein (Gewicht oben).</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="manuell">'
            . '<textarea name="sab_manuell" rows="10" class="large-text code">' . esc_textarea((string) get_option('sab_manuell', '')) . '</textarea><p><button class="button button-primary">Handdaten speichern</button></p></form>';
@@ -1545,14 +1615,14 @@ final class SAB {
         $h .= '<style>table.sab-uebers td{vertical-align:middle;padding:6px 8px}table.sab-uebers .sab-thumb{width:48px;height:48px;object-fit:contain;background:#fff;border:1px solid #e3e6e6;border-radius:4px}'
             . 'table.sab-uebers .sab-bal{display:inline-block;height:8px;border-radius:4px;vertical-align:middle;margin-right:6px}table.sab-uebers .sab-zahl{text-align:right;white-space:nowrap}'
             . 'table.sab-uebers .sab-chip{display:inline-block;padding:1px 6px;border-radius:9px;font-size:11px;margin:1px 2px 1px 0;background:#eef0f0;color:#333}table.sab-uebers .sab-chip.ok{background:#e3f4e7;color:#1a7f37}table.sab-uebers .sab-chip.warn{background:#fdf0d8;color:#8a5a00}table.sab-uebers .sab-chip.bad{background:#fbe3e3;color:#a00}'
-            . 'table.sab-uebers .sab-name{max-width:340px}table.sab-uebers details summary{cursor:pointer;color:#2271b1}</style>';
+            . 'table.sab-uebers .sab-name{max-width:340px}table.sab-uebers details summary{cursor:pointer;color:#2271b1}.sab-spark{display:inline-flex;align-items:flex-end;gap:1px;height:16px}.sab-spark i{display:block;width:3px;border-radius:1px}</style>';
         $h .= '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th>Mehr</th></tr></thead><tbody>';
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
             if (!$x) { $h .= '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="3"></td>' . self::markenzellen($asin) . '<td></td></tr>'; continue; }
             [$sc, $sch] = self::score($x);
-            $farbe = $sc >= 70 ? '#1a7f37' : ($sc >= 40 ? '#b36b00' : '#a00');
+            $farbe = self::score_farbe($sc);
             $bild = !empty($x['bilder'][0]) ? '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><img class="sab-thumb" loading="lazy" src="' . esc_url($x['bilder'][0]) . '" alt=""></a>' : '';
             $lief = !empty($x['trotz']) ? ['ok', 'lieferbar (geprüft)'] : (empty($x['lieferbar']) ? ['bad', 'kein Angebot'] : (self::unklar($x) ? ['warn', 'unklar'] : (($x['status'] ?? '') === 'OUT_OF_STOCK' ? ['bad', 'nicht auf Lager'] : ((($x['status'] ?? '') === 'IN_STOCK' || ($x['status'] ?? '') === '') ? ['ok', 'lieferbar'] : ['warn', 'eingeschränkt']))));
             $chips = '<span class="sab-chip ' . $lief[0] . '">' . esc_html($lief[1]) . '</span>'
@@ -1574,7 +1644,7 @@ final class SAB {
                   . (($x['preis'] === '' || $x['verkaeufer'] === '') ? '<p style="color:#a00">' . esc_html($x['diag'] ?? '') . '</p><details><summary>Rohdaten</summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>' : '')
                   . '</div></details>';
             $h .= '<tr><td class="sab-name"><div style="display:flex;gap:8px;align-items:center">' . $bild . '<div><strong>' . esc_html(($namen[$asin] ?? '') ?: mb_substr((string) ($x['titel'] ?? ''), 0, 60)) . '</strong><br><small><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a></small></div></div></td>'
-               . '<td data-v="' . $sc . '"><span class="sab-bal" style="width:' . max(4, (int) round($sc * 0.6)) . 'px;background:' . $farbe . '"></span><strong style="color:' . $farbe . '">' . $sc . '</strong></td>'
+               . '<td data-v="' . $sc . '"><span class="sab-bal" style="width:' . max(4, (int) round($sc * 0.6)) . 'px;background:' . $farbe . '"></span><strong style="color:' . $farbe . '">' . $sc . '</strong>' . (isset($x['k_anteil']) ? '<br><small title="Tage mit Score ab ' . self::K_SCHWELLE . ' in den letzten ' . (int) $x['k_tage'] . ' Tagen">' . round(100 * $x['k_anteil']) . ' % gut</small>' : '') . (!empty($x['k_reihe']) ? '<br>' . self::sparkline($x['k_reihe']) : '') . '</td>'
                . '<td>' . $chips . '</td><td class="sab-zahl" data-v="' . esc_attr((string) (self::preiszahl((string) ($x['preis'] ?? '')) ?? '')) . '">' . $preis . '</td>'
                . '<td class="sab-zahl" data-v="' . (isset($x['rang']) ? (int) $x['rang'] : '') . '">' . $rang . '</td><td class="sab-zahl" data-v="' . $nk . '">' . $klick . '</td>'
                . self::markenzellen($asin) . '<td>' . $mehr . '</td></tr>';

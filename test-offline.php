@@ -411,7 +411,7 @@ ok(strpos($mDv->invoke(null, ['offersV2' => ['listings' => [['type' => 'LIGHTNIN
 
 $mSc = new ReflectionMethod('SAB', 'score'); $mSc->setAccessible(true);
 [$p1, $h1] = $mSc->invoke(null, ['rang' => 80, 'kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '9 €', 'spar' => ['streich' => '12 €'], 'deal' => 'X', 'preisrel' => 0.5]);
-ok($p1 >= 95 && $h1 === '', 'Score: bestes Produkt nahe 100');
+ok($p1 >= 93 && $h1 === '', 'Score: bestes Produkt nahe 100');
 [$p2, $h2] = $mSc->invoke(null, ['rang' => 4334, 'kaufen' => true, 'status' => 'OUT_OF_STOCK', 'lieferbar' => true, 'preis' => '', 'verkaeufer' => '']);
 ok($p2 >= 38 && $p2 <= 42 && strpos($h2, 'Schnittstelle prüfen') !== false, 'Score: guter Rang ohne Angebot = Hinweis');
 [$p3, $h3] = $mSc->invoke(null, ['kaufen' => false, 'status' => 'OUT_OF_STOCK', 'lieferbar' => false]);
@@ -582,10 +582,29 @@ $mM = new ReflectionMethod('SAB', 'manuell_daten'); $mM->setAccessible(true);
 $md = $mM->invoke(null);
 ok($md['B0TABLE001']['sterne'] === 4.1 && $md['B0TABLE001']['anzahl'] === 588 && $md['B0TABLE001']['prime'] === true && abs($md['B0TABLE001']['liefertage'] - 2.3333) < 0.01, 'Handdaten: Sterne, Anzahl, Prime und Ø Lieferzeit gelesen');
 ok($md['B0TABLE002']['prime'] === false && $md['B0TABLE002']['liefertage'] === 1.5, 'Handdaten: kein Prime, Dezimal-Lieferzeit');
-$GLOBALS['opt']['sab_score_w'] = ['rang' => 0, 'buybox' => 0, 'angebot' => 0, 'preis' => 0, 'streich' => 0, 'deal' => 0, 'bewertung' => 10, 'prime' => 0, 'liefer' => 0];
+$GLOBALS['opt']['sab_score_w'] = ['rang' => 0, 'buybox' => 0, 'angebot' => 0, 'preis' => 0, 'streich' => 0, 'deal' => 0, 'bewertung' => 10, 'konstanz' => 0, 'prime' => 0, 'liefer' => 0];
 [$gut] = $mSc->invoke(null, ['rang' => 100, 'sterne' => 4.8, 'anzahl' => 1000]); [$schlecht] = $mSc->invoke(null, ['rang' => 100, 'sterne' => 3.0, 'anzahl' => 1000]); [$leer] = $mSc->invoke(null, ['rang' => 100]);
 ok($gut > 85 && $schlecht < 10 && $leer === 50, 'Score: nur Bewertung gewichtet');
 unset($GLOBALS['opt']['sab_score_w'], $GLOBALS['opt']['sab_manuell']);
 ob_start(); $_GET['tab'] = 'score'; SAB::seite(); $hh = ob_get_clean();
 ok(strpos($hh, 'Von Hand gepflegte Daten') !== false && strpos($hh, 'Verkaufsrang') !== false, 'Reiter Score rendert Gewichte und Handdaten');
+
+// ---- 0.43.0: Konstanz, Verlauf, Handdaten fehlen, Farben ----
+$GLOBALS['opt']['sab_verlauf'] = ['B0KONST001' => []];
+for ($i = 9; $i >= 0; $i--) { $GLOBALS['opt']['sab_verlauf']['B0KONST001'][gmdate('Y-m-d', time() - $i * 86400)] = $i < 3 ? 40 : 80; }
+$mV = new ReflectionMethod('SAB', 'mit_verlauf'); $mV->setAccessible(true);
+$dv = $mV->invoke(null, ['items' => ['B0KONST001' => ['rang' => 100, 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €', 'kategorie' => 'Jardín'], 'B0KONST002' => ['rang' => 100]], 'fehler' => ''], false);
+ok(abs($dv['items']['B0KONST001']['k_anteil'] - 0.7) < 0.001 && $dv['items']['B0KONST001']['k_tage'] === 10 && !isset($dv['items']['B0KONST002']['k_anteil']), 'Konstanz: Anteil guter Tage, zu wenig Daten = leer');
+[$sk, , $dk] = $mSc->invoke(null, $dv['items']['B0KONST001']);
+ok(in_array('Konstanz (Tage mit gutem Score)', array_column($dk, 0), true) && $dk[array_search('Konstanz (Tage mit gutem Score)', array_column($dk, 0))][2] === 0.7, 'Score: Konstanz-Posten mit Faktor 0,7');
+$dv2 = $mV->invoke(null, ['items' => ['B0KONST003' => ['rang' => 100, 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €', 'kategorie' => 'Jardín']], 'fehler' => ''], true);
+ok(isset($GLOBALS['opt']['sab_verlauf']['B0KONST003'][gmdate('Y-m-d')]), 'Verlauf: heutiger Score wird festgehalten');
+foreach (['Control de aves', 'Control de animales domésticos y salvajes', 'Jardín', 'Plagas'] as $k) { [$s_] = $mSc->invoke(null, ['rang' => 500, 'kategorie' => $k]); ok(!preg_match('/Fremd/', $mSc->invoke(null, ['rang' => 500, 'kategorie' => $k])[1]), 'Garten-Unterkategorie zählt: ' . $k); }
+ok(preg_match('/Fremd/', $mSc->invoke(null, ['rang' => 500, 'kategorie' => 'Cintas adhesivas de aluminio'])[1]) === 1, 'Fremdkategorie bleibt Fremdkategorie');
+$GLOBALS['opt']['sab_manuell'] = "B0AAAAAAA1 | 4,1 | 588 | ja | Madrid 2 | " . gmdate('Y-m-d') . "\nB0BBBBBBB1 | 4 | 5 | ja | Madrid 2 | 2020-01-01";
+$GLOBALS["opt"]["sab_produkte"] = "B0TABLE001 | A\nB0TABLE002 | B";
+$mH = new ReflectionMethod('SAB', 'handdaten_fehlen'); $mH->setAccessible(true);
+$hf = $mH->invoke(null, ['items' => []]);
+ok(!isset($hf["B0AAAAAAA1"]) && isset($hf["B0BBBBBBB1"]) && strpos($hf["B0BBBBBBB1"], 'älter') !== false, 'Handdaten fehlen: veraltete gemeldet, frische nicht');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
