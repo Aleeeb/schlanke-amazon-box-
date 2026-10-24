@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.40.0
+ * Plugin Name: 1a Amazon Box 0.41.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.40.0
+ * Version: 0.41.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.40.0';
+    const VERSION = '0.41.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -427,29 +427,92 @@ final class SAB {
         return $t;
     }
 
+    /** Standard-Gewichte des Scores (Summe 100). „prime“ bleibt 0, solange die Schnittstelle Prime nicht liefert. */
+    const SCORE_STANDARD = ['rang' => 35, 'buybox' => 20, 'angebot' => 15, 'preis' => 15, 'streich' => 10, 'deal' => 5, 'prime' => 0];
+    const SCORE_NAMEN = [
+        'rang'    => 'Verkaufsrang',
+        'buybox'  => 'Buy Box (Kaufen-Button)',
+        'angebot' => 'Angebot verfügbar',
+        'preis'   => 'Günstiger Preis (im Vergleich zur Gruppe)',
+        'streich' => 'Streichpreis / Ersparnis',
+        'deal'    => 'Aktion / Deal',
+        'prime'   => 'Prime (noch nicht lieferbar)',
+    ];
+
+    /** Gewichte aus den Einstellungen; Fehlendes und Ungültiges fällt auf den Standard zurück. @return array<string,int> */
+    private static function score_gewichte(): array {
+        $w = (array) get_option('sab_score_w', []); $out = [];
+        foreach (self::SCORE_STANDARD as $k => $std) { $out[$k] = isset($w[$k]) && is_numeric($w[$k]) ? max(0, min(100, (int) $w[$k])) : $std; }
+        return array_sum($out) > 0 ? $out : self::SCORE_STANDARD;
+    }
+
+    /** Zahl aus einem Preistext wie „12,99 €“ oder „€1.299,00“. */
+    private static function preiszahl(string $p): ?float {
+        if (!preg_match('/\d[\d.,]*/', $p, $m)) { return null; }
+        $z = $m[0];
+        if (strpos($z, ',') !== false && strpos($z, '.') !== false) { $z = strrpos($z, ',') > strrpos($z, '.') ? str_replace(',', '.', str_replace('.', '', $z)) : str_replace(',', '', $z); }
+        elseif (strpos($z, ',') !== false) { $z = str_replace(',', '.', $z); }
+        elseif (preg_match('/\.\d{3}$/', $z)) { $z = str_replace('.', '', $z); }
+        return (float) $z;
+    }
+
+    /** Preis im Vergleich: Verhältnis zum mittleren Preis der Produktgruppe (sonst der Kategorie), ab drei Produkten mit Preis. */
+    private static function mit_preisindex(array $d): array {
+        if (empty($d['items'])) { return $d; }
+        $gruppen = self::gruppen(); $preise = [];
+        foreach ($d['items'] as $a => $x) { $z = self::preiszahl((string) ($x['preis'] ?? '')); if ($z) { $preise[$a] = $z; } }
+        $median = function (array $v): float { sort($v); $n = count($v); return $n % 2 ? $v[intdiv($n, 2)] : ($v[$n / 2 - 1] + $v[$n / 2]) / 2; };
+        foreach ($d['items'] as $a => &$x) {
+            unset($x['preisrel']);
+            if (!isset($preise[$a])) { continue; }
+            $vgl = [];
+            foreach ($gruppen as $liste) { if (in_array((string) $a, $liste, true)) { foreach ($liste as $b) { if (isset($preise[$b])) { $vgl[$b] = $preise[$b]; } } } }
+            if (count($vgl) < 3) {
+                $vgl = [];
+                $kat = (string) ($x['kategorie'] ?? '');
+                if ($kat !== '') { foreach ($d['items'] as $b => $y) { if ((string) ($y['kategorie'] ?? '') === $kat && isset($preise[$b])) { $vgl[$b] = $preise[$b]; } } }
+            }
+            if (count($vgl) >= 3) { $m = $median(array_values($vgl)); if ($m > 0) { $x['preisrel'] = round($preise[$a] / $m, 2); } }
+        }
+        unset($x);
+        return $d;
+    }
+
     /**
-     * Produktscore 0 bis 100 aus den Amazon-Daten: Verkaufsrang (bis 45), Buy Box (20), Verfügbarkeit (20), Preis (5), Streichpreis (5), Aktion (5).
-     * Der Rang gilt nur innerhalb der Kategorie, darum ist der Score ein Richtwert zum Vergleichen ähnlicher Produkte, kein Urteil über die Qualität.
-     * @return array{0:int,1:string} [Score, Hinweis]
+     * Produktscore 0 bis 100 aus den Amazon-Daten, gewichtet nach den Einstellungen (Reiter „Score“).
+     * Der Rang zählt nur in Garten-Kategorien. Ohne Rang ist der Score auf 60 begrenzt.
+     * @return array{0:int,1:string,2:array} [Score, Hinweis, Einzelposten [Name, Gewicht, Faktor 0..1, Punkte, Erklärung]]
      */
     private static function score(array $x): array {
-        $r = $x['rang'] ?? null; $pkt = 0; $fremd = false;
-        // Ränge in anderen Hauptkategorien (Industrie, Werkzeug, Elektronik …) sagen nichts über den Verkauf als Gartenprodukt: sie zählen nicht
+        $w = self::score_gewichte(); $summe = array_sum($w);
+        $r = $x['rang'] ?? null; $fremd = false;
         $kat = (string) ($x['kategorie'] ?? '');
         if ($r !== null && $kat !== '' && !preg_match('/jard[ií]n|garten|giardin|garden|lawn|c[eé]sped|outdoor/iu', $kat)) { $r = null; $fremd = true; }
-        if ($r !== null) { $pkt += $r <= 1000 ? 45 : ($r <= 5000 ? 38 : ($r <= 20000 ? 28 : ($r <= 50000 ? 18 : ($r <= 150000 ? 8 : 2)))); }
-        if (!empty($x['kaufen'])) { $pkt += 20; }
+        $f = [];
+        $f['rang'] = $r === null ? [0.0, $fremd ? 'Rang nur in Fremdkategorie (' . $kat . '), zählt nicht' : 'ohne Verkaufsrang'] : [max(0.0, min(1.0, 1 - log10(max(1, $r) / 100) / log10(5000))), 'Platz ' . number_format((int) $r, 0, ',', '.')];
+        $f['buybox'] = !empty($x['kaufen']) ? [1.0, 'ja'] : [0.0, 'nein'];
         $st = (string) ($x['status'] ?? '');
-        if (!empty($x['trotz']) || $st === 'IN_STOCK' || ($st === '' && !empty($x['lieferbar']))) { $pkt += 20; }
-        elseif ($st === 'IN_STOCK_SCARCE') { $pkt += 14; }
-        elseif (!empty($x['lieferbar']) && $st !== 'OUT_OF_STOCK') { $pkt += 10; }
-        if (($x['preis'] ?? '') !== '') { $pkt += 5; }
-        if (!empty($x['spar']['streich'])) { $pkt += 5; }
-        if (!empty($x['deal'])) { $pkt += 5; }
+        if (!empty($x['trotz']) || $st === 'IN_STOCK' || ($st === '' && !empty($x['lieferbar']))) { $f['angebot'] = [1.0, 'lieferbar']; }
+        elseif ($st === 'IN_STOCK_SCARCE') { $f['angebot'] = [0.7, 'wenige Stück']; }
+        elseif (!empty($x['lieferbar']) && $st !== 'OUT_OF_STOCK') { $f['angebot'] = [0.5, 'eingeschränkt']; }
+        else { $f['angebot'] = [0.0, 'kein Angebot']; }
+        if (($x['preis'] ?? '') === '') { $f['preis'] = [0.0, 'kein Preis']; }
+        elseif (isset($x['preisrel'])) { $f['preis'] = [max(0.0, min(1.0, (1.5 - (float) $x['preisrel']) / 0.8)), round(100 * (float) $x['preisrel']) . ' % des Gruppenpreises']; }
+        else { $f['preis'] = [0.5, 'kein Vergleich möglich']; }
+        $f['streich'] = !empty($x['spar']['streich']) ? [1.0, 'vorhanden'] : [0.0, 'keiner'];
+        $f['deal'] = !empty($x['deal']) ? [1.0, (string) $x['deal']] : [0.0, 'keine'];
+        $f['prime'] = !empty($x['prime']) ? [1.0, 'ja'] : [0.0, 'unbekannt'];
+        $roh = 0.0; $det = [];
+        foreach (self::SCORE_STANDARD as $k => $_) {
+            $pt = $summe > 0 ? 100 * $w[$k] * $f[$k][0] / $summe : 0;
+            $roh += $pt; $det[] = [self::SCORE_NAMEN[$k], $w[$k], $f[$k][0], round($pt, 1), $f[$k][1]];
+        }
+        $score = (int) round($roh);
+        if ($r === null) { $score = min($score, 60); }
         $hinweis = '';
-        if ($r === null) { $hinweis = $fremd ? 'Rang nur in Fremdkategorie (' . $kat . '), zählt nicht' : 'ohne Verkaufsrang'; }
+        if ($r === null) { $hinweis = $f['rang'][1]; }
         if (self::unklar($x) && empty($x['trotz']) && $r !== null && $r <= 20000) { $hinweis = 'Schnittstelle prüfen: guter Rang, aber kein Angebot'; }
-        return [$pkt, $hinweis];
+        return [max(0, min(100, $score)), $hinweis, $det];
     }
 
     private static function scorezelle(array $x): string {
@@ -1110,6 +1173,10 @@ final class SAB {
      * „Neu laden“ geklickt, holt ein Hintergrundauftrag (WP-Cron) die neuen Daten. Nur beim allerersten Mal wartet die Seite auf Amazon.
      */
     private static function uebersicht_daten(string $land, bool $frisch = false): array {
+        return self::mit_preisindex(self::uebersicht_daten_roh($land, $frisch));
+    }
+
+    private static function uebersicht_daten_roh(string $land, bool $frisch = false): array {
         $key = "sab_uebersicht_{$land}";
         $c = get_transient($key);
         if (is_array($c) && !$frisch) { return $c; }
@@ -1177,6 +1244,46 @@ final class SAB {
         $out['ts'] = time();
         if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); }
         return $out;
+    }
+
+    /** Reiter „Score“: wie der Score berechnet wird, Gewichte ändern, Rechenbeispiele mit echten Produkten. */
+    private static function score_html(): string {
+        $land = self::land(''); $w = self::score_gewichte(); $summe = array_sum($w);
+        $h = '<h2>Score: so wird gerechnet</h2><p>Der Score (0 bis 100) vergleicht ähnliche Produkte. Er sagt nicht, wie gut ein Produkt ist, sondern wie gut es sich nach den Amazon-Daten verkauft und wie verlässlich es lieferbar ist. Jeder Posten bekommt einen Faktor von 0 (schlecht) bis 1 (sehr gut) und wird mit seinem Gewicht multipliziert. Die Summe wird auf 100 umgerechnet, damit die Gewichte keine feste Summe brauchen.</p>'
+           . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="score">'
+           . '<table class="widefat striped" style="max-width:860px"><thead><tr><th>Posten</th><th style="width:110px">Gewicht</th><th>Wie der Faktor entsteht</th></tr></thead><tbody>';
+        $erkl = [
+            'rang'    => '1 bei Platz 100 oder besser, 0 ab Platz 500.000, dazwischen gleichmäßig auf der Zehnerlogarithmus-Skala (Platz 10.000 ist deutlich besser als 100.000). Zählt nur in Garten-Kategorien. Ohne Rang ist der Score auf 60 begrenzt.',
+            'buybox'  => '1, wenn Amazon einen Kaufen-Button (Buy Box) für dieses Produkt vergibt, sonst 0.',
+            'angebot' => '1 lieferbar (oder von dir als lieferbar bestätigt), 0,7 wenige Stück, 0,5 eingeschränkt, 0 kein Angebot.',
+            'preis'   => 'Preis geteilt durch den mittleren Preis der Produktgruppe (sonst der Kategorie, mindestens drei Produkte): 1 bei 70 % oder weniger, 0 bei 150 % oder mehr. Ohne Vergleich 0,5.',
+            'streich' => '1, wenn Amazon einen durchgestrichenen Preis (Ersparnis) zeigt.',
+            'deal'    => '1 bei einer Aktion, einem Coupon oder einem Deal.',
+            'prime'   => 'Die Amazon-Schnittstelle liefert Prime derzeit nicht (die angefragte Angabe wurde abgelehnt). Das Gewicht wirkt erst, wenn sie verfügbar ist.',
+        ];
+        foreach (self::SCORE_NAMEN as $k => $name) {
+            $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="100" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:70px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
+        }
+        $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 35, Buy Box 20, Angebot 15, Preis 15, Streichpreis 10, Deal 5.</span></p></form>';
+        $d = self::uebersicht_daten($land, false);
+        $h .= self::stand_hinweis($d);
+        if (!empty($d['items'])) {
+            $liste = [];
+            foreach ($d['items'] as $a => $x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$a]); $liste[$a] = [self::score($x), $x]; }
+            uasort($liste, fn($p, $q) => $q[0][0] <=> $p[0][0]);
+            $auswahl = [];
+            if ($liste) { $k = array_keys($liste); $auswahl[] = $k[0]; $auswahl[] = $k[intdiv(count($k), 2)]; $auswahl[] = $k[count($k) - 1]; }
+            $namen = self::produkte();
+            $h .= '<h3 style="margin-top:2em">Rechenbeispiele mit echten Produkten</h3><p class="description">Ein sehr gutes, ein mittleres und ein schwaches Produkt aus deiner Liste, mit den aktuellen Gewichten.</p>';
+            foreach (array_unique($auswahl) as $a) {
+                [$sc, $sch, $det] = $liste[$a][0];
+                $h .= '<h4>' . esc_html(($namen[$a] ?? '') ?: mb_substr((string) ($liste[$a][1]['titel'] ?? ''), 0, 60)) . ' <code>' . esc_html($a) . '</code> &rarr; Score <strong>' . $sc . '</strong></h4>'
+                    . '<table class="widefat striped" style="max-width:860px"><thead><tr><th>Posten</th><th>Daten</th><th>Faktor</th><th>Gewicht</th><th>Punkte</th></tr></thead><tbody>';
+                foreach ($det as [$n, $g, $fa, $pt, $info]) { $h .= '<tr><td>' . esc_html($n) . '</td><td>' . esc_html($info) . '</td><td>' . number_format($fa, 2, ',', '') . '</td><td>' . (int) $g . '</td><td>' . number_format($pt, 1, ',', '') . '</td></tr>'; }
+                $h .= '</tbody></table>' . ($sch !== '' ? '<p class="description">' . esc_html($sch) . '</p>' : '');
+            }
+        }
+        return $h;
     }
 
     /** Hinweiszeile zum Alter der Daten (Übersicht, Problemprodukte, Umbau). */
@@ -1392,28 +1499,40 @@ final class SAB {
         $h .= self::stand_hinweis($d);
         if ($d['fehler']) { $h .= '<div class="notice notice-warning inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         if ($d['fehler']) { return $h; }
-        if (empty($d['bewertungen']['fehler']) && isset($d['bewertungen']) && !array_filter(array_column($d['bewertungen']['werte'], 'anzahl'), fn($v) => $v !== null)) {
-            $h .= '<div class="notice notice-info inline"><p>Amazon liefert über diese Schnittstelle keine Bewertungen (Sterne und Anzahl): Die Abfrage wird ohne Fehler beantwortet, aber ohne Werte.</p></div>';
-        }
-        if (!empty($d['bewertungen']['fehler'])) { $h .= '<div class="notice notice-info inline"><p>' . esc_html($d['bewertungen']['fehler']) . '</p></div>'; }
         $kz = self::klickzahlen(); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $h .= '<table class="widefat striped sab-sort2"><thead><tr><th>Bilder</th><th>ASIN / Name</th><th>Favorit</th><th>Ersetzen</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem lieferbar</th><th>Lieferbar</th><th>Buy Box<br><small>(Kaufen-Button)</small></th><th>Preis / Streichpreis</th><th title="0 bis 100: Verkaufsrang, Buy Box, Verfügbarkeit, Preis, Streichpreis, Aktion">Score</th><th>Aktion / Deal</th><th>Kategorie / Verkaufsrang</th><th>Verkäufer</th><th>Bewertung</th><th>Klicks (Bild/Text)</th><th>kamen zurück</th><th>Ø Zeit weg</th></tr></thead><tbody>';
+        $h .= '<style>table.sab-uebers td{vertical-align:middle;padding:6px 8px}table.sab-uebers .sab-thumb{width:48px;height:48px;object-fit:contain;background:#fff;border:1px solid #e3e6e6;border-radius:4px}'
+            . 'table.sab-uebers .sab-bal{display:inline-block;height:8px;border-radius:4px;vertical-align:middle;margin-right:6px}table.sab-uebers .sab-zahl{text-align:right;white-space:nowrap}'
+            . 'table.sab-uebers .sab-chip{display:inline-block;padding:1px 6px;border-radius:9px;font-size:11px;margin:1px 2px 1px 0;background:#eef0f0;color:#333}table.sab-uebers .sab-chip.ok{background:#e3f4e7;color:#1a7f37}table.sab-uebers .sab-chip.warn{background:#fdf0d8;color:#8a5a00}table.sab-uebers .sab-chip.bad{background:#fbe3e3;color:#a00}'
+            . 'table.sab-uebers .sab-name{max-width:340px}table.sab-uebers details summary{cursor:pointer;color:#2271b1}</style>';
+        $h .= '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th>Mehr</th></tr></thead><tbody>';
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
-            if (!$x) { $h .= '<tr><td>–</td><td>' . esc_html($asin) . '<br>' . esc_html($namen[$asin] ?? '') . '</td>' . self::markenzellen($asin) . '<td colspan="11"><strong>Amazon kennt das Produkt nicht (mehr)</strong></td></tr>'; continue; }
-            $b = '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,64px));gap:4px;width:136px">';
-            foreach ($x['bilder'] as $k => $u) { $b .= '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener" title="Bild ' . ($k + 1) . '" style="display:inline-block;text-align:center;font-size:11px"><img src="' . esc_url($u) . '" alt="" style="width:60px;height:60px;object-fit:contain;margin:0 4px 4px 0;background:#fff" referrerpolicy="no-referrer"><br>' . ($k + 1) . '</a>'; }
-            $b .= '</div>';
-            $bw = $d['bewertungen']['werte'][$asin] ?? null;
-            $bewzelle = $bw && $bw['anzahl'] !== null ? esc_html(($bw['sterne'] !== null ? $bw['sterne'] . ' ★ ' : '') . '(' . $bw['anzahl'] . ')') : '–';
-            $h .= '<tr><td style="width:150px">' . $b . '</td><td><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a><br><strong>' . esc_html($namen[$asin] ?? '') . '</strong><br><small>'
-               . '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($x['titel'], 0, 90)) . '</a></small></td>'
-               . self::markenzellen($asin) . '<td>' . self::lieferzelle($x) . '</td><td>' . (!empty($x['trotz']) ? 'ja' : (($x['kaufen'] ?? null) && self::unklar($x) ? '<strong>?</strong>' : (($x['kaufen'] ?? null) && (($x['status'] ?? '') === 'OUT_OF_STOCK' || empty($x['lieferbar'])) ? '<strong>nein</strong><br><small>Amazon zeigt zwar einen Kauf-Eintrag, das Produkt ist aber nicht verfügbar.</small>' : $ja($x['kaufen'])))) . '</td><td data-v="' . (preg_match('/[0-9][0-9.,]*/', (string) $x['preis'], $pm) ? (float) str_replace(',', '.', str_replace('.', '', $pm[0])) : '') . '">' . esc_html($x['preis'] ?: '–') . self::sparzeile($x) . self::sparzeile($x)
-               . ($x['preis'] === '' || $x['verkaeufer'] === '' ? '<br><small style="color:#a00">' . esc_html($x['diag'] ?? '') . '</small><details><summary><small>Rohdaten</small></summary><code style="font-size:10px;word-break:break-all">' . esc_html($x['roh'] ?? '') . '</code></details>' : '') . '</td>'
-               . '<td data-v="' . self::score($x)[0] . '">' . self::scorezelle($x) . '</td><td>' . self::primezelle($x) . '</td><td data-v="' . (isset($x['rang']) ? (int) $x['rang'] : '') . '">' . self::rangzelle($x) . '</td>'
-               . '<td>' . esc_html($x['verkaeufer'] ?: '–') . '</td><td>' . $bewzelle . '</td>'
-               . self::klickzellen($kz[$asin] ?? null) . '</tr>';
+            if (!$x) { $h .= '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="3"></td>' . self::markenzellen($asin) . '<td></td></tr>'; continue; }
+            [$sc, $sch] = self::score($x);
+            $farbe = $sc >= 70 ? '#1a7f37' : ($sc >= 40 ? '#b36b00' : '#a00');
+            $bild = !empty($x['bilder'][0]) ? '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><img class="sab-thumb" loading="lazy" src="' . esc_url($x['bilder'][0]) . '" alt=""></a>' : '';
+            $lief = !empty($x['trotz']) ? ['ok', 'lieferbar (geprüft)'] : (empty($x['lieferbar']) ? ['bad', 'kein Angebot'] : (self::unklar($x) ? ['warn', 'unklar'] : (($x['status'] ?? '') === 'OUT_OF_STOCK' ? ['bad', 'nicht auf Lager'] : ((($x['status'] ?? '') === 'IN_STOCK' || ($x['status'] ?? '') === '') ? ['ok', 'lieferbar'] : ['warn', 'eingeschränkt']))));
+            $chips = '<span class="sab-chip ' . $lief[0] . '">' . esc_html($lief[1]) . '</span>'
+                   . '<span class="sab-chip ' . (($x['kaufen'] ?? null) ? 'ok' : 'bad') . '" title="Buy Box = Kaufen-Button">Buy Box ' . (($x['kaufen'] ?? null) === null ? '?' : (($x['kaufen']) ? 'ja' : 'nein')) . '</span>'
+                   . (!empty($x['deal']) ? '<span class="sab-chip warn">' . esc_html($x['deal']) . '</span>' : '');
+            $sp = (array) ($x['spar'] ?? []);
+            $preis = ($x['preis'] ?? '') !== '' ? '<strong>' . esc_html($x['preis']) . '</strong>' . (!empty($sp['streich']) ? '<br><small><s>' . esc_html($sp['streich']) . '</s>' . (isset($sp['prozent']) ? ' &minus;' . (int) $sp['prozent'] . ' %' : '') . '</small>' : '') : '–';
+            $rang = isset($x['rang']) && $x['rang'] !== null ? '<span title="' . esc_attr((string) ($x['kategorie'] ?? '')) . '">' . number_format((int) $x['rang'], 0, ',', '.') . '</span>' : '–';
+            $k = $kz[$asin] ?? null; $nk = $k ? (int) $k['n'] : 0;
+            $klick = $k ? '<span title="Bild ' . (int) $k['b'] . ', Text/Button ' . (int) $k['x'] . '; zurückgekommen ' . (int) $k['z'] . '">' . $nk . '</span>' : '0';
+            $mehr = '<details><summary>Details</summary><div style="max-width:420px;font-size:12px">'
+                  . '<p><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html($x['titel'] ?? '') . '</a></p>'
+                  . '<p>Verkäufer: ' . esc_html($x['verkaeufer'] ?: '–') . '</p>'
+                  . '<p>Kategorie: ' . esc_html((string) ($x['kategorie'] ?? '–')) . ($sch !== '' ? '<br><em>' . esc_html($sch) . '</em>' : '') . '</p>'
+                  . '<p>' . self::lieferzelle($x) . '</p>'
+                  . (($x['preis'] === '' || $x['verkaeufer'] === '') ? '<p style="color:#a00">' . esc_html($x['diag'] ?? '') . '</p><details><summary>Rohdaten</summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>' : '')
+                  . '</div></details>';
+            $h .= '<tr><td class="sab-name"><div style="display:flex;gap:8px;align-items:center">' . $bild . '<div><strong>' . esc_html(($namen[$asin] ?? '') ?: mb_substr((string) ($x['titel'] ?? ''), 0, 60)) . '</strong><br><small><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a></small></div></div></td>'
+               . '<td data-v="' . $sc . '"><span class="sab-bal" style="width:' . max(4, (int) round($sc * 0.6)) . 'px;background:' . $farbe . '"></span><strong style="color:' . $farbe . '">' . $sc . '</strong></td>'
+               . '<td>' . $chips . '</td><td class="sab-zahl" data-v="' . esc_attr((string) (self::preiszahl((string) ($x['preis'] ?? '')) ?? '')) . '">' . $preis . '</td>'
+               . '<td class="sab-zahl" data-v="' . (isset($x['rang']) ? (int) $x['rang'] : '') . '">' . $rang . '</td><td class="sab-zahl" data-v="' . $nk . '">' . $klick . '</td>'
+               . self::markenzellen($asin) . '<td>' . $mehr . '</td></tr>';
         }
         return $h . '</tbody></table>' . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Warnungen“.</span></p>';
     }
@@ -1798,6 +1917,7 @@ final class SAB {
         'statistik'     => 'Statistik',
         'problem'       => 'Problemprodukte',
         'gruppen'       => 'Produktgruppen',
+        'score'         => 'Score',
         'umbau'         => 'Umbau',
         'vorschau'      => 'Vorschau',
         'tests'         => 'A/B-Tests',
@@ -1951,6 +2071,14 @@ JS;
                 }
                 $meldung = $neu ? count($neu) . ' Austausch-Regel(n) angelegt: ' . implode(', ', $neu) . '.' : 'Nichts eingetragen.';
                 if ($fehler) { $meldung .= ' Ungültig (nicht 10 Zeichen oder gleich): ' . implode(', ', $fehler) . '.'; }
+            } elseif ($form === 'score') {
+                if (!empty($_POST['sab_score_std'])) { delete_option('sab_score_w'); $meldung = 'Gewichte auf den Standard zurückgesetzt.'; }
+                else {
+                    $w = [];
+                    foreach (array_keys(self::SCORE_STANDARD) as $k) { $w[$k] = max(0, min(100, (int) ($_POST['sab_w'][$k] ?? 0))); }
+                    update_option('sab_score_w', $w, false);
+                    $meldung = 'Gewichte gespeichert. Die Scores in allen Listen sind sofort neu berechnet.';
+                }
             } elseif ($form === 'gruppen') {
                 update_option('sab_gruppen', sanitize_textarea_field(wp_unslash($_POST['sab_gruppen'] ?? '')), false);
                 delete_transient('sab_alle_asins');
@@ -2035,6 +2163,8 @@ JS;
             echo self::statistik_html();
         } elseif ($tab === 'gruppen') {
             echo self::gruppen_html();
+        } elseif ($tab === 'score') {
+            echo self::score_html();
         } elseif ($tab === 'problem') {
             echo self::problem_html();
         } elseif ($tab === 'umbau') {

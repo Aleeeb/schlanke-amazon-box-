@@ -226,8 +226,8 @@ ok(strpos($h, '12,50 EUR') !== false, 'Preis aus amount+currency als Rückfall')
 ok(strpos($h, 'ohne Preisfeld (Felder: isBuyBoxWinner, availability)') !== false, 'Diagnose nennt vorhandene Felder bei fehlendem Preis');
 ok(strpos($h, 'Angebotsblock leer') !== false, 'Diagnose: leerer Angebotsblock');
 ok(strpos($h, 'A1234') !== false, 'Verkäufer-ID als Rückfall');
-ok(strpos($h, 'keine Bewertungen') !== false || strpos($h, 'Bewertungen') !== false, 'Bewertungen: Hinweis statt Abfrage');
-ok(strpos($h, 'grid-template-columns:repeat(2') !== false, 'Bilder in zwei Spalten');
+ok(strpos($h, 'Bewertung') === false, 'Keine leere Bewertungsspalte mehr');
+ok(strpos($h, 'sab-thumb') !== false && strpos($h, 'sab-uebers') !== false, 'Übersicht: kompakte Zeilen mit Mini-Bild');
 ok(strpos($h, 'Rohdaten') !== false, 'Rohdaten aufklappbar');
 
 // ---- 0.12.1: Lieferort-Hinweis, strikt-Option ----
@@ -245,7 +245,7 @@ $GLOBALS['opt']['sab_strikt'] = '0'; $GLOBALS['tr'] = [];
 $GLOBALS['opt']['sab_produkte'] = "B0OOS00001 | oos"; $_GET['tab'] = 'uebersicht'; $GLOBALS['admin'] = true; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
 ok(strpos($h, 'nicht auf Lager') !== false && strpos($h, 'Standard-Lieferort') !== false, 'Übersicht: nicht auf Lager mit Lieferort-Hinweis');
-ok(strpos($h, 'keine Bewertungen') !== false, 'Übersicht: Hinweis, dass keine Bewertungen geliefert werden');
+ok(strpos($h, 'Bewertung') === false, 'Übersicht ohne Bewertungsspalte');
 
 // ---- 0.13.0: Karten mit Preis und Favorit ----
 foreach (['sab_marken','sab_tests','sab_tausch','sab_ausfall','sab_bildtests'] as $k) { unset($GLOBALS['opt'][$k]); }
@@ -355,7 +355,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 12 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und elf Untermenüs');
+ok(count($GLOBALS['menu']) === 13 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und elf Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -410,10 +410,10 @@ $mDv = new ReflectionMethod('SAB', 'deal_von'); $mDv->setAccessible(true);
 ok(strpos($mDv->invoke(null, ['offersV2' => ['listings' => [['type' => 'LIGHTNING_DEAL', 'dealDetails' => ['badge' => 'Oferta flash']]]]]), 'Oferta flash') !== false, 'Deal gelesen');
 
 $mSc = new ReflectionMethod('SAB', 'score'); $mSc->setAccessible(true);
-[$p1, $h1] = $mSc->invoke(null, ['rang' => 800, 'kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '9 €', 'spar' => ['streich' => '12 €'], 'deal' => 'X']);
-ok($p1 === 100 && $h1 === '', 'Score: bestes Produkt = 100');
+[$p1, $h1] = $mSc->invoke(null, ['rang' => 80, 'kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '9 €', 'spar' => ['streich' => '12 €'], 'deal' => 'X', 'preisrel' => 0.5]);
+ok($p1 >= 95 && $h1 === '', 'Score: bestes Produkt nahe 100');
 [$p2, $h2] = $mSc->invoke(null, ['rang' => 4334, 'kaufen' => true, 'status' => 'OUT_OF_STOCK', 'lieferbar' => true, 'preis' => '', 'verkaeufer' => '']);
-ok($p2 === 58 && strpos($h2, 'Schnittstelle prüfen') !== false, 'Score: guter Rang ohne Angebot = Hinweis');
+ok($p2 >= 38 && $p2 <= 42 && strpos($h2, 'Schnittstelle prüfen') !== false, 'Score: guter Rang ohne Angebot = Hinweis');
 [$p3, $h3] = $mSc->invoke(null, ['kaufen' => false, 'status' => 'OUT_OF_STOCK', 'lieferbar' => false]);
 ok($p3 === 0 && $h3 === 'ohne Verkaufsrang', 'Score: nichts = 0');
 
