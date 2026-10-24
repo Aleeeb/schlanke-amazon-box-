@@ -554,4 +554,13 @@ $GLOBALS['opt']['sab_tausch'] = 'B0TABLE001 => B0TABLE002'; $GLOBALS['opt']['sab
 $h = SAB::sc_karten([], $neu);
 ok(strpos($h, 'Valla') === false && strpos($h, 'Anillos') !== false, 'Nach Austausch kommt der Kurzname des neuen Produkts');
 $GLOBALS['opt']['sab_tausch'] = ''; $GLOBALS['opt']['sab_produkte'] = '';
+
+// ---- 0.39.0: Rang nur in Gartenkategorie ----
+$mS = new ReflectionMethod('SAB', 'score'); $mS->setAccessible(true);
+$basis = ['kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '10 €'];
+[$pg] = $mS->invoke(null, $basis + ['rang' => 2150, 'kategorie' => 'Jardín']);
+[$pi, $hi] = $mS->invoke(null, $basis + ['rang' => 2150, 'kategorie' => 'Industria, empresas y ciencia']);
+ok($pg > $pi && strpos($hi, 'Fremdkategorie') !== false, 'Score: Rang in Fremdkategorie zählt nicht');
+[$pk] = $mS->invoke(null, $basis + ['rang' => 2150, 'kategorie' => '']);
+ok($pk === $pg, 'Score: ohne Kategorieangabe bleibt der Rang');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

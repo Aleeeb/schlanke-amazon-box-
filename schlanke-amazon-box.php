@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.38.4
+ * Plugin Name: 1a Amazon Box 0.39.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.38.4
+ * Version: 0.39.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.38.4';
+    const VERSION = '0.39.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -430,7 +430,10 @@ final class SAB {
      * @return array{0:int,1:string} [Score, Hinweis]
      */
     private static function score(array $x): array {
-        $r = $x['rang'] ?? null; $pkt = 0;
+        $r = $x['rang'] ?? null; $pkt = 0; $fremd = false;
+        // Ränge in anderen Hauptkategorien (Industrie, Werkzeug, Elektronik …) sagen nichts über den Verkauf als Gartenprodukt: sie zählen nicht
+        $kat = (string) ($x['kategorie'] ?? '');
+        if ($r !== null && $kat !== '' && !preg_match('/jard[ií]n|garten|giardin|garden|lawn|c[eé]sped|outdoor/iu', $kat)) { $r = null; $fremd = true; }
         if ($r !== null) { $pkt += $r <= 1000 ? 45 : ($r <= 5000 ? 38 : ($r <= 20000 ? 28 : ($r <= 50000 ? 18 : ($r <= 150000 ? 8 : 2)))); }
         if (!empty($x['kaufen'])) { $pkt += 20; }
         $st = (string) ($x['status'] ?? '');
@@ -441,7 +444,7 @@ final class SAB {
         if (!empty($x['spar']['streich'])) { $pkt += 5; }
         if (!empty($x['deal'])) { $pkt += 5; }
         $hinweis = '';
-        if ($r === null) { $hinweis = 'ohne Verkaufsrang'; }
+        if ($r === null) { $hinweis = $fremd ? 'Rang nur in Fremdkategorie (' . $kat . '), zählt nicht' : 'ohne Verkaufsrang'; }
         if (self::unklar($x) && empty($x['trotz']) && $r !== null && $r <= 20000) { $hinweis = 'Schnittstelle prüfen: guter Rang, aber kein Angebot'; }
         return [$pkt, $hinweis];
     }
