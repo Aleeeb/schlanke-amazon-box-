@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.43.4
+ * Plugin Name: 1a Amazon Box 0.45.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.43.4
+ * Version: 0.45.0
  * Requires PHP: 7.4
  */
 
@@ -1613,12 +1613,139 @@ final class SAB {
             }
             return $t . '</tbody></table>' . self::tabellenhilfe();
         };
+        $faelle = [];
+        foreach ($weg as $a) { $faelle[$a] = 'Amazon kennt das Produkt nicht mehr'; }
+        foreach ($wa as $a) { $faelle[$a] = 'Kein Preis und kein brauchbarer Rang'; }
+        foreach ($nv as $a) { $faelle[$a] = 'Nicht lieferbar'; }
+        uksort($faelle, fn($a, $b) => array_sum(array_column($fund[$b] ?? [], 'n')) <=> array_sum(array_column($fund[$a] ?? [], 'n')));
+        $h .= self::assistent_html($faelle, (array) $d, $empf, $fund, $dp) . '<hr style="margin:2em 0"><h3>Alle Problemprodukte als Liste</h3>';
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_neu">'
             . '<h3>Amazon kennt das Produkt nicht mehr (' . count($weg) . ')</h3><p class="description">Neue ASIN eintragen und unten „Austauschen“ klicken: Das Plugin legt eine Austausch-Regel an, danach zeigen alle Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) das neue Produkt mit Bild, Link und Preis. Feste Links erst im Reiter „Umbau“ umwandeln. Rückgängig: Zeile im Reiter „Produkte und Ersatzlisten“ unter „Austausch-Regeln“ löschen.</p>' . $tabelle($weg, 'Keine.', true);
         $h .= '<h3 style="margin-top:2em">Wahrscheinlich austauschen: kein Preis und kein Verkaufsrang (' . count($wa) . ')</h3><p class="description">Diese Produkte haben weder Preis noch einen brauchbaren Rang (leer oder schlechter als Platz 300.000). Erfahrungsgemäß sind sie bei Amazon nicht mehr kaufbar. Rechts steht, wenn möglich, ein Ersatz mit hohem Score. Bitte vor dem Austausch kurz auf Amazon nachsehen.</p>' . $tabelle($wa, 'Keine.', true);
         $h .= '<h3 style="margin-top:2em">Nicht verfügbar / nicht auf Lager (' . count($nv) . ')</h3>' . $tabelle($nv, 'Keine.', true);
         $h .= '<h3 style="margin-top:2em">Unklar: Amazon meldet „nicht auf Lager“, aber ohne Preis und Verkäufer (' . count($uk) . ')</h3><p class="description">Hier stimmt die Schnittstelle oft nicht mit der Amazon-Seite überein (Beispiel: auf Amazon lieferbar, in der Schnittstelle „No disponible“). Bitte auf Amazon selbst nachsehen. Das Plugin zeigt diese Produkte weiter.</p>' . $tabelle($uk, 'Keine.', true);
         $h .= '<p><button class="button button-primary">Austauschen</button></p></form>';
+        return $h;
+    }
+
+
+    // ---------- Tausch-Assistent: Austausch dauerhaft in die Artikel schreiben (mit Sicherung und Rückgängig) ----------
+
+    /** Name des Produkts laut Artikel: Text einer anderen Zeile derselben Tabellenspalte (ohne Link/Bild), sonst fetter Text oder Überschrift kurz davor. */
+    public static function kontext_titel(string $c, string $asin): string {
+        $pos = strpos($c, $asin);
+        if ($pos === false) { return ''; }
+        if (preg_match_all('#<table\b.*?</table>#is', $c, $tm, PREG_OFFSET_CAPTURE)) {
+            foreach ($tm[0] as [$t, $off]) {
+                if ($pos < $off || $pos > $off + strlen($t)) { continue; }
+                preg_match_all('#<tr\b.*?</tr>#is', $t, $rows);
+                $ci = null; $zellen = [];
+                foreach ($rows[0] as $ri => $row) {
+                    preg_match_all('#<t[dh]\b.*?</t[dh]>#is', $row, $cs);
+                    foreach ($cs[0] as $i => $cell) { $zellen[$ri][$i] = $cell; if ($ci === null && strpos($cell, $asin) !== false) { $ci = $i; } }
+                }
+                if ($ci !== null) {
+                    foreach ($zellen as $r) {
+                        $cell = $r[$ci] ?? '';
+                        if ($cell === '' || strpos($cell, $asin) !== false || preg_match('#<a\b|<img\b|\[#i', $cell)) { continue; }
+                        $tx = trim(html_entity_decode(strip_tags($cell)));
+                        if (mb_strlen($tx) >= 5 && mb_strlen($tx) <= 140 && !preg_match('#https?://#', $tx)) { return $tx; }
+                    }
+                }
+            }
+        }
+        $vor = substr($c, max(0, $pos - 700), min($pos, 700));
+        if (preg_match_all('#<(strong|b|h[2-5])\b[^>]*>(.*?)</\1>|<span id="productTitle">(.*?)</span>#is', $vor, $m, PREG_SET_ORDER)) {
+            $l = end($m); $tx = trim(html_entity_decode(strip_tags((string) (($l[2] ?? '') !== '' ? $l[2] : ($l[3] ?? '')))));
+            if ($tx !== '') { return mb_substr($tx, 0, 140); }
+        }
+        return '';
+    }
+
+    /** Austausch im Text: ASIN überall (Platzhalter, Links, aawp), dazu der alte Name durch den neuen. @return array{0:string,1:int} [neuer Text, Zahl der Ersetzungen] */
+    public static function tausch_text(string $c, string $alt, string $neu, array $alte_namen, string $neuer_name): array {
+        $n = substr_count($c, $alt);
+        $c = str_replace($alt, $neu, $c);
+        if ($neuer_name !== '') {
+            foreach (array_unique(array_filter(array_map('trim', $alte_namen))) as $name) {
+                if (mb_strlen($name) >= 6 && $name !== $neuer_name && strpos($c, $name) !== false) { $n += substr_count($c, $name); $c = str_replace($name, $neuer_name, $c); }
+            }
+        }
+        return [$c, $n];
+    }
+
+    /** Schreibt den Austausch in alle Artikel (jeweils mit Sicherung). @return array{0:int,1:int,2:string} [Artikel, Kurzlinks ohne ASIN, Fehler] */
+    private static function tausch_festschreiben(string $alt, string $neu, string $neuer_name, array $alte_namen): array {
+        global $wpdb;
+        if (!isset($wpdb) || strlen($alt) !== 10 || strlen($neu) !== 10 || $alt === $neu) { return [0, 0, 'Ungültige Angabe.']; }
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT ID, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A);
+        $log = (array) get_option('sab_tausch_log', []); $id = (string) (time()) . substr(md5($alt . $neu), 0, 4); $posts = []; $kurz = 0;
+        foreach ((array) $rows as $r) {
+            $pid = (int) $r['ID']; $c = (string) $r['post_content'];
+            [$neu_c, $n] = self::tausch_text($c, $alt, $neu, $alte_namen, $neuer_name);
+            if ($n === 0 || $neu_c === $c) { continue; }
+            update_post_meta($pid, '_sab_tausch_' . $id, wp_slash($c));
+            wp_update_post(['ID' => $pid, 'post_content' => wp_slash($neu_c)]);
+            $posts[$pid] = md5($neu_c);
+            $kurz += preg_match_all('#amzn\.to|amzn\.eu|a\.co/#i', $neu_c);
+        }
+        if ($neuer_name !== '' && !isset(self::produkte()[$neu])) { update_option('sab_produkte', trim((string) get_option('sab_produkte', '')) . "\n" . $neu . ' | ' . $neuer_name, false); }
+        $log[$id] = ['ts' => time(), 'alt' => $alt, 'neu' => $neu, 'name' => $neuer_name, 'posts' => $posts];
+        update_option('sab_tausch_log', array_slice($log, -50, null, true), false);
+        delete_transient('sab_alle_asins');
+        return [count($posts), $kurz, ''];
+    }
+
+    /** Macht einen festgeschriebenen Austausch rückgängig (nur Artikel, die seitdem nicht von Hand geändert wurden). @return array{0:int,1:int} [zurückgesetzt, übersprungen] */
+    private static function tausch_zurueck(string $id): array {
+        $log = (array) get_option('sab_tausch_log', []); $e = $log[$id] ?? null; $ok = 0; $skip = 0;
+        if (!$e) { return [0, 0]; }
+        foreach ((array) $e['posts'] as $pid => $hash) {
+            $post = get_post((int) $pid); $alt = get_post_meta((int) $pid, '_sab_tausch_' . $id, true);
+            if (!$post || $alt === '' || md5((string) $post->post_content) !== $hash) { $skip++; continue; }
+            wp_update_post(['ID' => (int) $pid, 'post_content' => wp_slash((string) $alt)]);
+            delete_post_meta((int) $pid, '_sab_tausch_' . $id); $ok++;
+        }
+        unset($log[$id]); update_option('sab_tausch_log', $log, false); delete_transient('sab_alle_asins');
+        return [$ok, $skip];
+    }
+
+    /** Fenster oben im Reiter „Ausfälle und Wartung“: je Problemprodukt ein Vorschlag, per Klick freigeben. */
+    private static function assistent_html(array $faelle, array $d, array $empf, array $fund, string $dp): string {
+        $namen = self::produkte(); $skip = (array) get_option('sab_tausch_skip', []); $log = (array) get_option('sab_tausch_log', []);
+        $h = '<h3>Tausch-Assistent</h3><p class="description">Für jedes Produkt, das Amazon nicht mehr kennt oder das nicht lieferbar ist, steht hier ein Vorschlag. „Freigeben“ schreibt den Austausch dauerhaft in die Artikel (ASIN, Link und Name). Vorher wird jeder Artikel gesichert, „Rückgängig“ unten stellt ihn wieder her. Kurzlinks (amzn.to) ohne ASIN bleiben erst unverändert, die wandelt der Reiter „Umbau“ um.</p>';
+        $n = 0; $style = 'border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 10px;max-width:980px;display:flex;gap:16px;flex-wrap:wrap';
+        foreach ($faelle as $alt => $grund) {
+            if (isset($skip[$alt])) { continue; }
+            $f = $fund[$alt] ?? []; if (!$f) { continue; }
+            $x = $d['items'][$alt] ?? null; $e = $empf[$alt] ?? null; $n++;
+            $kn = ''; if (!$x) { $pid = (int) array_key_first($f); $post = get_post($pid); $kn = $post ? self::kontext_titel((string) $post->post_content, $alt) : ''; }
+            $altname = ($namen[$alt] ?? '') ?: ($x['titel'] ?? '') ?: $kn;
+            $li = ''; foreach (array_slice($f, 0, 6, true) as $pid => $a) { $li .= '<li>' . esc_html($a['titel'] ?: ('Beitrag ' . $pid)) . ' (' . (int) $a['n'] . '×)</li>'; }
+            $h .= '<form method="post" style="' . $style . '">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_fest"><input type="hidden" name="sab_alt" value="' . esc_attr($alt) . '">'
+               . '<div style="flex:1 1 300px"><strong style="color:#a00">' . esc_html($grund) . '</strong><br><a href="' . esc_url($dp . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . esc_html($altname) . ($kn !== '' && !$x ? '<br><small>Name laut Artikel: „' . esc_html($kn) . '“</small>' : '') . '<ul style="margin:6px 0 0;font-size:12px">' . $li . (count($f) > 6 ? '<li>… und ' . (count($f) - 6) . ' weitere</li>' : '') . '</ul></div>'
+               . '<div style="flex:1 1 320px">';
+            if ($e) {
+                $nx = $d['items'][$e[0]] ?? [];
+                $vorschlag = ($namen[$e[0]] ?? '') ?: $e[2];
+                $h .= '<strong>Vorschlag:</strong> ' . (!empty($nx['bilder'][0]) ? '<img src="' . esc_url($nx['bilder'][0]) . '" alt="" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:6px">' : '') . '<a href="' . esc_url($dp . $e[0]) . '" target="_blank" rel="noopener"><code>' . esc_html($e[0]) . '</code></a><br><small>Score ' . (int) $e[1] . ' &middot; ' . esc_html((string) ($nx['preis'] ?? '')) . '</small>'
+                    . '<input type="hidden" name="sab_neu" value="' . esc_attr($e[0]) . '"><br><label>Name im Artikel: <input type="text" name="sab_name" value="' . esc_attr($vorschlag) . '" class="regular-text" style="max-width:260px"></label>';
+            } else {
+                $h .= '<strong>Kein Ersatz in der Gruppe gefunden.</strong><br><label>Neue ASIN: <input type="text" name="sab_neu" size="12" maxlength="10" placeholder="B0…"></label><br><label>Name im Artikel: <input type="text" name="sab_name" class="regular-text" style="max-width:260px"></label>';
+            }
+            $h .= '<p style="margin:8px 0 0"><button class="button button-primary">Freigeben und in ' . count($f) . ' Artikel schreiben</button> <button class="button" name="sab_zurueckstellen" value="1">Zurückstellen</button></p></div></form>';
+            if ($n >= 10) { $h .= '<p class="description">Weitere Vorschläge erscheinen, sobald diese erledigt sind.</p>'; break; }
+        }
+        if ($n === 0) { $h .= '<p>Keine offenen Vorschläge.</p>'; }
+        if ($log) {
+            $h .= '<h4>Zuletzt festgeschrieben</h4><ul>';
+            foreach (array_reverse($log, true) as $id => $e) {
+                $h .= '<li><form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_zurueck"><input type="hidden" name="sab_id" value="' . esc_attr((string) $id) . '">'
+                    . esc_html(gmdate('d.m. H:i', (int) $e['ts'])) . ': <code>' . esc_html($e['alt']) . '</code> &rarr; <code>' . esc_html($e['neu']) . '</code> in ' . count((array) $e['posts']) . ' Artikeln <button class="button button-small">Rückgängig</button></form></li>';
+                if (count($log) > 8) { break; }
+            }
+            $h .= '</ul>';
+        }
         return $h;
     }
 
@@ -1650,7 +1777,7 @@ final class SAB {
         $h .= '<style>table.sab-uebers td{vertical-align:middle;padding:6px 8px}table.sab-uebers .sab-thumb{width:48px;height:48px;object-fit:contain;background:#fff;border:1px solid #e3e6e6;border-radius:4px}'
             . 'table.sab-uebers .sab-bal{display:inline-block;height:8px;border-radius:4px;vertical-align:middle;margin-right:6px}table.sab-uebers .sab-zahl{text-align:right;white-space:nowrap}'
             . 'table.sab-uebers .sab-chip{display:inline-block;padding:1px 6px;border-radius:9px;font-size:11px;margin:1px 2px 1px 0;background:#eef0f0;color:#333}table.sab-uebers .sab-chip.ok{background:#e3f4e7;color:#1a7f37}table.sab-uebers .sab-chip.warn{background:#fdf0d8;color:#8a5a00}table.sab-uebers .sab-chip.bad{background:#fbe3e3;color:#a00}'
-            . 'table.sab-uebers .sab-name{max-width:340px}table.sab-uebers details summary{cursor:pointer;color:#2271b1}.sab-spark{display:inline-flex;align-items:flex-end;gap:1px;height:16px}.sab-spark i{display:block;width:3px;border-radius:1px}</style>';
+            . 'table.sab-uebers .sab-name{max-width:340px}table.sab-uebers details summary{cursor:pointer;color:#2271b1}.sab-bildspalte{width:52px;flex:none}.sab-minis{display:flex;gap:2px;margin-top:2px;width:52px;overflow-x:auto;scrollbar-width:none}.sab-minis::-webkit-scrollbar{display:none}table.sab-uebers .sab-mini{width:14px;height:14px;object-fit:contain;border:1px solid #e3e6e6;border-radius:2px;cursor:pointer;background:#fff;flex:none}#sab-gross{position:fixed;z-index:100000;right:16px;top:60px;width:300px;max-width:80vw;background:#fff;border:1px solid #c3c4c7;box-shadow:0 4px 18px rgba(0,0,0,.25);border-radius:8px;padding:6px;display:none}#sab-gross img{width:100%;height:auto;display:block}.sab-spark{display:inline-flex;align-items:flex-end;gap:1px;height:16px}.sab-spark i{display:block;width:3px;border-radius:1px}</style>';
         $h .= '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Auf wie vielen Seiten das Produkt verlinkt ist, wie oft insgesamt (Bild und Button zählen je einmal) und das Maximum auf einer Seite. Kurzlinks ohne ASIN werden nicht erkannt. „allgemein“ = auf mehr als 10 Seiten.">Seiten</th><th class="sab-zahl" title="Priorität zum Tauschen: (100 minus Score) mal Seiten. Hoch = schlechter Score auf vielen Seiten.">Prio.</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th>Mehr</th></tr></thead><tbody>';
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
@@ -1660,6 +1787,9 @@ final class SAB {
             $farbe = self::score_farbe($sc);
             $bild = !empty($x['bilder'][0]) ? '<a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><img class="sab-thumb" loading="lazy" src="' . esc_url($x['bilder'][0]) . '" alt=""></a>' : '';
             $lief = !empty($x['trotz']) ? ['ok', 'lieferbar (geprüft)'] : (empty($x['lieferbar']) ? ['bad', 'kein Angebot'] : (self::unklar($x) ? ['warn', 'unklar'] : (($x['status'] ?? '') === 'OUT_OF_STOCK' ? ['bad', 'nicht auf Lager'] : ((($x['status'] ?? '') === 'IN_STOCK' || ($x['status'] ?? '') === '') ? ['ok', 'lieferbar'] : ['warn', 'eingeschränkt']))));
+            $mini = '';
+            foreach (array_slice((array) ($x['bilder'] ?? []), 1, 5) as $bu) { $mini .= '<img class="sab-mini" loading="lazy" src="' . esc_url($bu) . '" alt="" title="Klicken: groß ansehen">'; }
+            $bild = '<div class="sab-bildspalte">' . $bild . ($mini !== '' ? '<div class="sab-minis">' . $mini . '</div>' : '') . '</div>';
             $chips = '<span class="sab-chip ' . $lief[0] . '">' . esc_html($lief[1]) . '</span>'
                    . '<span class="sab-chip ' . (($x['kaufen'] ?? null) ? 'ok' : 'bad') . '" title="Buy Box = Kaufen-Button">Buy Box ' . (($x['kaufen'] ?? null) === null ? '?' : (($x['kaufen']) ? 'ja' : 'nein')) . '</span>'
                    . (!empty($x['deal']) ? '<span class="sab-chip warn">' . esc_html($x['deal']) . '</span>' : '')
@@ -1687,7 +1817,7 @@ final class SAB {
                . '<td class="sab-zahl" data-v="' . (isset($x['rang']) ? (int) $x['rang'] : '') . '">' . $rang . '</td><td class="sab-zahl" data-v="' . $ns . '">' . $seiten . '</td><td class="sab-zahl" data-v="' . $prio . '">' . ($prio > 0 ? '<strong style="color:' . ($prio >= 1500 ? '#a00' : ($prio >= 500 ? '#b36b00' : '#555')) . '">' . $prio . '</strong>' : '–') . '</td><td class="sab-zahl" data-v="' . $nk . '">' . $klick . '</td>'
                . self::markenzellen($asin) . '<td>' . $mehr . '</td></tr>';
         }
-        return $h . '</tbody></table>' . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Warnungen“.</span></p>';
+        return $h . '</tbody></table>' . '<div id="sab-gross"><img alt=""></div><script>(function(){var g=document.getElementById("sab-gross"),i=g&&g.querySelector("img");document.addEventListener("click",function(e){var t=e.target;if(t.classList&&t.classList.contains("sab-mini")){i.src=t.src;g.style.display="block";e.preventDefault()}else if(g&&g.style.display==="block"&&!g.contains(t)){g.style.display="none"}})})();</script>' . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Warnungen“.</span></p>';
     }
 
     // ---------- Umbau-Werkzeug: feste Amazon-Links in Artikeln => Plugin-Platzhalter ----------
@@ -2068,7 +2198,7 @@ final class SAB {
         'produkte'      => 'Produkte und Ersatzlisten',
         'ausfaelle'     => 'Ausfälle und Warnungen',
         'statistik'     => 'Statistik',
-        'problem'       => 'Problemprodukte',
+        'problem'       => 'Ausfälle und Wartung',
         'gruppen'       => 'Produktgruppen',
         'score'         => 'Score',
         'umbau'         => 'Umbau',
@@ -2224,6 +2354,19 @@ JS;
                 }
                 $meldung = $neu ? count($neu) . ' Austausch-Regel(n) angelegt: ' . implode(', ', $neu) . '.' : 'Nichts eingetragen.';
                 if ($fehler) { $meldung .= ' Ungültig (nicht 10 Zeichen oder gleich): ' . implode(', ', $fehler) . '.'; }
+            } elseif ($form === 'tausch_fest') {
+                $alt = self::asin((string) ($_POST['sab_alt'] ?? '')); $neu = self::asin((string) ($_POST['sab_neu'] ?? ''));
+                if (!empty($_POST['sab_zurueckstellen'])) { $sk = (array) get_option('sab_tausch_skip', []); $sk[$alt] = time(); update_option('sab_tausch_skip', $sk, false); $meldung = 'Zurückgestellt: ' . $alt . '.'; }
+                else {
+                    $name = trim(sanitize_text_field(wp_unslash($_POST['sab_name'] ?? '')));
+                    $d0 = self::uebersicht_daten(self::land(''), false); $f0 = self::fundstellen([$alt]); $an = [(string) (self::produkte()[$alt] ?? ''), (string) ($d0['items'][$alt]['titel'] ?? '')];
+                    if (!$an[1] && !empty($f0[$alt])) { $p0 = get_post((int) array_key_first($f0[$alt])); $an[] = $p0 ? self::kontext_titel((string) $p0->post_content, $alt) : ''; }
+                    [$na, $nk, $fe] = self::tausch_festschreiben($alt, $neu, $name, $an);
+                    $meldung = $fe !== '' ? $fe : $alt . ' → ' . $neu . ' in ' . $na . ' Artikel(n) geschrieben.' . ($nk ? ' In diesen Artikeln stehen noch ' . $nk . ' Kurzlinks, die erst der Umbau erfasst.' : '');
+                }
+            } elseif ($form === 'tausch_zurueck') {
+                [$ok, $sk] = self::tausch_zurueck(sanitize_text_field(wp_unslash($_POST['sab_id'] ?? '')));
+                $meldung = $ok . ' Artikel zurückgesetzt' . ($sk ? ', ' . $sk . ' übersprungen (seitdem von Hand geändert)' : '') . '.';
             } elseif ($form === 'katgroesse') {
                 update_option('sab_kat_groesse', sanitize_textarea_field(wp_unslash($_POST['sab_kat_groesse'] ?? '')), false);
                 $meldung = 'Kategoriegrößen gespeichert.';
