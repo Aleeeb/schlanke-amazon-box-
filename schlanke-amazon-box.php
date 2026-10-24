@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.41.0
+ * Plugin Name: 1a Amazon Box 0.42.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.41.0
+ * Version: 0.42.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.41.0';
+    const VERSION = '0.42.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -428,7 +428,7 @@ final class SAB {
     }
 
     /** Standard-Gewichte des Scores (Summe 100). „prime“ bleibt 0, solange die Schnittstelle Prime nicht liefert. */
-    const SCORE_STANDARD = ['rang' => 35, 'buybox' => 20, 'angebot' => 15, 'preis' => 15, 'streich' => 10, 'deal' => 5, 'prime' => 0];
+    const SCORE_STANDARD = ['rang' => 30, 'buybox' => 20, 'angebot' => 15, 'preis' => 10, 'streich' => 10, 'deal' => 5, 'bewertung' => 10, 'prime' => 0, 'liefer' => 0];
     const SCORE_NAMEN = [
         'rang'    => 'Verkaufsrang',
         'buybox'  => 'Buy Box (Kaufen-Button)',
@@ -436,7 +436,9 @@ final class SAB {
         'preis'   => 'Günstiger Preis (im Vergleich zur Gruppe)',
         'streich' => 'Streichpreis / Ersparnis',
         'deal'    => 'Aktion / Deal',
-        'prime'   => 'Prime (noch nicht lieferbar)',
+        'bewertung' => 'Bewertung (Sterne und Anzahl, von Hand)',
+        'prime'   => 'Prime (von Hand)',
+        'liefer'  => 'Lieferzeit (von Hand, Ø Hauptstädte)',
     ];
 
     /** Gewichte aus den Einstellungen; Fehlendes und Ungültiges fällt auf den Standard zurück. @return array<string,int> */
@@ -454,6 +456,36 @@ final class SAB {
         elseif (strpos($z, ',') !== false) { $z = str_replace(',', '.', $z); }
         elseif (preg_match('/\.\d{3}$/', $z)) { $z = str_replace('.', '', $z); }
         return (float) $z;
+    }
+
+    /**
+     * Von Hand gepflegte Daten, eine Zeile pro Produkt: „ASIN | Sterne | Anzahl | Prime (ja/nein) | Lieferzeit je Stadt | Datum“,
+     * z. B. „B001AUKTYG | 4,1 | 588 | ja | Madrid 2, Barcelona 3, Sevilla 2 | 2026-10-24“. Leere Felder bleiben leer. @return array<string,array>
+     */
+    private static function manuell_daten(): array {
+        $out = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_manuell', '')) as $z) {
+            $t = array_map('trim', explode('|', $z));
+            $a = self::asin($t[0] ?? ''); if (strlen($a) !== 10) { continue; }
+            $zahl = fn($v) => $v !== '' && preg_match('/\d/', $v) ? (float) str_replace(',', '.', preg_replace('/[^\d,.]/', '', $v)) : null;
+            $tage = null;
+            if (preg_match_all('/(\d+(?:[.,]\d+)?)\s*(?:T|Tage?|d)?\b/u', preg_replace('/\p{L}+/u', ' ', (string) ($t[4] ?? '')), $m) && $m[1]) {
+                $v = array_map(fn($n) => (float) str_replace(',', '.', $n), $m[1]); $tage = array_sum($v) / count($v);
+            }
+            $p = mb_strtolower($t[3] ?? '');
+            $out[$a] = [
+                'sterne' => $zahl($t[1] ?? ''), 'anzahl' => isset($t[2]) && $t[2] !== '' ? (int) preg_replace('/\D/', '', $t[2]) : null,
+                'prime' => $p === '' ? null : in_array($p, ['ja', 'yes', 'j', '1', 'prime'], true), 'liefertage' => $tage,
+                'liefertext' => $t[4] ?? '', 'manuell_stand' => $t[5] ?? '',
+            ];
+        }
+        return $out;
+    }
+
+    private static function mit_manuell(array $d): array {
+        if (empty($d['items'])) { return $d; }
+        foreach (self::manuell_daten() as $a => $m) { if (isset($d['items'][$a])) { $d['items'][$a] = array_merge($d['items'][$a], $m); } }
+        return $d;
     }
 
     /** Preis im Vergleich: Verhältnis zum mittleren Preis der Produktgruppe (sonst der Kategorie), ab drei Produkten mit Preis. */
@@ -501,7 +533,12 @@ final class SAB {
         else { $f['preis'] = [0.5, 'kein Vergleich möglich']; }
         $f['streich'] = !empty($x['spar']['streich']) ? [1.0, 'vorhanden'] : [0.0, 'keiner'];
         $f['deal'] = !empty($x['deal']) ? [1.0, (string) $x['deal']] : [0.0, 'keine'];
-        $f['prime'] = !empty($x['prime']) ? [1.0, 'ja'] : [0.0, 'unbekannt'];
+        if (isset($x['sterne']) && $x['sterne'] !== null) {   // vorsichtig bewertet: wenige Bewertungen ziehen zum Mittelwert 4,0
+            $n = (int) ($x['anzahl'] ?? 0); $st5 = ((float) $x['sterne'] * $n + 4.0 * 20) / ($n + 20);
+            $f['bewertung'] = [max(0.0, min(1.0, ($st5 - 3.0) / 2.0)), str_replace('.', ',', (string) $x['sterne']) . ' ★ (' . $n . ')'];
+        } else { $f['bewertung'] = [0.5, 'unbekannt']; }
+        $f['prime'] = isset($x['prime']) && $x['prime'] !== null ? [$x['prime'] ? 1.0 : 0.0, $x['prime'] ? 'ja' : 'nein'] : [0.5, 'unbekannt'];
+        $f['liefer'] = isset($x['liefertage']) && $x['liefertage'] !== null ? [max(0.0, min(1.0, (7 - (float) $x['liefertage']) / 6)), 'Ø ' . str_replace('.', ',', (string) round((float) $x['liefertage'], 1)) . ' Tage'] : [0.5, 'unbekannt'];
         $roh = 0.0; $det = [];
         foreach (self::SCORE_STANDARD as $k => $_) {
             $pt = $summe > 0 ? 100 * $w[$k] * $f[$k][0] / $summe : 0;
@@ -1173,7 +1210,7 @@ final class SAB {
      * „Neu laden“ geklickt, holt ein Hintergrundauftrag (WP-Cron) die neuen Daten. Nur beim allerersten Mal wartet die Seite auf Amazon.
      */
     private static function uebersicht_daten(string $land, bool $frisch = false): array {
-        return self::mit_preisindex(self::uebersicht_daten_roh($land, $frisch));
+        return self::mit_preisindex(self::mit_manuell(self::uebersicht_daten_roh($land, $frisch)));
     }
 
     private static function uebersicht_daten_roh(string $land, bool $frisch = false): array {
@@ -1259,12 +1296,17 @@ final class SAB {
             'preis'   => 'Preis geteilt durch den mittleren Preis der Produktgruppe (sonst der Kategorie, mindestens drei Produkte): 1 bei 70 % oder weniger, 0 bei 150 % oder mehr. Ohne Vergleich 0,5.',
             'streich' => '1, wenn Amazon einen durchgestrichenen Preis (Ersparnis) zeigt.',
             'deal'    => '1 bei einer Aktion, einem Coupon oder einem Deal.',
-            'prime'   => 'Die Amazon-Schnittstelle liefert Prime derzeit nicht (die angefragte Angabe wurde abgelehnt). Das Gewicht wirkt erst, wenn sie verfügbar ist.',
+            'bewertung' => 'Sterne und Anzahl von Hand eingetragen (unten). Wenige Bewertungen zählen vorsichtig: 4,0 Sterne ist der Mittelwert. 3 Sterne ergibt 0, 5 Sterne 1. Ohne Angabe 0,5.',
+            'prime'   => 'Prime von Hand eingetragen (die Amazon-Schnittstelle liefert es nicht): ja 1, nein 0, unbekannt 0,5. Gewicht standardmäßig 0.',
+            'liefer'  => 'Durchschnittliche Lieferzeit in Tagen zu den eingetragenen Hauptstädten: 1 Tag oder weniger ergibt 1, 7 Tage oder mehr 0. Ohne Angabe 0,5. Gewicht standardmäßig 0.',
         ];
         foreach (self::SCORE_NAMEN as $k => $name) {
             $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="100" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:70px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
         }
-        $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 35, Buy Box 20, Angebot 15, Preis 15, Streichpreis 10, Deal 5.</span></p></form>';
+        $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 30, Buy Box 20, Angebot 15, Preis 10, Streichpreis 10, Deal 5, Bewertung 10.</span></p></form>';
+        $h .= '<h3 style="margin-top:2em">Von Hand gepflegte Daten</h3><p class="description">Die Amazon-Schnittstelle liefert keine Sterne, kein Prime und keine Lieferzeit. Trag sie hier ein, eine Zeile pro Produkt: <code>ASIN | Sterne | Anzahl Bewertungen | Prime (ja/nein) | Lieferzeit in Tagen je Hauptstadt | Datum</code>, zum Beispiel <code>B001AUKTYG | 4,1 | 588 | ja | Madrid 2, Barcelona 3, Sevilla 2 | 2026-10-24</code>. Leere Felder sind erlaubt. Die Angaben erscheinen als Chips in der Übersicht und fließen in den Score ein (Gewicht oben).</p>'
+           . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="manuell">'
+           . '<textarea name="sab_manuell" rows="10" class="large-text code">' . esc_textarea((string) get_option('sab_manuell', '')) . '</textarea><p><button class="button button-primary">Handdaten speichern</button></p></form>';
         $d = self::uebersicht_daten($land, false);
         $h .= self::stand_hinweis($d);
         if (!empty($d['items'])) {
@@ -1515,7 +1557,10 @@ final class SAB {
             $lief = !empty($x['trotz']) ? ['ok', 'lieferbar (geprüft)'] : (empty($x['lieferbar']) ? ['bad', 'kein Angebot'] : (self::unklar($x) ? ['warn', 'unklar'] : (($x['status'] ?? '') === 'OUT_OF_STOCK' ? ['bad', 'nicht auf Lager'] : ((($x['status'] ?? '') === 'IN_STOCK' || ($x['status'] ?? '') === '') ? ['ok', 'lieferbar'] : ['warn', 'eingeschränkt']))));
             $chips = '<span class="sab-chip ' . $lief[0] . '">' . esc_html($lief[1]) . '</span>'
                    . '<span class="sab-chip ' . (($x['kaufen'] ?? null) ? 'ok' : 'bad') . '" title="Buy Box = Kaufen-Button">Buy Box ' . (($x['kaufen'] ?? null) === null ? '?' : (($x['kaufen']) ? 'ja' : 'nein')) . '</span>'
-                   . (!empty($x['deal']) ? '<span class="sab-chip warn">' . esc_html($x['deal']) . '</span>' : '');
+                   . (!empty($x['deal']) ? '<span class="sab-chip warn">' . esc_html($x['deal']) . '</span>' : '')
+                   . (isset($x['sterne']) && $x['sterne'] !== null ? '<span class="sab-chip" title="von Hand gepflegt' . (!empty($x['manuell_stand']) ? ', Stand ' . esc_attr($x['manuell_stand']) : '') . '">★ ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')</span>' : '')
+                   . (isset($x['prime']) && $x['prime'] !== null ? '<span class="sab-chip ' . ($x['prime'] ? 'ok' : '') . '">' . ($x['prime'] ? 'Prime' : 'kein Prime') . '</span>' : '')
+                   . (isset($x['liefertage']) && $x['liefertage'] !== null ? '<span class="sab-chip" title="' . esc_attr((string) ($x['liefertext'] ?? '')) . '">Lieferung Ø ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T</span>' : '');
             $sp = (array) ($x['spar'] ?? []);
             $preis = ($x['preis'] ?? '') !== '' ? '<strong>' . esc_html($x['preis']) . '</strong>' . (!empty($sp['streich']) ? '<br><small><s>' . esc_html($sp['streich']) . '</s>' . (isset($sp['prozent']) ? ' &minus;' . (int) $sp['prozent'] . ' %' : '') . '</small>' : '') : '–';
             $rang = isset($x['rang']) && $x['rang'] !== null ? '<span title="' . esc_attr((string) ($x['kategorie'] ?? '')) . '">' . number_format((int) $x['rang'], 0, ',', '.') . '</span>' : '–';
@@ -2071,6 +2116,9 @@ JS;
                 }
                 $meldung = $neu ? count($neu) . ' Austausch-Regel(n) angelegt: ' . implode(', ', $neu) . '.' : 'Nichts eingetragen.';
                 if ($fehler) { $meldung .= ' Ungültig (nicht 10 Zeichen oder gleich): ' . implode(', ', $fehler) . '.'; }
+            } elseif ($form === 'manuell') {
+                update_option('sab_manuell', sanitize_textarea_field(wp_unslash($_POST['sab_manuell'] ?? '')), false);
+                $meldung = 'Handdaten gespeichert.';
             } elseif ($form === 'score') {
                 if (!empty($_POST['sab_score_std'])) { delete_option('sab_score_w'); $meldung = 'Gewichte auf den Standard zurückgesetzt.'; }
                 else {
