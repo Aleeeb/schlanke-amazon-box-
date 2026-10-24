@@ -50,6 +50,7 @@ function do_shortcode($t) {
         preg_match_all('#(\w+)="([^"]*)"#', $m[2], $a); return call_user_func($GLOBALS['sc'][$m[1]], array_combine($a[1], $a[2]), '');
     }, $t);
 }
+if (!function_exists('admin_url')) { function admin_url($p = '') { return 'https://x.test/wp-admin/' . $p; } }
 class FakeResp { public $url; function __construct($u) { $this->url = $u; } }
 class FakeHttp { public $o; function __construct($u) { $this->o = new FakeResp($u); } function get_response_object() { return $this->o; } }
 function wp_remote_head($u, $a = []) { $z = $GLOBALS['kurz'][$u] ?? ''; return ['http_response' => new FakeHttp($z)]; }
@@ -563,4 +564,15 @@ $basis = ['kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis'
 ok($pg > $pi && strpos($hi, 'Fremdkategorie') !== false, 'Score: Rang in Fremdkategorie zählt nicht');
 [$pk] = $mS->invoke(null, $basis + ['rang' => 2150, 'kategorie' => '']);
 ok($pk === $pg, 'Score: ohne Kategorieangabe bleibt der Rang');
+
+// ---- 0.40.0: Block und Pluginlisten-Links ----
+$GLOBALS['opt']['sab_gruppen'] = ''; $GLOBALS['opt']['sab_produkte'] = '';
+$o = SAB::block_ausgabe(['quelle' => "B0TABLE001 | Mein Titel\nB0TABLE002 | Zweiter", 'darstellung' => 'karte']);
+ok(substr_count($o, 'class="sab-karte"') === 2 && strpos($o, 'repeat(2,') !== false && strpos($o, 'Mein Titel') !== false, 'Block: zwei Zeilen = zwei Karten nebeneinander');
+$GLOBALS['kurz']['https://amzn.to/blocktest'] = 'https://www.amazon.es/x/dp/B0TABLE002';
+$o = SAB::block_ausgabe(['quelle' => 'https://amzn.to/blocktest', 'darstellung' => 'button', 'text' => 'Ver']);
+ok(strpos($o, 'B0TABLE002') !== false && strpos($o, '>Ver<') !== false, 'Block: Kurzlink wird zur ASIN, Button');
+ok(SAB::block_ausgabe(['quelle' => '', 'darstellung' => 'karte']) === '', 'Block: ohne Eingabe nichts');
+$l = SAB::aktionslinks(['<a>Deaktivieren</a>']);
+ok(count($l) === 3 && strpos($l[0], 'sab-einstellungen') !== false, 'Pluginliste: Link Einstellungen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

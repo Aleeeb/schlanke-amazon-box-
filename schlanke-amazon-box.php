@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.39.0
+ * Plugin Name: 1a Amazon Box 0.40.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.39.0
+ * Version: 0.40.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.39.0';
+    const VERSION = '0.40.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -78,8 +78,11 @@ final class SAB {
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
         add_action('sab_holen',      [__CLASS__, 'holen'], 10, 2);
+        add_action('sab_uebersicht_holen', [__CLASS__, 'uebersicht_holen'], 10, 1);
         add_action('sab_bild_holen', [__CLASS__, 'bild_holen'], 10, 3);
         add_action('admin_menu',     [__CLASS__, 'menue']);
+        add_action('init',           [__CLASS__, 'block_registrieren']);
+        add_filter('plugin_action_links_' . plugin_basename(__FILE__), [__CLASS__, 'aktionslinks']);
         add_action('rest_api_init',  [__CLASS__, 'rest']);
         add_action('wp_footer',      [__CLASS__, 'messskript']);
         add_action('wp_footer',      [__CLASS__, 'fuss'], 5);
@@ -1102,11 +1105,29 @@ final class SAB {
     }
 
     /** Holt Details für die Übersicht (höchstens 1 Stunde zwischengespeichert, Amazon-Regel für Angebote). */
+    /**
+     * Daten für Übersicht, Problemprodukte und Umbau. Es wird immer der letzte Stand sofort gezeigt; ist er älter als eine Stunde oder wird
+     * „Neu laden“ geklickt, holt ein Hintergrundauftrag (WP-Cron) die neuen Daten. Nur beim allerersten Mal wartet die Seite auf Amazon.
+     */
     private static function uebersicht_daten(string $land, bool $frisch = false): array {
         $key = "sab_uebersicht_{$land}";
-        if ($frisch) { delete_transient($key); }
         $c = get_transient($key);
-        if (is_array($c)) { return $c; }
+        if (is_array($c) && !$frisch) { return $c; }
+        $stand = get_option("sab_uebersicht_stand_{$land}");
+        if (is_array($stand) && !empty($stand['items']) && !defined('SAB_SYNC')) {
+            self::im_hintergrund('sab_uebersicht_holen', [$land]);
+            $stand['im_hintergrund'] = true;
+            return $stand;
+        }
+        return self::uebersicht_holen($land);
+    }
+
+    /** Hintergrundauftrag: neue Daten bei Amazon holen und als Stand speichern. */
+    public static function uebersicht_holen($land): array {
+        $land = (string) $land;
+        if (!isset(self::LAENDER[$land])) { return ['fehler' => 'Land unbekannt.', 'items' => []]; }
+        $key = "sab_uebersicht_{$land}";
+        delete_transient($key);
         $token = self::token($land); $tag = self::tag($land);
         if (!$token || !$tag) { return ['fehler' => 'Zugangsdaten oder Partner-ID fehlen.', 'items' => []]; }
         $mp = self::LAENDER[$land][0]; $items = []; $fehler = '';
@@ -1153,8 +1174,16 @@ final class SAB {
         // Bewertungen liefert diese Schnittstelle nicht (Antwort immer ohne Werte): keine Abfrage mehr, das spart Abfragen (Limit 1 pro Sekunde)
         $bew = ['fehler' => '', 'werte' => []];
         $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
-        if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); }
+        $out['ts'] = time();
+        if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); }
         return $out;
+    }
+
+    /** Hinweiszeile zum Alter der Daten (Übersicht, Problemprodukte, Umbau). */
+    private static function stand_hinweis(array $d): string {
+        if (empty($d['ts'])) { return ''; }
+        $min = max(0, (int) round((time() - (int) $d['ts']) / 60));
+        return '<p class="description">Stand: vor ' . ($min < 60 ? $min . ' Min.' : round($min / 60, 1) . ' Std.') . (!empty($d['im_hintergrund']) ? ' &ndash; neue Daten werden gerade im Hintergrund geholt, bitte die Seite in ein bis zwei Minuten neu öffnen.' : '') . '</p>';
     }
 
     /** Reiter „Statistik“: Klicks pro Tag als Balkengrafik und sortierbare Liste der meistgeklickten Produkte (mit Rückkehr und Zeit). */
@@ -1241,6 +1270,7 @@ final class SAB {
            . '<p><button class="button button-primary">Gruppen speichern</button></p></form>';
         if (!$gr) { return $h . '<p>Noch keine Gruppen angelegt.</p>'; }
         $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
+        $h .= self::stand_hinweis($d);
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         $namen = self::produkte(); $trotz = (array) get_option('sab_trotz', []);
         $h .= '<p class="description">Stand höchstens 1 Stunde alt. Der Score (0 bis 100) vergleicht Verkaufsrang, Buy Box, Verfügbarkeit, Preis und Aktion. Der Rang gilt nur innerhalb einer Kategorie, innerhalb einer Gruppe ähnlicher Produkte ist der Vergleich aussagekräftig.</p>';
@@ -1299,6 +1329,7 @@ final class SAB {
         $h = '<h2>Problemprodukte (' . esc_html($land) . ')</h2>'
            . '<p class="description">Stand höchstens 1 Stunde alt. Gezählt werden die Produkte, die per Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) eingebunden sind, samt allen Stellen in Artikeln dieser Webseite, auch feste Links.</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><p><button class="button" name="sab_neu" value="1">Neu laden</button></p></form>';
+        $h .= self::stand_hinweis($d);
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         $weg = []; $nv = []; $uk = []; $wa = []; $trotz = (array) get_option('sab_trotz', []);
         foreach (self::alle_asins() as $asin) {
@@ -1358,6 +1389,7 @@ final class SAB {
         $h = '<h2>Übersicht aller Produkte (' . esc_html($land) . ')</h2>'
            . '<p class="description">Stand höchstens 1 Stunde alt. Bilder kommen hier direkt von Amazon (nur im Admin-Bereich, nicht für Besucher). Die Lieferzeit liefert die API nicht; sie ist nur auf der Amazon-Seite mit spanischer Lieferadresse sichtbar.</p>'
            . '<p><button class="button" name="sab_neu" value="1">Übersicht neu laden</button></p>';
+        $h .= self::stand_hinweis($d);
         if ($d['fehler']) { $h .= '<div class="notice notice-warning inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         if ($d['fehler']) { return $h; }
         if (empty($d['bewertungen']['fehler']) && isset($d['bewertungen']) && !array_filter(array_column($d['bewertungen']['werte'], 'anzahl'), fn($v) => $v !== null)) {
@@ -1772,6 +1804,70 @@ final class SAB {
         'einstellungen' => 'Einstellungen',
         'hilfe'         => 'Hilfe',
     ];
+
+    /** Links in der Pluginliste neben „Deaktivieren“. */
+    public static function aktionslinks($links): array {
+        $neu = [
+            '<a href="' . esc_url(admin_url('admin.php?page=sab-einstellungen')) . '">Einstellungen</a>',
+            '<a href="' . esc_url(admin_url('admin.php?page=sab')) . '">Übersicht</a>',
+        ];
+        return array_merge($neu, (array) $links);
+    }
+
+    /**
+     * Gutenberg-Block „Amazon-Produkt“ (dynamisch: die Ausgabe kommt beim Anzeigen vom Plugin, so wirken Austausch, Gruppen und Tests).
+     * Eingabe pro Zeile: ASIN, Amazon-Adresse oder Kurzlink (amzn.to/…), optional „ | Kurzname“. Mehrere Zeilen = Karten nebeneinander.
+     */
+    public static function block_registrieren(): void {
+        if (!function_exists('register_block_type') || !function_exists('wp_register_script')) { return; }
+        wp_register_script('sab-block', '', ['wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-server-side-render'], self::VERSION, true);
+        wp_add_inline_script('sab-block', self::BLOCK_JS);
+        register_block_type('sab/produkt', [
+            'api_version'     => 2,
+            'title'           => 'Amazon-Produkt (1a Amazon Box)',
+            'category'        => 'widgets',
+            'icon'            => 'cart',
+            'attributes'      => ['quelle' => ['type' => 'string', 'default' => ''], 'darstellung' => ['type' => 'string', 'default' => 'karte'], 'text' => ['type' => 'string', 'default' => '']],
+            'editor_script'   => 'sab-block',
+            'render_callback' => [__CLASS__, 'block_ausgabe'],
+        ]);
+    }
+
+    const BLOCK_JS = <<<'JS'
+(function(w){var b=w.wp.blocks,e=w.wp.element.createElement,be=w.wp.blockEditor,c=w.wp.components,SSR=w.wp.serverSideRender;
+b.registerBlockType('sab/produkt',{edit:function(p){var a=p.attributes,s=p.setAttributes;
+return e('div',be.useBlockProps(),
+e(be.InspectorControls,null,e(c.PanelBody,{title:'Darstellung',initialOpen:true},
+e(c.SelectControl,{label:'Darstellung',value:a.darstellung,options:[{label:'Karte(n) nebeneinander',value:'karte'},{label:'Nur Bild',value:'bild'},{label:'Nur Button',value:'button'},{label:'Textlink',value:'text'}],onChange:function(v){s({darstellung:v})}}),
+e(c.TextControl,{label:'Button-/Linktext (optional)',value:a.text,onChange:function(v){s({text:v})}}))),
+e(c.TextareaControl,{label:'Produkt(e): pro Zeile ASIN, Amazon-Adresse oder Kurzlink, optional | Kurzname',value:a.quelle,rows:3,onChange:function(v){s({quelle:v})},placeholder:'B0DZWRJNTV | Cuello anticaracoles - 12 unidades\nhttps://amzn.to/3B0BRT2'}),
+a.quelle?e(SSR,{block:'sab/produkt',attributes:a}):null)},save:function(){return null}});})(window);
+JS;
+
+    /** Ausgabe des Blocks. */
+    public static function block_ausgabe($attrs): string {
+        $attrs = (array) $attrs;
+        $dar = in_array($attrs['darstellung'] ?? 'karte', ['karte', 'bild', 'button', 'text'], true) ? $attrs['darstellung'] : 'karte';
+        $text = trim((string) ($attrs['text'] ?? ''));
+        $teile = [];
+        foreach (preg_split('/\R/', (string) ($attrs['quelle'] ?? '')) as $z) {
+            [$q, $name] = array_pad(array_map('trim', explode('|', $z, 2)), 2, '');
+            if ($q === '') { continue; }
+            $land = self::land('');
+            if (preg_match('#^https?://#i', $q)) { $u = self::umbau_url($q, true); if (!$u) { continue; } [$land, $asin] = $u; }
+            else { $asin = substr(self::asin($q), 0, 10); }
+            if (strlen($asin) !== 10) { continue; }
+            if ($dar === 'bild') { $teile[] = self::sc_bild(['asin' => $asin, 'land' => $land], ''); }
+            elseif ($dar === 'button') { $teile[] = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn'], $text !== '' ? $text : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de'])); }
+            elseif ($dar === 'text') { $teile[] = self::sc_link(['asin' => $asin, 'land' => $land], $text !== '' ? $text : $name); }
+            else { $teile[] = self::sc_karte(['asin' => $asin, 'land' => $land, 'titel' => $name, 'text' => $text], ''); }
+        }
+        $teile = array_values(array_filter($teile));
+        if (!$teile) { return ''; }
+        if ($dar !== 'karte') { return implode(' ', $teile); }
+        self::$genutzt = true; self::$karten = true;
+        return '<div class="sab-karten" style="grid-template-columns:repeat(' . max(1, min(4, count($teile))) . ',minmax(0,1fr))">' . implode('', $teile) . '</div>';
+    }
 
     /** Eigener Punkt "1a Amazon Box" in der Seitenleiste des Backends, mit einem Untermenü je Reiter. */
     public static function menue(): void {
