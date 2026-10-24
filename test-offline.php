@@ -611,4 +611,7 @@ $GLOBALS['opt']['sab_kat_groesse'] = "Control de aves | 800\nJardín | 1500000";
 [$sa] = $mSc->invoke(null, ['rang' => 69, 'kategorie' => 'Control de aves']); [$sb] = $mSc->invoke(null, ['rang' => 69, 'kategorie' => 'Jardín']);
 ok($sb > $sa, 'Rang im Verhältnis zur Kategoriegröße: Platz 69 von 800 ist weniger als Platz 69 von 1,5 Mio.');
 unset($GLOBALS['opt']['sab_kat_groesse']);
+$mK = new ReflectionMethod('SAB', 'mit_kat_schaetzung'); $mK->setAccessible(true);
+$dk2 = $mK->invoke(null, ['items' => ['A' => ['kategorie' => 'Control de aves', 'rang' => 75], 'B' => ['kategorie' => 'Control de aves', 'rang' => 1500], 'C' => ['kategorie' => 'Jardín', 'rang' => 11128]]]);
+ok($dk2['items']['A']['kat_groesse_s'] === 3000 && $dk2['items']['C']['kat_groesse_s'] === 1500000, 'Kategoriegröße wird aus eigenen Daten geschätzt, Jardín fest');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

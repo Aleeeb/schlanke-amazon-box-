@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.43.3
+ * Plugin Name: 1a Amazon Box 0.43.4
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.43.3
+ * Version: 0.43.4
  * Requires PHP: 7.4
  */
 
@@ -509,6 +509,20 @@ final class SAB {
         return $p >= 80 ? '#1a7f37' : ($p >= 60 ? '#6a9a1f' : ($p >= 40 ? '#b36b00' : '#a00'));
     }
 
+    /** Schätzt die Größe einer Kategorie aus den eigenen Daten: Hauptkategorie Jardín fest 1,5 Mio., sonst doppelter größter beobachteter Rang (mindestens 2000). Eingetragene Größen haben Vorrang. */
+    private static function mit_kat_schaetzung(array $d): array {
+        if (empty($d['items'])) { return $d; }
+        $max = [];
+        foreach ($d['items'] as $x) { $k = mb_strtolower((string) ($x['kategorie'] ?? '')); if ($k !== '' && isset($x['rang'])) { $max[$k] = max($max[$k] ?? 0, (int) $x['rang']); } }
+        foreach ($d['items'] as $a => $x) {
+            unset($d['items'][$a]['kat_groesse_s']);
+            $k = mb_strtolower((string) ($x['kategorie'] ?? ''));
+            if ($k === '' || !isset($max[$k])) { continue; }
+            $d['items'][$a]['kat_groesse_s'] = preg_match('/^jard[ií]n$/iu', $k) ? 1500000 : max(2000, 2 * $max[$k]);
+        }
+        return $d;
+    }
+
     /** Zahl der Produkte je Kategorie (Einstellung, eine Zeile „Kategorie | Anzahl“); Schlüssel klein geschrieben. */
     private static function kat_groessen(): array {
         $out = [];
@@ -590,13 +604,14 @@ final class SAB {
         $w = self::score_gewichte(); if ($ohne_k || !isset($x['k_anteil'])) { $w['konstanz'] = 0; } $summe = array_sum($w);   // ohne genug Verlauf zählt die Konstanz nicht
         $r = $x['rang'] ?? null; $fremd = false;
         $kat = (string) ($x['kategorie'] ?? '');
-        $groesse = $kat !== '' ? (self::kat_groessen()[mb_strtolower($kat)] ?? null) : null;
+        $groesse = $kat !== '' ? (self::kat_groessen()[mb_strtolower($kat)] ?? null) : null; $geschaetzt = false;
+        if ($groesse === null && isset($x['kat_groesse_s'])) { $groesse = (int) $x['kat_groesse_s']; $geschaetzt = true; }
         if ($r !== null && $kat !== '' && $groesse === null && !preg_match(self::GARTEN_KAT, $kat)) { $fremd = true; }   // andere Kategorie ohne bekannte Größe: Rang zählt abgeschwächt
         $f = [];
         if ($r === null) { $f['rang'] = [0.0, 'ohne Verkaufsrang']; }
         elseif ($groesse) {   // Rang im Verhältnis zur Zahl der Produkte der Kategorie
             $pz = max(1, $r) / max(1, $groesse);
-            $f['rang'] = [max(0.0, min(1.0, 1 - log10(max($pz, 1e-4) / 1e-4) / log10(5000))), 'Platz ' . number_format((int) $r, 0, ',', '.') . ' von ' . number_format((int) $groesse, 0, ',', '.') . ' (' . round(100 * $pz, 2) . ' %)'];
+            $f['rang'] = [max(0.0, min(1.0, 1 - log10(max($pz, 1e-4) / 1e-4) / log10(5000))), 'Platz ' . number_format((int) $r, 0, ',', '.') . ' von ' . ($geschaetzt ? 'ca. ' : '') . number_format((int) $groesse, 0, ',', '.') . ' (' . round(100 * $pz, 2) . ' %)'];
         } else {
             $f['rang'] = [max(0.0, min(1.0, 1 - log10(max(1, $r) / 100) / log10(5000))) * ($fremd ? 0.7 : 1.0), 'Platz ' . number_format((int) $r, 0, ',', '.') . ($fremd ? ' in ' . $kat . ' (Kategoriegröße unbekannt, 70 % gewertet)' : '')];
         }
@@ -1290,7 +1305,7 @@ final class SAB {
      * „Neu laden“ geklickt, holt ein Hintergrundauftrag (WP-Cron) die neuen Daten. Nur beim allerersten Mal wartet die Seite auf Amazon.
      */
     private static function uebersicht_daten(string $land, bool $frisch = false): array {
-        return self::mit_verlauf(self::mit_preisindex(self::mit_manuell(self::uebersicht_daten_roh($land, $frisch))));
+        return self::mit_verlauf(self::mit_preisindex(self::mit_kat_schaetzung(self::mit_manuell(self::uebersicht_daten_roh($land, $frisch)))));
     }
 
     private static function uebersicht_daten_roh(string $land, bool $frisch = false): array {
@@ -1359,7 +1374,7 @@ final class SAB {
         $bew = ['fehler' => '', 'werte' => []];
         $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
         $out['ts'] = time();
-        if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); self::mit_verlauf(self::mit_preisindex(self::mit_manuell($out)), true); }
+        if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); self::mit_verlauf(self::mit_preisindex(self::mit_kat_schaetzung(self::mit_manuell($out))), true); }
         return $out;
     }
 
@@ -1385,7 +1400,7 @@ final class SAB {
             $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="100" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:70px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
         }
         $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 27, Buy Box 18, Angebot 13, Preis 9, Streichpreis 9, Deal 4, Bewertung 10, Konstanz 10.</span></p></form>';
-        $h .= '<h3 style="margin-top:2em">Größe der Kategorien</h3><p class="description">Ein Rang zählt im Verhältnis zur Zahl der Produkte der Kategorie (Platz 69 von 800 ist weniger als Platz 69 von 500.000). Amazon liefert die Größe nicht, sie lässt sich aber auf der Kategorie-Seite („x Ergebnisse“) ablesen. Eine Zeile pro Kategorie: <code>Kategoriename | Anzahl Produkte</code>, z. B. <code>Jardín | 1500000</code>. Ohne Angabe zählt ein Rang aus Gartenkategorien voll, aus anderen Kategorien zu 70 %.</p>'
+        $h .= '<h3 style="margin-top:2em">Größe der Kategorien</h3><p class="description">Ein Rang zählt im Verhältnis zur Zahl der Produkte der Kategorie (Platz 69 von 800 ist weniger als Platz 69 von 500.000). Amazon liefert die Größe nicht, sie lässt sich aber auf der Kategorie-Seite („x Ergebnisse“) ablesen. Eine Zeile pro Kategorie: <code>Kategoriename | Anzahl Produkte</code>, z. B. <code>Jardín | 1500000</code>. Ohne Angabe schätzt das Plugin die Größe: Jardín fest 1,5 Mio., andere Kategorien aus dem doppelten größten Rang deiner Produkte (mindestens 2000). Eingetragene Zahlen haben Vorrang.</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="katgroesse">'
            . '<textarea name="sab_kat_groesse" rows="5" class="large-text code">' . esc_textarea((string) get_option('sab_kat_groesse', '')) . '</textarea><p><button class="button button-primary">Kategoriegrößen speichern</button></p></form>';
         $d0 = self::uebersicht_daten($land, false); $fehlt = self::handdaten_fehlen($d0); $nm0 = self::produkte();
