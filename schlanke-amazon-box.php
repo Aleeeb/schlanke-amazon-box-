@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.43.2
+ * Plugin Name: 1a Amazon Box 0.43.3
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.43.2
+ * Version: 0.43.3
  * Requires PHP: 7.4
  */
 
@@ -509,6 +509,16 @@ final class SAB {
         return $p >= 80 ? '#1a7f37' : ($p >= 60 ? '#6a9a1f' : ($p >= 40 ? '#b36b00' : '#a00'));
     }
 
+    /** Zahl der Produkte je Kategorie (Einstellung, eine Zeile „Kategorie | Anzahl“); Schlüssel klein geschrieben. */
+    private static function kat_groessen(): array {
+        $out = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_kat_groesse', '')) as $z) {
+            $t = array_map('trim', explode('|', $z));
+            if (count($t) >= 2 && $t[0] !== '' && (int) preg_replace('/\D/', '', $t[1]) > 0) { $out[mb_strtolower($t[0])] = (int) preg_replace('/\D/', '', $t[1]); }
+        }
+        return $out;
+    }
+
     /** Zahl aus einem Preistext wie „12,99 €“ oder „€1.299,00“. */
     private static function preiszahl(string $p): ?float {
         if (!preg_match('/\d[\d.,]*/', $p, $m)) { return null; }
@@ -580,9 +590,16 @@ final class SAB {
         $w = self::score_gewichte(); if ($ohne_k || !isset($x['k_anteil'])) { $w['konstanz'] = 0; } $summe = array_sum($w);   // ohne genug Verlauf zählt die Konstanz nicht
         $r = $x['rang'] ?? null; $fremd = false;
         $kat = (string) ($x['kategorie'] ?? '');
-        if ($r !== null && $kat !== '' && !preg_match(self::GARTEN_KAT, $kat)) { $r = null; $fremd = true; }
+        $groesse = $kat !== '' ? (self::kat_groessen()[mb_strtolower($kat)] ?? null) : null;
+        if ($r !== null && $kat !== '' && $groesse === null && !preg_match(self::GARTEN_KAT, $kat)) { $fremd = true; }   // andere Kategorie ohne bekannte Größe: Rang zählt abgeschwächt
         $f = [];
-        $f['rang'] = $r === null ? [0.0, $fremd ? 'Rang nur in Fremdkategorie (' . $kat . '), zählt nicht' : 'ohne Verkaufsrang'] : [max(0.0, min(1.0, 1 - log10(max(1, $r) / 100) / log10(5000))), 'Platz ' . number_format((int) $r, 0, ',', '.')];
+        if ($r === null) { $f['rang'] = [0.0, 'ohne Verkaufsrang']; }
+        elseif ($groesse) {   // Rang im Verhältnis zur Zahl der Produkte der Kategorie
+            $pz = max(1, $r) / max(1, $groesse);
+            $f['rang'] = [max(0.0, min(1.0, 1 - log10(max($pz, 1e-4) / 1e-4) / log10(5000))), 'Platz ' . number_format((int) $r, 0, ',', '.') . ' von ' . number_format((int) $groesse, 0, ',', '.') . ' (' . round(100 * $pz, 2) . ' %)'];
+        } else {
+            $f['rang'] = [max(0.0, min(1.0, 1 - log10(max(1, $r) / 100) / log10(5000))) * ($fremd ? 0.7 : 1.0), 'Platz ' . number_format((int) $r, 0, ',', '.') . ($fremd ? ' in ' . $kat . ' (Kategoriegröße unbekannt, 70 % gewertet)' : '')];
+        }
         $f['buybox'] = !empty($x['kaufen']) ? [1.0, 'ja'] : [0.0, 'nein'];
         $st = (string) ($x['status'] ?? '');
         if (!empty($x['trotz']) || $st === 'IN_STOCK' || ($st === '' && !empty($x['lieferbar']))) { $f['angebot'] = [1.0, 'lieferbar']; }
@@ -607,9 +624,9 @@ final class SAB {
             $roh += $pt; $det[] = [self::SCORE_NAMEN[$k], $w[$k], $f[$k][0], round($pt, 1), $f[$k][1]];
         }
         $score = (int) round($roh);
-        if ($r === null) { $score = min($score, 60); }
+        if ($r === null) { $score = min($score, 60); }   // ohne Rang höchstens 60
         $hinweis = '';
-        if ($r === null) { $hinweis = $f['rang'][1]; }
+        if ($r === null) { $hinweis = $f['rang'][1]; } elseif ($fremd) { $hinweis = 'Kategoriegröße von „' . $kat . '“ fehlt (Reiter Score)'; }
         if (self::unklar($x) && empty($x['trotz']) && $r !== null && $r <= 20000) { $hinweis = 'Schnittstelle prüfen: guter Rang, aber kein Angebot'; }
         return [max(0, min(100, $score)), $hinweis, $det];
     }
@@ -1353,7 +1370,7 @@ final class SAB {
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="score">'
            . '<table class="widefat striped" style="max-width:860px"><thead><tr><th>Posten</th><th style="width:110px">Gewicht</th><th>Wie der Faktor entsteht</th></tr></thead><tbody>';
         $erkl = [
-            'rang'    => '1 bei Platz 100 oder besser, 0 ab Platz 500.000, dazwischen gleichmäßig auf der Zehnerlogarithmus-Skala (Platz 10.000 ist deutlich besser als 100.000). Zählt nur in Garten-Kategorien. Ohne Rang ist der Score auf 60 begrenzt.',
+            'rang'    => '1 bei Platz 100 oder besser, 0 ab Platz 500.000, dazwischen gleichmäßig auf der Zehnerlogarithmus-Skala (Platz 10.000 ist deutlich besser als 100.000). Mit bekannter Kategoriegröße zählt der Anteil (Platz geteilt durch Zahl der Produkte), sonst der Platz selbst; in Nicht-Garten-Kategorien ohne bekannte Größe zu 70 %. Ohne Rang ist der Score auf 60 begrenzt.',
             'buybox'  => '1, wenn Amazon einen Kaufen-Button (Buy Box) für dieses Produkt vergibt, sonst 0.',
             'angebot' => '1 lieferbar (oder von dir als lieferbar bestätigt), 0,7 wenige Stück, 0,5 eingeschränkt, 0 kein Angebot.',
             'preis'   => 'Preis geteilt durch den mittleren Preis der Produktgruppe (sonst der Kategorie, mindestens drei Produkte): 1 bei 70 % oder weniger, 0 bei 150 % oder mehr. Ohne Vergleich 0,5.',
@@ -1368,6 +1385,9 @@ final class SAB {
             $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="100" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:70px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
         }
         $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 27, Buy Box 18, Angebot 13, Preis 9, Streichpreis 9, Deal 4, Bewertung 10, Konstanz 10.</span></p></form>';
+        $h .= '<h3 style="margin-top:2em">Größe der Kategorien</h3><p class="description">Ein Rang zählt im Verhältnis zur Zahl der Produkte der Kategorie (Platz 69 von 800 ist weniger als Platz 69 von 500.000). Amazon liefert die Größe nicht, sie lässt sich aber auf der Kategorie-Seite („x Ergebnisse“) ablesen. Eine Zeile pro Kategorie: <code>Kategoriename | Anzahl Produkte</code>, z. B. <code>Jardín | 1500000</code>. Ohne Angabe zählt ein Rang aus Gartenkategorien voll, aus anderen Kategorien zu 70 %.</p>'
+           . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="katgroesse">'
+           . '<textarea name="sab_kat_groesse" rows="5" class="large-text code">' . esc_textarea((string) get_option('sab_kat_groesse', '')) . '</textarea><p><button class="button button-primary">Kategoriegrößen speichern</button></p></form>';
         $d0 = self::uebersicht_daten($land, false); $fehlt = self::handdaten_fehlen($d0); $nm0 = self::produkte();
         if ($fehlt) {
             $h .= '<h3 style="margin-top:2em">Handdaten fehlen (' . count($fehlt) . ')</h3><p class="description">Für diese Produkte fehlen Sterne, Prime oder Lieferzeit oder sie sind älter als 30 Tage. Der montägliche Rundgang sammelt sie für Madrid und Barcelona.</p><ul style="columns:2;max-width:860px">';
@@ -2189,6 +2209,9 @@ JS;
                 }
                 $meldung = $neu ? count($neu) . ' Austausch-Regel(n) angelegt: ' . implode(', ', $neu) . '.' : 'Nichts eingetragen.';
                 if ($fehler) { $meldung .= ' Ungültig (nicht 10 Zeichen oder gleich): ' . implode(', ', $fehler) . '.'; }
+            } elseif ($form === 'katgroesse') {
+                update_option('sab_kat_groesse', sanitize_textarea_field(wp_unslash($_POST['sab_kat_groesse'] ?? '')), false);
+                $meldung = 'Kategoriegrößen gespeichert.';
             } elseif ($form === 'manuell') {
                 update_option('sab_manuell', sanitize_textarea_field(wp_unslash($_POST['sab_manuell'] ?? '')), false);
                 $meldung = 'Handdaten gespeichert.';

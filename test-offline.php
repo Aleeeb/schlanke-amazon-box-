@@ -561,7 +561,7 @@ $mS = new ReflectionMethod('SAB', 'score'); $mS->setAccessible(true);
 $basis = ['kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '10 €'];
 [$pg] = $mS->invoke(null, $basis + ['rang' => 2150, 'kategorie' => 'Jardín']);
 [$pi, $hi] = $mS->invoke(null, $basis + ['rang' => 2150, 'kategorie' => 'Industria, empresas y ciencia']);
-ok($pg > $pi && strpos($hi, 'Fremdkategorie') !== false, 'Score: Rang in Fremdkategorie zählt nicht');
+ok($pg > $pi && strpos($hi, 'Kategoriegröße') !== false, 'Score: Rang in anderer Kategorie zählt abgeschwächt');
 [$pk] = $mS->invoke(null, $basis + ['rang' => 2150, 'kategorie' => '']);
 ok($pk === $pg, 'Score: ohne Kategorieangabe bleibt der Rang');
 
@@ -600,11 +600,15 @@ ok(in_array('Konstanz (Tage mit gutem Score)', array_column($dk, 0), true) && $d
 $dv2 = $mV->invoke(null, ['items' => ['B0KONST003' => ['rang' => 100, 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €', 'kategorie' => 'Jardín']], 'fehler' => ''], true);
 ok(isset($GLOBALS['opt']['sab_verlauf']['B0KONST003'][gmdate('Y-m-d')]), 'Verlauf: heutiger Score wird festgehalten');
 foreach (['Control de aves', 'Control de animales domésticos y salvajes', 'Jardín', 'Plagas'] as $k) { [$s_] = $mSc->invoke(null, ['rang' => 500, 'kategorie' => $k]); ok(!preg_match('/Fremd/', $mSc->invoke(null, ['rang' => 500, 'kategorie' => $k])[1]), 'Garten-Unterkategorie zählt: ' . $k); }
-ok(preg_match('/Fremd/', $mSc->invoke(null, ['rang' => 500, 'kategorie' => 'Cintas adhesivas de aluminio'])[1]) === 1, 'Fremdkategorie bleibt Fremdkategorie');
+ok(preg_match('/Kategoriegröße/u', $mSc->invoke(null, ['rang' => 500, 'kategorie' => 'Cintas adhesivas de aluminio'])[1]) === 1, 'Andere Kategorie: Hinweis auf fehlende Größe');
 $GLOBALS['opt']['sab_manuell'] = "B0AAAAAAA1 | 4,1 | 588 | ja | Madrid 2 | " . gmdate('Y-m-d') . "\nB0BBBBBBB1 | 4 | 5 | ja | Madrid 2 | 2020-01-01";
 $GLOBALS["opt"]["sab_produkte"] = "B0TABLE001 | A\nB0TABLE002 | B";
 $mH = new ReflectionMethod('SAB', 'handdaten_fehlen'); $mH->setAccessible(true);
 $hf = $mH->invoke(null, ['items' => []]);
 ok(!isset($hf["B0AAAAAAA1"]) && isset($hf["B0BBBBBBB1"]) && strpos($hf["B0BBBBBBB1"], 'älter') !== false, 'Handdaten fehlen: veraltete gemeldet, frische nicht');
 
+$GLOBALS['opt']['sab_kat_groesse'] = "Control de aves | 800\nJardín | 1500000";
+[$sa] = $mSc->invoke(null, ['rang' => 69, 'kategorie' => 'Control de aves']); [$sb] = $mSc->invoke(null, ['rang' => 69, 'kategorie' => 'Jardín']);
+ok($sb > $sa, 'Rang im Verhältnis zur Kategoriegröße: Platz 69 von 800 ist weniger als Platz 69 von 1,5 Mio.');
+unset($GLOBALS['opt']['sab_kat_groesse']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
