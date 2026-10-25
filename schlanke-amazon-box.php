@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.64.0
+ * Plugin Name: 1a Amazon Box 0.64.1
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.64.0
+ * Version: 0.64.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.64.0';
+    const VERSION = '0.64.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -452,7 +452,7 @@ final class SAB {
     /** Gewichte aus den Einstellungen; Fehlendes und Ungültiges fällt auf den Standard zurück. @return array<string,int> */
     private static function score_gewichte(): array {
         $w = (array) get_option('sab_score_w', []); $out = [];
-        foreach (self::SCORE_STANDARD as $k => $std) { $out[$k] = isset($w[$k]) && is_numeric($w[$k]) ? max(0, min(100, (int) $w[$k])) : $std; }
+        foreach (self::SCORE_STANDARD as $k => $std) { $out[$k] = isset($w[$k]) && is_numeric($w[$k]) ? max(0, min(1000000, (int) $w[$k])) : $std; }
         return array_sum($out) > 0 ? $out : self::SCORE_STANDARD;
     }
 
@@ -1653,7 +1653,7 @@ final class SAB {
             'liefer'  => 'Durchschnittliche Lieferzeit in Tagen zu den eingetragenen Hauptstädten: 1 Tag oder weniger ergibt 1, 7 Tage oder mehr 0. Ohne Angabe 0,5. Gewicht standardmäßig 0.',
         ];
         foreach (self::SCORE_NAMEN as $k => $name) {
-            $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="100" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:70px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
+            $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="1000000" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:100px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
         }
         $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 27, Buy Box 18, Angebot 13, Preis 9, Streichpreis 9, Deal 4, Bewertung 10, Konstanz 10.</span></p></form>';
         $h .= '<h3 style="margin-top:2em">Größe der Kategorien</h3><p class="description">Ein Rang zählt im Verhältnis zur Zahl der Produkte der Kategorie (Platz 69 von 800 ist weniger als Platz 69 von 500.000). Amazon liefert die Größe nicht, sie lässt sich aber auf der Kategorie-Seite („x Ergebnisse“) ablesen. Eine Zeile pro Kategorie: <code>Kategoriename | Anzahl Produkte</code>, z. B. <code>Jardín | 1500000</code>. Ohne Angabe schätzt das Plugin die Größe: Jardín fest 1,5 Mio., andere Kategorien aus dem doppelten größten Rang deiner Produkte (mindestens 2000). Eingetragene Zahlen haben Vorrang.</p>'
@@ -3733,7 +3733,7 @@ JS;
                 if (!empty($_POST['sab_score_std'])) { delete_option('sab_score_w'); $meldung = 'Gewichte auf den Standard zurückgesetzt.'; }
                 else {
                     $w = [];
-                    foreach (array_keys(self::SCORE_STANDARD) as $k) { $w[$k] = max(0, min(100, (int) ($_POST['sab_w'][$k] ?? 0))); }
+                    foreach (array_keys(self::SCORE_STANDARD) as $k) { $w[$k] = max(0, min(1000000, (int) ($_POST['sab_w'][$k] ?? 0))); }
                     update_option('sab_score_w', $w, false);
                     $meldung = 'Gewichte gespeichert. Die Scores in allen Listen sind sofort neu berechnet.';
                 }
