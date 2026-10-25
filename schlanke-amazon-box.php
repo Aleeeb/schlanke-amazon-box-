@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.70.2
+ * Plugin Name: 1a Amazon Box 0.70.3
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.2
+ * Version: 0.70.3
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.2';
+    const VERSION = '0.70.3';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -3197,6 +3197,9 @@ final class SAB {
      */
     private static function austausch_kandidaten(string $alt, string $name, array $d, array $trotz, array $fund, int $max = 4): array {
         $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $marken = (array) get_option('sab_marken', []);
+        if (!defined('SAB_SYNC') && get_transient('sab_such_pruefung') === false) {   // eingetragene Suchtreffer ohne Amazon-Daten: Abruf im Hintergrund anstoßen (höchstens alle 10 Minuten)
+            foreach (self::such_kandidaten() as $l_) { foreach ($l_['liste'] as $b_) { if (!isset($items[$b_])) { set_transient('sab_such_pruefung', 1, 10 * MINUTE_IN_SECONDS); foreach (array_keys(self::LAENDER) as $ld_) { delete_transient("sab_uebersicht_{$ld_}"); } break 2; } } }
+        }
         $q = [];
         foreach ((self::amz_alternativen()[$alt]['liste'] ?? []) as $i => $a) { $q[$a] = 'Amazon-Alternative ' . ($i + 1); }
         foreach ((self::such_kandidaten()[$alt]['liste'] ?? []) as $i => $a) { $q[$a] = $q[$a] ?? 'Amazon-Suche ' . ($i + 1); }
@@ -3209,7 +3212,7 @@ final class SAB {
         $a1 = self::arten($text); $w1 = self::woerter($text);
         $out = []; $aus = [];
         foreach ($q as $a => $quelle) {
-            $a = (string) $a; if ($a === $alt || ($marken[$a] ?? '') === 'ers' || !isset($items[$a])) { if ($quelle === 'Empfehlung' && $a !== $alt && !isset($items[$a])) { $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => null, 'x' => [], 'ok' => false, 'passt' => 0, 'rang' => -1, 'ausgeschlossen' => false]; } continue; }
+            $a = (string) $a; if ($a === $alt || ($marken[$a] ?? '') === 'ers' || !isset($items[$a])) { if (($quelle === 'Empfehlung' || strpos($quelle, 'Amazon-Suche') === 0) && $a !== $alt && !isset($items[$a])) { $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => null, 'x' => [], 'ok' => false, 'passt' => 0, 'rang' => -1, 'ausgeschlossen' => false]; } continue; }
             $x = $items[$a]; $x['trotz'] = isset($trotz[$a]);
             $ok = ($x['preis'] ?? '') !== '' && !empty($x['lieferbar']) && ($x['status'] ?? '') !== 'OUT_OF_STOCK';
             $tc = ($namen[$a] ?? '') . ' ' . (string) ($x['titel'] ?? '');
@@ -3752,7 +3755,7 @@ JS;
                 update_option('sab_amz_alt', sanitize_textarea_field(wp_unslash($_POST['sab_amz_alt'] ?? '')), false); delete_transient('sab_alle_asins');
                 $meldung = 'Alternativen gespeichert.';
             } elseif ($form === 'such_kand') {
-                update_option('sab_such_kand', sanitize_textarea_field(wp_unslash($_POST['sab_such_kand'] ?? '')), false); delete_transient('sab_alle_asins');
+                update_option('sab_such_kand', sanitize_textarea_field(wp_unslash($_POST['sab_such_kand'] ?? '')), false); delete_transient('sab_alle_asins'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }   // neue ASINs sofort im Hintergrund abfragen
                 $meldung = 'Suchtreffer gespeichert.';
             } elseif ($form === 'austausch_auto') {
                 update_option('sab_auto_tausch', !empty($_POST['sab_auto_tausch']) ? '1' : '0', false);
