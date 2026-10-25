@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.14
+ * Version: 0.71.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.14';
+    const VERSION = '0.71.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -3454,16 +3454,32 @@ final class SAB {
         $faelle = self::tausch_faelle((array) $d, $trotz);
         $fund = self::fundstellen(array_keys($faelle) ?: ['XXXXXXXXXX']);
         $zeilen = [];
+        $dring = [];   // Dringlichkeit 0 bis 100 je Produkt: nicht lieferbar/unklar = 100, sonst schwacher Score, lange Lieferzeit, wenige Sterne
+        $marken = (array) get_option('sab_marken', []);
+        foreach (self::alle_asins() as $a0) {
+            $x0 = $d['items'][$a0] ?? null;
+            if (!$x0) { $dring[$a0] = 100; continue; }
+            $x0['trotz'] = isset($trotz[$a0]);
+            $sc0 = self::score($x0)[0]; $dr0 = self::tausch_dringlichkeit($x0, $sc0);
+            if (($marken[$a0] ?? '') === 'ers') { $dr0 = max($dr0, 100); }
+            if ($dr0 > 0) {
+                $dring[$a0] = $dr0;
+                if (!isset($faelle[$a0])) {
+                    $faelle[$a0] = ($marken[$a0] ?? '') === 'ers' ? 'von dir als „Ersetzen“ markiert' : ($sc0 < 35 ? 'sehr schwacher Score (' . $sc0 . ')' : (isset($x0['liefertage']) && (float) $x0['liefertage'] > 14 ? 'Lieferzeit über 14 Tage' : (isset($x0['sterne']) && $x0['sterne'] !== null && (float) $x0['sterne'] < 3.5 ? 'unter 3,5 Sterne' : 'Prime-Status unklar')));
+                }
+            }
+        }
+        $fund = self::fundstellen(array_keys($faelle) ?: ['XXXXXXXXXX']);
         foreach ($faelle as $alt => $grund) {
             $f = $fund[$alt] ?? []; $seiten = count($f); $n = (int) array_sum(array_column($f, 'n'));
             if ($seiten === 0) { continue; }   // steht in keinem Artikel: kein Handlungsbedarf
             if (self::toetend_asin((string) $alt, (array) $d)) { continue; }   // tötende Produkte gar nicht erst zum Tausch zeigen
-            $zeilen[] = ['alt' => $alt, 'grund' => $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => 100 * max(1, $seiten), 'f' => $f];
+            $zeilen[] = ['alt' => $alt, 'grund' => $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => ($dring[$alt] ?? 100) * max(1, $seiten), 'f' => $f];
         }
         usort($zeilen, fn($a, $b) => $b['prio'] <=> $a['prio']);
-        $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = 25;
+        $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = 10;
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
-            . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Es werden die ersten ' . $ladeLimit . ' gezeigt.</p>';
+            . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Es werden immer die ' . $ladeLimit . ' mit der höchsten Priorität gezeigt (Dringlichkeit mal Seiten); jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
         $zaehler = 0;
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
@@ -3517,9 +3533,21 @@ final class SAB {
             . '<p>Nur wenn der beste passende Kandidat lieferbar ist und mindestens Score <input type="number" name="sab_auto_schwelle" min="0" max="100" value="' . $schwelle . '" style="width:70px"> hat. Das Plugin legt dann eine <strong>Austausch-Regel</strong> an (Reiter „Produkte und Ersatzlisten“): Sie wirkt sofort auf alle Platzhalter, schreibt aber nichts in die Artikel. Rückgängig: Regel löschen. Du bekommst eine Mail.</p>'
             . '<p><button class="button">Speichern</button></p></form>';
         if ($log) {
-            $h .= '<h4>Zuletzt automatisch getauscht</h4><ul>';
-            foreach (array_slice(array_reverse($log), 0, 10) as $e) { $h .= '<li>' . esc_html(wp_date('d.m. H:i', (int) $e['ts'])) . ': <code>' . esc_html($e['alt']) . '</code> → <code>' . esc_html($e['neu']) . '</code> (Score ' . (int) $e['score'] . ')</li>'; }
-            $h .= '</ul>';
+            $nf = self::tausch_regeln();
+            $h .= '<h4>Automatisch getauscht (zur Kontrolle)</h4><p class="description">Links das alte, rechts das neue Produkt. „Rückgängig“ löscht die Austausch-Regel, das alte Produkt erscheint dann wieder. Ist alles geprüft, kannst du die Liste leeren (die Tausche bleiben).</p>';
+            $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="auto_log">';
+            $h .= '<table class="widefat striped" style="max-width:1000px"><thead><tr><th>Wann</th><th>Vorher</th><th>Nachher</th><th>Score</th><th></th></tr></thead><tbody>';
+            $fa = self::fundstellen(array_values(array_unique(array_column($log, 'alt'))) ?: ['XXXXXXXXXX']);
+            foreach (array_slice(array_reverse($log), 0, 30) as $e) {
+                $xa = $d['items'][$e['alt']] ?? []; $xn = $d['items'][$e['neu']] ?? [];
+                $na = ($namen[$e['alt']] ?? '') ?: self::kurzname_aus_titel((string) ($xa['titel'] ?? '')); $nn = ($namen[$e['neu']] ?? '') ?: self::kurzname_aus_titel((string) ($xn['titel'] ?? ''));
+                $aktiv = ($nf[$e['alt']] ?? '') === $e['neu'];
+                $h .= '<tr><td>' . esc_html(wp_date('d.m. H:i', (int) $e['ts'])) . '</td>'
+                    . '<td><div style="display:flex;gap:8px;align-items:center">' . self::mini_bild($e['alt'], $xa) . '<span><strong>' . esc_html($na ?: $e['alt']) . '</strong><br><code>' . esc_html($e['alt']) . '</code><br><small>auf ' . count($fa[$e['alt']] ?? []) . ' Seiten</small></span></div></td>'
+                    . '<td><div style="display:flex;gap:8px;align-items:center">' . self::mini_bild($e['neu'], $xn) . '<span><strong>' . esc_html($nn ?: $e['neu']) . '</strong><br><code>' . esc_html($e['neu']) . '</code></span></div></td>'
+                    . '<td>' . (int) $e['score'] . '</td><td>' . ($aktiv ? '<button class="button" name="auto_zurueck" value="' . esc_attr($e['alt']) . '">Rückgängig</button>' : '<small>zurückgenommen</small>') . '</td></tr>';
+            }
+            $h .= '</tbody></table><p><button class="button" name="auto_leeren" value="1" onclick="return confirm(\'Liste leeren? Die Tausche bleiben bestehen.\')">Liste leeren (geprüft)</button></p></form>';
         }
         return $h;
     }
@@ -3848,6 +3876,14 @@ JS;
                 update_option('sab_auto_tausch', !empty($_POST['sab_auto_tausch']) ? '1' : '0', false);
                 update_option('sab_auto_schwelle', max(0, min(100, (int) ($_POST['sab_auto_schwelle'] ?? 55))), false);
                 $meldung = 'Automatik gespeichert: ' . (!empty($_POST['sab_auto_tausch']) ? 'an' : 'aus') . '.';
+            } elseif ($form === 'auto_log') {
+                if (!empty($_POST['auto_leeren'])) { update_option('sab_auto_log', [], false); $meldung = 'Liste geleert. Die Tausche bleiben bestehen.'; }
+                elseif (!empty($_POST['auto_zurueck'])) {
+                    $alt = self::asin((string) $_POST['auto_zurueck']); $zeilen = [];
+                    foreach (self::tausch_regeln() as $a => $b) { if ($a !== $alt) { $zeilen[] = $a . ' => ' . $b; } }
+                    update_option('sab_tausch', implode("\n", $zeilen), false); delete_transient('sab_alle_asins');
+                    $meldung = 'Rückgängig: ' . $alt . ' erscheint wieder.';
+                }
             } elseif ($form === 'umbau_viele') {
                 $ids = array_slice(array_unique(array_map('intval', (array) ($_POST['sab_ids'] ?? []))), 0, self::UMBAU_PROSEITE);
                 self::$umbau_abw = []; self::$umbau_info = []; $ok = 0; $links = 0; $uebersprungen = [];

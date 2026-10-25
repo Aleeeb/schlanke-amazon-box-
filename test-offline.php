@@ -948,4 +948,9 @@ $mTx = new ReflectionMethod('SAB', 'text_ohne_bloecke'); $mTx->setAccessible(tru
 ok($mTx->invoke(null, $art) === $mTx->invoke(null, $pl['neu']) && strpos($pl['neu'], '<hr') === false || true, 'Entzerren: Text ohne Produktblöcke vorher/nachher identisch');
 ok($mTx->invoke(null, $art) === $mTx->invoke(null, $pl['neu']), 'Entzerren: Kontrolle identisch');
 ok(!preg_match('#</h[1-6]>\s*(<table|\[amz_karten)#', $pl['neu']), 'Entzerren: kein Block direkt hinter einer Überschrift');
+$mA = new ReflectionMethod('SAB', 'austausch_html'); $mA->setAccessible(true);
+$GLOBALS['opt']['sab_auto_log'] = [['ts' => time(), 'alt' => 'B0ALT00001', 'neu' => 'B0NEU00001', 'score' => 70]];
+$ah = (string) $mA->invoke(null);
+ok(strpos($ah, 'Zu tauschen') !== false && strpos($ah, 'Automatisch getauscht') !== false && strpos($ah, 'Rückgängig') !== false, 'Austausch-Reiter rendert mit Prioritätsliste und Protokoll');
+unset($GLOBALS['opt']['sab_auto_log']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
