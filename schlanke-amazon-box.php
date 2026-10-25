@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.61.1
+ * Plugin Name: 1a Amazon Box 0.62.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.61.1
+ * Version: 0.62.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.61.1';
+    const VERSION = '0.62.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -1506,6 +1506,7 @@ final class SAB {
         $alle = array_merge($alle, array_values(self::tausch_regeln()));
         foreach (self::gruppen() as $liste) { $alle = array_merge($alle, $liste); }
         foreach (self::amz_alternativen() as $l) { $alle = array_merge($alle, $l['liste']); }   // Amazons Alternativen mit abfragen (Score)
+        foreach (self::such_kandidaten() as $l) { $alle = array_merge($alle, $l['liste']); }
         foreach (self::claude_empfehlungen() as $l) { $alle[] = $l[0]; }
         global $wpdb;
         if (isset($wpdb)) {
@@ -3095,6 +3096,23 @@ final class SAB {
         return $out;
     }
 
+    /** Treffer der Amazon-Suche nach dem Produkttitel (liest die Mac-Sitzung): Zeilen „ALTE-ASIN | ASIN1, ASIN2, ASIN3 | Datum“. */
+    private static function such_kandidaten(): array {
+        $out = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_such_kand', '')) as $z) {
+            $t = array_map('trim', explode('|', $z));
+            $a = self::asin($t[0] ?? ''); if (strlen($a) !== 10) { continue; }
+            $l = array_values(array_filter(array_map([__CLASS__, 'asin'], explode(',', (string) ($t[1] ?? ''))), fn($x) => strlen($x) === 10));
+            if ($l) { $out[$a] = ['liste' => $l, 'datum' => (string) ($t[2] ?? '')]; }
+        }
+        return $out;
+    }
+
+    /** Link zur Amazon-Suche nach dem Titel des Produkts (damit man sofort sieht, was Amazon dazu anzeigt). */
+    private static function such_link(string $titel): string {
+        return 'https://' . self::LAENDER[self::land('')][0] . '/s?k=' . rawurlencode(mb_substr(trim(preg_replace('/\s+/u', ' ', $titel)), 0, 120));
+    }
+
     /** Welche Produkte getauscht werden müssen: weg (Amazon kennt es nicht), kein Preis/Rang, nicht lieferbar, unklar. @return array<string,string> ASIN => Grund */
     private static function tausch_faelle(array $d, array $trotz): array {
         $out = [];
@@ -3125,6 +3143,7 @@ final class SAB {
         $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $marken = (array) get_option('sab_marken', []);
         $q = [];
         foreach ((self::amz_alternativen()[$alt]['liste'] ?? []) as $i => $a) { $q[$a] = 'Amazon-Alternative ' . ($i + 1); }
+        foreach ((self::such_kandidaten()[$alt]['liste'] ?? []) as $i => $a) { $q[$a] = $q[$a] ?? 'Amazon-Suche ' . ($i + 1); }
         $ce = self::claude_empfehlungen()[$alt] ?? null; if ($ce) { $q[$ce[0]] = 'Empfehlung'; }
         foreach ($marken as $a => $t) { if ($t === 'fav' && !isset($q[$a])) { $q[$a] = 'Favorit'; } }
         foreach (array_keys($namen) as $a) { if (!isset($q[$a])) { $q[$a] = 'Katalog'; } }
@@ -3313,8 +3332,9 @@ final class SAB {
                     . ($pv !== null ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;' . $pvStil . '">' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision</span>' : '<span style="color:#a00">Provision unbekannt</span>')
                     . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . '</span></label>';
             }
-            if (!$k['liste']) { $h .= '<p style="margin:0"><em>Kein passender Kandidat gefunden.</em></p>'; }
-            $h .= '</div><p style="margin:8px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> Nichts tauschen</label> &nbsp; <label>oder eigene ASIN: <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="12" maxlength="10" placeholder="B0…"></label>'
+            $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
+            if (!$k['liste']) { $h .= '<p style="margin:0"><em>Kein passender Kandidat gefunden.</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
+            $h .= '</div><p style="margin:8px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> Nichts tauschen</label> &nbsp; <label>oder eigene ASIN: <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="12" maxlength="10" placeholder="B0…"></label>' . ($k['liste'] ? ' <a href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">bei Amazon suchen</a>' : '')
                 . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
         }
         $h .= ($zeilen ? '<p><button class="button button-primary button-hero">Auswahl tauschen (jeweils mit Sicherung)</button> <span class="description">Der Tausch gilt in allen Artikeln, Titel und Textlinks folgen dem neuen Bildprodukt. Bis zu 10 pro Klick.</span></p>' : '<p>Nichts zu tauschen.</p>') . '</form>';
@@ -3323,6 +3343,9 @@ final class SAB {
         $h .= '<h3 style="margin-top:2em">Amazons Alternativen (Austauschliste)</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="amz_alt">'
             . '<p class="description">Eine Zeile pro Produkt: <code>ALTE-ASIN | ASIN1, ASIN2, ASIN3 | Datum</code>. Das sind die „alternativen Produkte“, die Amazon auf der Seite eines nicht mehr verfügbaren Produkts zeigt. Die Mac-Sitzung liest sie beim Rundgang und trägt sie hier ein. Nur passende werden oben vorgeschlagen.</p>'
             . '<textarea name="sab_amz_alt" rows="6" class="large-text code">' . esc_textarea((string) get_option('sab_amz_alt', '')) . '</textarea><p><button class="button">Speichern</button> <span class="description">' . count($alts) . ' Produkte mit Alternativen.</span></p></form>';
+        $h .= '<h3 style="margin-top:2em">Treffer der Amazon-Suche</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="such_kand">'
+            . '<p class="description">Wo Amazon keine Alternativen zeigt: Die Mac-Sitzung sucht bei Amazon nach dem Titel des Produkts und trägt hier die besten passenden Treffer ein (gleiches Format: <code>ALTE-ASIN | ASIN1, ASIN2, ASIN3 | Datum</code>). Sie erscheinen oben als „Amazon-Suche“.</p>'
+            . '<textarea name="sab_such_kand" rows="5" class="large-text code">' . esc_textarea((string) get_option('sab_such_kand', '')) . '</textarea><p><button class="button">Speichern</button> <span class="description">' . count(self::such_kandidaten()) . ' Produkte mit Suchtreffern.</span></p></form>';
         // Automatik
         $auto = get_option('sab_auto_tausch') === '1'; $log = (array) get_option('sab_auto_log', []);
         $h .= '<h3 style="margin-top:2em">Automatik</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_auto">'
@@ -3646,6 +3669,9 @@ JS;
             } elseif ($form === 'amz_alt') {
                 update_option('sab_amz_alt', sanitize_textarea_field(wp_unslash($_POST['sab_amz_alt'] ?? '')), false); delete_transient('sab_alle_asins');
                 $meldung = 'Alternativen gespeichert.';
+            } elseif ($form === 'such_kand') {
+                update_option('sab_such_kand', sanitize_textarea_field(wp_unslash($_POST['sab_such_kand'] ?? '')), false); delete_transient('sab_alle_asins');
+                $meldung = 'Suchtreffer gespeichert.';
             } elseif ($form === 'austausch_auto') {
                 update_option('sab_auto_tausch', !empty($_POST['sab_auto_tausch']) ? '1' : '0', false);
                 update_option('sab_auto_schwelle', max(0, min(100, (int) ($_POST['sab_auto_schwelle'] ?? 55))), false);

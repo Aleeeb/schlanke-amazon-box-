@@ -925,4 +925,13 @@ $kk = $mK->invoke(null, 'B0TOTZAUN1', 'Valla metálica anticaracoles', $dd3, [],
 $asins3 = array_column($kk['liste'], 'asin');
 ok(($asins3[0] ?? '') === 'B0ELEK5PRO' && in_array('B0ELEK3PRO', $asins3, true) && !in_array('B0KATZE001', $asins3, true) && count($kk['aussortiert']) >= 1, 'Kandidaten: 5 % vor 3 %, unpassendes Katzen-Produkt aussortiert');
 
+// ---- 0.62.0: Amazon-Suche als Kandidatenquelle und Suchlink ----
+$GLOBALS['opt']['sab_such_kand'] = "B0TOTZAUN1 | B0ELEK5PRO | 2026-10-25";
+$kk2 = $mK->invoke(null, 'B0TOTZAUN1', 'Valla metálica anticaracoles', $dd3, [], []);
+$qs = array_column($kk2['liste'], 'quelle');
+ok(in_array('Amazon-Suche 1', $qs, true) || in_array('Amazon-Alternative 2', $qs, true), 'Kandidaten: Treffer der Amazon-Suche werden berücksichtigt');
+$mSl = new ReflectionMethod('SAB', 'such_link');
+ok(strpos($mSl->invoke(null, 'Valla metálica 4 m'), '/s?k=Valla%20met%C3%A1lica%204%20m') !== false, 'Suchlink enthält den Produkttitel');
+unset($GLOBALS['opt']['sab_such_kand']);
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
