@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.24
+ * Version: 0.75.25
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.24';
+    const VERSION = '0.75.25';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3033,6 +3033,7 @@ final class SAB {
     /** Seite der Gesamtvorschau, die nach einem Tausch wieder geöffnet wird. */
     public static int $vorschau_seite = 1;
 
+    const UMBAU_MAX = 30;       // Artikel, die per Häkchen auf einmal umgebaut werden dürfen
     const UMBAU_PROSEITE = 15; // Artikel pro Durchgang (kurz genug gegen Zeitlimits)
 
     /** Löst einen Amazon-Kurzlink (Sitestripe, amzn.to / amzn.eu) über seine Weiterleitung auf die Produkt-URL auf; Ergebnis 30 Tage gemerkt. */
@@ -4600,16 +4601,17 @@ JS;
                 if ($eb) { update_option('sab_ebay_ids', trim((string) get_option('sab_ebay_ids', '') . "\n" . implode("\n", $eb)), false); }
                 $meldung = count($am) + count($eb) . ' IDs übernommen.';
             } elseif ($form === 'umbau_viele') {
-                $ids = array_slice(array_unique(array_map('intval', (array) ($_POST['sab_ids'] ?? []))), 0, self::UMBAU_PROSEITE);
-                self::$umbau_abw = []; self::$umbau_info = []; $ok = 0; $links = 0; $uebersprungen = [];
+                $ids = array_slice(array_unique(array_map('intval', (array) ($_POST['sab_ids'] ?? []))), 0, self::UMBAU_MAX);
+                self::$umbau_abw = []; self::$umbau_info = []; $ok = 0; $links = 0; $uebersprungen = []; $t_u = microtime(true); $nicht_dran = 0;
                 foreach ($ids as $pid) {
                     if ($pid < 1) { continue; }
+                    if (microtime(true) - $t_u > 40) { $nicht_dran++; continue; }   // Zeitgrenze: Rest beim nächsten Klick
                     $abw0 = count(self::$umbau_abw);
                     [$n, $sk, $gea] = self::umbau_artikel($pid);
                     if (count(self::$umbau_abw) > $abw0) { $uebersprungen[] = (string) get_the_title($pid); }
                     $ok += $gea; $links += $n;
                 }
-                $meldung = $ok . ' Artikel umgebaut (' . $links . ' Links bzw. Blöcke).' . ($uebersprungen ? ' Mit Hinweis, bitte ansehen: ' . implode('; ', array_slice($uebersprungen, 0, 6)) . '.' : '');
+                $meldung = $ok . ' Artikel umgebaut (' . $links . ' Links bzw. Blöcke).' . ($nicht_dran ? ' ' . $nicht_dran . ' Artikel blieben wegen der Zeitgrenze offen, bitte erneut markieren.' : '') . ($uebersprungen ? ' Mit Hinweis, bitte ansehen: ' . implode('; ', array_slice($uebersprungen, 0, 6)) . '.' : '');
             } elseif ($form === 'umbau_ok' || $form === 'umbau_ok_weg') {
                 $k = sanitize_text_field(wp_unslash($_POST['sab_key'] ?? '')); $okl = (array) get_option('sab_umbau_ok', []);
                 if ($k !== '' && preg_match('/^(titel|dupl|weg):[A-Za-z0-9,:]+$/', $k)) {
@@ -4734,23 +4736,28 @@ JS;
             if ($liste) {
                 $zeile = function (array $a): void {
                     $vu = add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'));
-                    echo '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . (int) $a['fest'] . '</td><td>' . (int) $a['kurz'] . '</td>'
+                    echo '<tr><td>' . ($a['fertig'] ? '' : '<input type="checkbox" name="sab_ids[]" form="umbau-sammel" value="' . (int) $a['id'] . '" class="sab-wahl">') . '</td><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td data-v="' . (int) $a['fest'] . '">' . (int) $a['fest'] . '</td><td data-v="' . (int) $a['kurz'] . '">' . (int) $a['kurz'] . '</td>'
                        . '<td>' . ($a['fertig'] ? '<strong style="color:#1a7f37">umgebaut</strong>' : 'offen') . '</td><td><a class="button" href="' . esc_url($vu) . '">Vorschau</a> ';
                     echo '<form method="post" style="display:inline">'; wp_nonce_field('sab_speichern');
                     echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_id" value="' . (int) $a['id'] . '">'
                        . ($a['fertig'] ? '<input type="hidden" name="sab_form" value="umbau_zurueck_einzeln"><button class="button">Rückgängig</button>' : '<input type="hidden" name="sab_form" value="umbau_einzeln"><button class="button button-primary">Umbauen</button>')
                        . '</form></td></tr>';
                 };
-                $kopf = '<table class="widefat striped" style="margin-top:1em"><thead><tr><th>Artikel</th><th>feste Links</th><th>Kurzlinks</th><th>Stand</th><th>Aktion</th></tr></thead><tbody>';
+                $kopf = '<table class="widefat striped sab-sort2" style="margin-top:1em"><thead><tr><th style="width:28px"><input type="checkbox" onclick="event.stopPropagation();document.querySelectorAll(\'.sab-wahl\').forEach(function(c){c.checked=this.checked}.bind(this))" title="Alle offenen markieren"></th><th>Artikel</th><th>feste Links</th><th>Kurzlinks</th><th>Stand</th><th>Aktion</th></tr></thead><tbody>';
                 $offene = array_values(array_filter($liste, fn($x) => !$x['fertig'])); $fertige = array_values(array_filter($liste, fn($x) => $x['fertig']));
-                echo '<h3>Noch offen (' . count($offene) . ')</h3>' . $kopf;
+                echo '<h3>Noch offen (' . count($offene) . ')</h3><p class="description">Auf eine Überschrift klicken sortiert die Liste. Häkchen setzen und unten „Markierte umbauen“ klicken (bis zu ' . self::UMBAU_MAX . ' auf einmal).</p>' . $kopf;
                 foreach (array_slice($offene, 0, 200) as $a) { $zeile($a); }
                 echo '</tbody></table>';
+                if ($offene) {
+                    echo '<form method="post" id="umbau-sammel" style="margin:10px 0">'; wp_nonce_field('sab_speichern');
+                    echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_viele"><button class="button button-primary button-large">Markierte Artikel umbauen</button> <span class="description">Jeder Artikel wird vorher gesichert und kann einzeln zurückgesetzt werden.</span></form>';
+                }
                 if ($fertige) {
                     echo '<details style="margin-top:1em"><summary><strong>Schon umgebaut (' . count($fertige) . ')</strong></summary>' . $kopf;
                     foreach (array_slice($fertige, 0, 200) as $a) { $zeile($a); }
                     echo '</tbody></table></details>';
                 }
+                echo self::tabellenhilfe();
             }
             $namen = self::produkte(); $an = self::umbau_analyse();
             echo '<details style="margin-top:1.5em"><summary><strong>Alle auf einmal umbauen oder zurücksetzen</strong></summary>';
