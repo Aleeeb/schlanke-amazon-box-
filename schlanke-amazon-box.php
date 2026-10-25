@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.13
+ * Version: 0.70.14
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.13';
+    const VERSION = '0.70.14';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -1398,15 +1398,26 @@ final class SAB {
            . 'function fi(l){for(var i=0;i<l.length;i++){var b=l[i],t=JSON.stringify(b.attributes||{})+String(b.originalContent||"");if(t.indexOf(a)>=0){return b}var r=fi(b.innerBlocks||[]);if(r){return r}}return null}'
            . 'var f=fi(bl);if(!f){ban("Im Text habe ich "+a+" nicht gefunden (vielleicht über einen Platzhalter oder eine Austausch-Regel).");return}'
            . 'wd.dispatch("core/block-editor").selectBlock(f.clientId);setTimeout(function(){var e=document.getElementById("block-"+f.clientId);if(!e){var fr=document.querySelector("iframe[name=editor-canvas]");e=fr&&fr.contentDocument&&fr.contentDocument.getElementById("block-"+f.clientId)}if(e){e.scrollIntoView({block:"center"})}},300);ban(a+" steht im markierten Block ("+f.name+"). Zum Schließen klicken.")}'
-           . 'function los(){'
-           . 'var ta=document.getElementById("content");if(!ta){gb();return}'
+           . 'function hl(el){var o=el.style.cssText;el.style.cssText+=";background:#fff3a3;outline:3px solid #d63638";setTimeout(function(){el.style.cssText=o},6000)}'
+           . 'function vis(n){n=n||0;var ed=window.tinyMCE&&tinyMCE.get&&tinyMCE.get("content");if(!ed||!ed.getBody()||!ed.getBody().innerHTML){if(n<30){setTimeout(function(){vis(n+1)},400)}else{txt()}return}'
+           . 'var body=ed.getBody(),w=ed.getDoc().createTreeWalker(body,NodeFilter.SHOW_TEXT,null),nd,hit=null;while((nd=w.nextNode())){if(nd.nodeValue.indexOf(a)>=0){hit=nd;break}}'
+           . 'var el=hit?hit.parentNode:body.querySelector("[href*=\""+a+"\"],[data-mce-href*=\""+a+"\"],[src*=\""+a+"\"]");'
+           . 'if(!el){txt();return}'
+           . 'if(hit){var r=ed.getDoc().createRange(),i=hit.nodeValue.indexOf(a);r.setStart(hit,i);r.setEnd(hit,i+a.length);ed.selection.setRng(r)}'
+           . 'var fr=document.getElementById("content_ifr"),rc=el.getBoundingClientRect();'
+           . 'try{el.scrollIntoView({block:"center"})}catch(e){}'
+           . 'if(fr){window.scrollTo(0,Math.max(0,fr.getBoundingClientRect().top+window.pageYOffset+rc.top-220))}'
+           . 'hl(el);ban(a+" steht hier (gelb markiert, Ansicht Visuell). Zum Schließen klicken.")}'
+           . 'function txt(){var t=document.getElementById("content");if(!t){return}'
            . 'if(window.switchEditors&&document.getElementById("wp-content-wrap")&&document.getElementById("wp-content-wrap").className.indexOf("tmce-active")>=0){try{switchEditors.go("content","html")}catch(e){}}'
-           . 'setTimeout(function(){var t=document.getElementById("content");var v=t.value,i=v.indexOf(a);'
-           . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:180px;right:0;top:32px;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px sans-serif;text-align:center";'
-           . 'if(i<0){b.textContent="Im Text habe ich "+a+" nicht gefunden (vielleicht über einen Platzhalter oder eine Austausch-Regel).";document.body.appendChild(b);return}'
-           . 'var z=v.slice(0,i).split("\\n").length,tz=v.split("\\n").length;b.textContent=a+" steht in Zeile "+z+" von "+tz+" (markiert). Zum Schließen klicken.";b.onclick=function(){b.remove()};document.body.appendChild(b);'
-           . 'document.getElementById("wp-content-editor-container").scrollIntoView({block:"start"});t.focus();t.setSelectionRange(i,i+a.length);'
-           . 't.scrollTop=Math.max(0,(z/tz)*t.scrollHeight-t.clientHeight/2);},700)}'
+           . 'setTimeout(function(){var v=t.value,i=v.indexOf(a);if(i<0){ban("Im Text habe ich "+a+" nicht gefunden (vielleicht über einen Platzhalter oder eine Austausch-Regel).");return}'
+           . 'var z=v.slice(0,i).split("\n").length,tz=v.split("\n").length;'
+           . 'var m=document.createElement("div"),cs=getComputedStyle(t);m.style.cssText="position:absolute;visibility:hidden;white-space:pre-wrap;word-wrap:break-word;top:0;left:-9999px;width:"+t.clientWidth+"px;font:"+cs.font+";padding:"+cs.padding+";letter-spacing:"+cs.letterSpacing;m.textContent=v.slice(0,i);document.body.appendChild(m);var h=m.offsetHeight;m.remove();'
+           . 'document.getElementById("wp-content-editor-container").scrollIntoView({block:"start"});t.focus();t.setSelectionRange(i,i+a.length);t.scrollTop=Math.max(0,h-t.clientHeight/2);'
+           . 'ban(a+" steht in Zeile "+z+" von "+tz+" (markiert). Zum Schließen klicken.")},600)}'
+           . 'function los(){var ta=document.getElementById("content");if(!ta){gb();return}'
+           . 'var wrap=document.getElementById("wp-content-wrap");if(wrap&&wrap.className.indexOf("html-active")>=0&&window.switchEditors){try{switchEditors.go("content","tmce")}catch(e){}}'
+           . 'vis()}'
            . 'if(document.readyState==="complete"){setTimeout(los,600)}else{window.addEventListener("load",function(){setTimeout(los,600)})}})();</script>';
     }
 
