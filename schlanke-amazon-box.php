@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.71.4
+ * Version: 0.71.5
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.71.4';
+    const VERSION = '0.71.5';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -3501,7 +3501,7 @@ final class SAB {
             if ($dr0 > 0) {
                 $dring[$a0] = $dr0;
                 if (!isset($faelle[$a0])) {
-                    $faelle[$a0] = ($marken[$a0] ?? '') === 'ers' ? 'von dir als „Ersetzen“ markiert' : ($sc0 < 35 ? 'sehr schwacher Score (' . $sc0 . ')' : (isset($x0['liefertage']) && (float) $x0['liefertage'] > 14 ? 'Lieferzeit über 14 Tage' : (isset($x0['sterne']) && $x0['sterne'] !== null && (float) $x0['sterne'] < 3.5 ? 'unter 3,5 Sterne' : 'Prime-Status unklar')));
+                    $faelle[$a0] = ($marken[$a0] ?? '') === 'ers' ? 'von dir als „Ersetzen“ markiert' : ($sc0 < 35 ? 'sehr schwacher Score (' . $sc0 . ')' : (isset($x0['liefertage']) && (float) $x0['liefertage'] > 14 ? 'Lieferzeit über 14 Tage' : (isset($x0['sterne']) && $x0['sterne'] !== null && (float) $x0['sterne'] < 3.5 ? 'unter 3,5 Sterne' : 'Prime-Status unklar (bei Amazon nicht erkennbar)')));
                 }
             }
         }
@@ -3510,7 +3510,7 @@ final class SAB {
             $f = $fund[$alt] ?? []; $seiten = count($f); $n = (int) array_sum(array_column($f, 'n'));
             if ($seiten === 0) { continue; }   // steht in keinem Artikel: kein Handlungsbedarf
             $toet = self::toetend_asin((string) $alt, (array) $d);   // steht schon in Artikeln, obwohl es Tiere töten kann: ganz nach oben, Ersatz suchen
-            $zeilen[] = ['alt' => $alt, 'grund' => $toet ? 'Tierschutz: kann Tiere töten oder verletzen, bitte ersetzen' : $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => $toet ? 1000 * max(1, $seiten) : ($dring[$alt] ?? 100) * max(1, $seiten), 'f' => $f];
+            $zeilen[] = ['alt' => $alt, 'grund' => $toet ? 'Tierschutz: kann Tiere töten oder verletzen, bitte ersetzen' : $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => $toet ? 1000 * max(1, $seiten) : ($dring[$alt] ?? 100) * max(1, $seiten), 'dr' => $toet ? 1000 : ($dring[$alt] ?? 100), 'f' => $f];
         }
         usort($zeilen, fn($a, $b) => $b['prio'] <=> $a['prio']);
         $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = 10;
@@ -3536,7 +3536,7 @@ final class SAB {
                 $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
             }
             $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
-                . '<div><strong>Zu tauschen:</strong> <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><small style="color:#a00">' . esc_html($z['grund']) . '</small> · ' . $wo . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
+                . '<div><strong>Zu tauschen:</strong> <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><span style="color:#a00;font-size:16px;font-weight:700">' . esc_html($z['grund']) . '</span><br><small style="color:#555" title="Reihenfolge der Liste: Dringlichkeit (0 bis 100) mal Zahl der Seiten">Priorität ' . (int) $z['prio'] . ' = Dringlichkeit ' . (int) $z['dr'] . ' &times; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . '</small><br>' . $wo . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
                 . '<div style="display:flex;flex-wrap:wrap;gap:10px">';
             foreach ($k['liste'] as $i => $c) {
                 $x = $c['x']; $pv = $c['pv'] ?? null; $nm = ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
