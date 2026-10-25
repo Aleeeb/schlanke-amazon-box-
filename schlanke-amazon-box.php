@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.10
+ * Version: 0.70.11
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.10';
+    const VERSION = '0.70.11';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -3300,6 +3300,18 @@ final class SAB {
         }
         if (preg_match_all('#\[amz_karten\].*?\[/amz_karten\]#is', $c, $km, PREG_OFFSET_CAPTURE)) {
             foreach ($km[0] as [$t, $off]) { $e[] = ['s' => $off, 'e' => $off + strlen($t), 'html' => $t]; }
+        }
+        if (preg_match_all('#\[(amz_bild|amz_produkt|amz_karte|aawp)\b[^\]]*\]#i', $c, $sm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {   // einzelne Platzhalter außerhalb von Tabellen und Kartenblöcken zählen wie in der Wartungsliste mit
+            foreach ($sm as $x) {
+                $p = (int) $x[0][1]; $in = false;
+                foreach ($e as $u0) { if ($p >= $u0['s'] && $p < $u0['e']) { $in = true; break; } }
+                if ($in || !preg_match('#\[(?:amz_bild|amz_produkt|amz_karte)\b|\[aawp\b[^\]]*(?:thumb|image|box|grid|table)#i', $x[0][0])) { continue; }
+                $s0 = $p; $e0 = $p + strlen($x[0][0]);
+                $z = stripos($c, '[/' . $x[1][0] . ']', $e0);
+                if ($z !== false && $z - $e0 < 3000) { $e0 = $z + strlen($x[1][0]) + 3; }
+                if (preg_match('#<p[^>]*>\s*$#i', substr($c, max(0, $s0 - 80), min($s0, 80)), $pm) && preg_match('#^\s*</p>#i', substr($c, $e0, 20), $pn)) { $s0 -= strlen($pm[0]); $e0 += strlen($pn[0]); }
+                $e[] = ['s' => $s0, 'e' => $e0, 'html' => substr($c, $s0, $e0 - $s0)];
+            }
         }
         usort($e, fn($a, $b) => $a['s'] <=> $b['s']);
         $re = '#(?:asin|fields|box|link|data-sab-asin)\s*=\s*["\']?([A-Z0-9]{10})\b|/(?:dp|gp/product|product)/([A-Z0-9]{10})\b#i';
