@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.4
+ * Version: 0.75.5
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.4';
+    const VERSION = '0.75.5';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1641,9 +1641,9 @@ final class SAB {
 
     /** Durchsucht alle Artikel nach Partner-IDs (Amazon: tag=, tracking_id; eBay: campid) und zählt Stellen und Artikel. @return array{amazon:array,ebay:array} */
     private static function ids_scan(): array {
-        global $wpdb; $out = ['amazon' => [], 'ebay' => []];
+        global $wpdb; $out = ['amazon' => [], 'ebay' => [], 'ohne' => []];
         if (!isset($wpdb)) { return $out; }
-        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND (post_content LIKE '%tag=%' OR post_content LIKE '%tracking_id%' OR post_content LIKE '%campid%')", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND (post_content LIKE '%tag=%' OR post_content LIKE '%tracking_id%' OR post_content LIKE '%campid%' OR post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%')", ARRAY_A);
         foreach ((array) $rows as $r) {
             $c = html_entity_decode((string) $r['post_content']);
             $f = [];
@@ -1651,9 +1651,12 @@ final class SAB {
             if (preg_match_all('/\btag=["\']([A-Za-z0-9][A-Za-z0-9\-]{2,39}-\d{2})["\']/', $c, $m)) { foreach ($m[1] as $i) { $f['amazon'][$i][] = (int) $r['ID']; } }
             if (preg_match_all('/[?&;]tag=([A-Za-z0-9][A-Za-z0-9\-]{2,39}-\d{2})\b/', $c, $m)) { foreach ($m[1] as $i) { $f['amazon'][$i][] = (int) $r['ID']; } }
             if (preg_match_all('/\bcampid=["\']?(\d{8,12})/', $c, $m)) { foreach ($m[1] as $i) { $f['ebay'][$i][] = (int) $r['ID']; } }
+            if (preg_match_all('#https?://(?:www\.)?(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu))/[^\s"\'<>\]]*#i', $c, $m)) {
+                foreach ($m[0] as $u) { if (!preg_match('/[?&;]tag=[A-Za-z0-9\-]+-\d{2}/', $u)) { $out['ohne'][(int) $r['ID']] = ['titel' => (string) $r['post_title'], 'n' => ($out['ohne'][(int) $r['ID']]['n'] ?? 0) + 1, 'bsp' => $out['ohne'][(int) $r['ID']]['bsp'] ?? $u]; } }
+            }
             foreach ($f as $art => $ids) { foreach ($ids as $i => $pids) { $o = &$out[$art][$i]; $o = $o ?? ['stellen' => 0, 'artikel' => []]; $o['stellen'] += count($pids); foreach ($pids as $pid) { $o['artikel'][$pid] = (string) $r['post_title']; } unset($o); } }
         }
-        foreach ($out as &$l) { uasort($l, fn($a, $b) => $b['stellen'] <=> $a['stellen']); }
+        foreach (['amazon','ebay'] as $k) { $l = &$out[$k]; uasort($l, fn($a, $b) => $b['stellen'] <=> $a['stellen']); unset($l); }
         return $out;
     }
 
@@ -1675,6 +1678,13 @@ final class SAB {
                 $bek = in_array((string) $id, $art === 'amazon' ? $am_bekannt : $eb_bekannt, true); if (!$bek) { $neu++; }
                 $h .= '<tr><td><code>' . esc_html((string) $id) . '</code></td><td>' . (int) $d['stellen'] . '</td><td>' . count($d['artikel']) . '</td><td>' . ($bek ? '<span style="color:#1a7f37;font-weight:700">eingetragen</span>' : '<span style="color:#b36b00;font-weight:700">noch nicht eingetragen</span>') . '</td></tr>';
             }
+            $h .= '</tbody></table>';
+        }
+        $h .= '<h3>Amazon-Links ohne Partner-ID</h3>';
+        if (!$sc['ohne']) { $h .= '<p>Keine gefunden: Alle fest eingetragenen Amazon-Links tragen eine ID.</p>'; }
+        else {
+            $h .= '<p class="description">Diese Artikel enthalten Amazon-Links, die kein tag= haben und so keine Provision bringen. Am besten durch ein Plugin-Shortcode ersetzen (Reiter Umbau).</p><table class="widefat striped" style="max-width:900px"><thead><tr><th>Artikel</th><th>Links</th><th>Beispiel</th></tr></thead><tbody>';
+            foreach ($sc['ohne'] as $pid => $d) { $h .= '<tr><td><a href="' . esc_url(get_edit_post_link($pid)) . '">' . esc_html($d['titel']) . '</a></td><td>' . (int) $d['n'] . '</td><td><code style="word-break:break-all">' . esc_html(mb_substr($d['bsp'], 0, 90)) . '</code></td></tr>'; }
             $h .= '</tbody></table>';
         }
         $h .= '<p><button class="button"' . ($neu ? '' : ' disabled') . '>Fehlende IDs übernehmen' . ($neu ? ' (' . $neu . ')' : '') . '</button></p></form>';
