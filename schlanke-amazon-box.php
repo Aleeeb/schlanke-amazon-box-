@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.9
+ * Version: 0.70.10
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.9';
+    const VERSION = '0.70.10';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -3927,6 +3927,8 @@ JS;
         } elseif ($tab === 'problem') {
             echo self::ausfall_html() . '<hr style="margin:2em 0">' . self::problem_html() . self::asin_diag_html();
         } elseif ($tab === 'umbau') {
+            $eid = (int) ($_GET['entzerren'] ?? ($_POST['sab_id'] ?? 0));
+            if (!empty($_GET['entzerren']) || (isset($_POST['sab_form']) && in_array($_POST['sab_form'], ['entzerren_los', 'entzerren_zurueck'], true))) { echo '<div id="sab-entzerren" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">' . self::entzerren_vorschau_html($eid) . '</div>'; }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; }
             echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>'
@@ -3937,8 +3939,6 @@ JS;
                . '<p>Gefunden: <strong>' . count($liste) . '</strong> Artikel mit Amazon-Links, davon <strong>' . $nfertig . '</strong> schon umgebaut; <strong>' . $nf . '</strong> feste Produkt-Links und <strong>' . $nk . '</strong> Kurzlinks (amzn.to) offen.</p>';
             echo '<p><a class="button button-primary" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'seite' => 1], admin_url('admin.php'))) . '">Vorschau für alle offenen Artikel (Probleme sehen, dann mehrere auf einmal umbauen)</a></p>';
             if (!empty($_GET['alle_vorschau']) || !empty($_POST['sab_alle_vorschau'])) { echo self::umbau_uebersicht_html((int) ($_GET['seite'] ?? ($_POST['sab_alle_vorschau'] ?? 1))); }
-            $eid = (int) ($_GET['entzerren'] ?? ($_POST['sab_id'] ?? 0));
-            if (!empty($_GET['entzerren']) || (isset($_POST['sab_form']) && in_array($_POST['sab_form'], ['entzerren_los', 'entzerren_zurueck'], true))) { echo self::entzerren_vorschau_html($eid); }
             $vid = (int) ($_GET['vorschau'] ?? ($_POST['sab_vorschau'] ?? 0));
             if ($vid) { echo self::umbau_vorschau($vid); }
             if ($liste) {
