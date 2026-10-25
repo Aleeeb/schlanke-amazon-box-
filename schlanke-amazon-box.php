@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.10
+ * Version: 0.75.11
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.10';
+    const VERSION = '0.75.11';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4009,6 +4009,32 @@ final class SAB {
         return $h . '</div>';
     }
 
+    /** Stylesheets und Körperklassen der echten Webseite (von der Startseite gelesen, 6 Stunden gemerkt), damit Vorschauen wie bei Besuchern aussehen. */
+    private static function theme_kopf(): array {
+        $c = get_transient('sab_theme_kopf');
+        if (is_array($c)) { return $c; }
+        $kopf = ''; $klasse = '';
+        $r = wp_remote_get(home_url('/'), ['timeout' => 8]);
+        if (!is_wp_error($r) && wp_remote_retrieve_response_code($r) === 200) {
+            $html = (string) wp_remote_retrieve_body($r);
+            $head = preg_match('#<head\b.*?</head>#is', $html, $m) ? $m[0] : '';
+            if (preg_match_all('#<link\b[^>]*rel=["\']stylesheet["\'][^>]*>#i', $head, $m)) { $kopf .= implode("\n", $m[0]); }
+            if (preg_match_all('#<style\b[^>]*>.*?</style>#is', $head, $m)) { $kopf .= implode("\n", $m[0]); }
+            if (preg_match('#<body\b[^>]*class=["\']([^"\']*)#i', $html, $m)) { $klasse = trim(str_replace(['home', 'blog'], '', $m[1])) . ' single single-post'; }
+        }
+        $out = ['kopf' => $kopf, 'klasse' => $klasse];
+        set_transient('sab_theme_kopf', $out, 6 * HOUR_IN_SECONDS);
+        return $out;
+    }
+
+    /** Zeigt HTML in einem eigenen Rahmen mit dem Aussehen der Webseite; das Admin-Aussehen kann so nichts verzerren (z. B. riesige Symbole). */
+    private static function vorschau_rahmen(string $inhalt): string {
+        $t = self::theme_kopf();
+        $css = get_option('sab_karten_css') !== '0' ? '<style>' . self::KARTEN_CSS . '</style>' : '';
+        $doc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank">' . $t['kopf'] . $css . '<style>body{margin:0;padding:12px;background:#fff}</style></head><body class="' . esc_attr($t['klasse']) . '"><div class="site-content"><div class="inside-article"><div class="entry-content">' . preg_replace('#<script\b.*?</script>#is', '', $inhalt) . '</div></div></div></body></html>';
+        return '<iframe class="sab-umb-rahmen" sandbox="allow-same-origin" loading="lazy" style="width:100%;height:320px;border:1px solid #dcdcde;background:#fff" srcdoc="' . esc_attr($doc) . '" onload="try{this.style.height=Math.min(900,this.contentDocument.documentElement.scrollHeight+10)+\'px\'}catch(e){}"></iframe>';
+    }
+
     private static function umbau_vorschau(int $id): string {
         $post = get_post($id);
         if (!$post) { return '<p>Artikel nicht gefunden.</p>'; }
@@ -4047,12 +4073,12 @@ final class SAB {
             $kurz = fn(string $t, int $len) => '<code style="word-break:break-all;white-space:pre-wrap;font-size:11px;display:block;max-height:420px;overflow:auto">' . esc_html($zeig($t, $len)) . '</code>';
             $titelz = mb_substr(trim(preg_replace('/\s+/', ' ', strip_tags($ab))), 0, 60) ?: 'Abschnitt ' . $i;
             // grafische Ansicht: beide Fassungen so gezeigt, wie Besucher sie sehen würden (höchstens 12 Abschnitte, wegen der Ladezeit)
-            $bild = fn(string $t) => '<div class="sab-umb-bild" style="max-height:520px;overflow:auto;padding:8px;background:#fff;border:1px solid #dcdcde">' . do_shortcode(wpautop($t)) . '</div>';
+            $bild = fn(string $t) => self::vorschau_rahmen(do_shortcode(wpautop($t)));
             $grafisch = $i <= 12;
             $code = '<details style="margin-top:6px"><summary style="cursor:pointer;color:#2271b1">HTML-Code zeigen</summary>';
             $zeilen[] = '<tr><td colspan="2" style="background:#f6f7f7"><strong>' . esc_html($titelz) . '</strong></td></tr><tr><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($ab) . $code . $kurz($ab, $la) . '</details>' : $kurz($ab, $la)) . '</td><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($nab) . $code . $kurz($nab, $lb) . '</details>' : $kurz($nab, $lb)) . '</td></tr>';
         }
-        $h .= '' . (get_option('sab_karten_css') !== '0' ? '<style>' . self::KARTEN_CSS . '</style>' : '') . '<style>.sab-umb-bild img{max-width:100%;height:auto}</style><p><strong>Abschnitte, die sich ändern (' . count($zeilen) . '):</strong> links vorher, rechts nachher, so wie Besucher es sehen (bei den ersten 12 Abschnitten als Bild, den HTML-Code gibt es per Klick). Die Vorher-Seite zeigt, was jetzt im Artikel steht; der Rahmen kann vom Theme-Aussehen leicht abweichen.</p><table class="widefat striped"><thead><tr><th>Vorher</th><th>Nachher</th></tr></thead><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td colspan="2">Nichts.</td></tr>') . '</tbody></table>';
+        $h .= '' . (get_option('sab_karten_css') !== '0' ? '<style>' . self::KARTEN_CSS . '</style>' : '') . '<style>.sab-umb-bild img{max-width:100%;height:auto}</style><p><strong>Abschnitte, die sich ändern (' . count($zeilen) . '):</strong> links vorher, rechts nachher, so wie Besucher es sehen (bei den ersten 12 Abschnitten als Bild im Aussehen der Webseite, den HTML-Code gibt es per Klick). Die Vorher-Seite zeigt, was jetzt im Artikel steht.</p><table class="widefat striped"><thead><tr><th>Vorher</th><th>Nachher</th></tr></thead><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td colspan="2">Nichts.</td></tr>') . '</tbody></table>';
         $rest = [];
         if (preg_match_all('#<a\b[^>]*>.*?</a>#is', preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', $neu), $m)) {
             foreach ($m[0] as $a) { if (preg_match('#href=(["\'])(.*?)\1#is', $a, $hh) && preg_match('#amazon\.|amzn\.|a\.co/|link\.amazon#i', $hh[2])) { $rest[] = '<li><code style="word-break:break-all">' . esc_html(mb_substr($a, 0, 300)) . '</code></li>'; } }
