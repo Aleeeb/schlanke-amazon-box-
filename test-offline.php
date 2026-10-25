@@ -1076,4 +1076,7 @@ $rep = SAB::attr_reparieren($kaputt);
 ok($rep === '[amz_bild asin="B0822QM4B5" land="de"][/amz_bild] Text', 'Bild-Attribut: Platzhalter im src wird zum ganzen Bild-Platzhalter');
 ok(SAB::attr_reparieren('<img src="https://a/b.jpg"> [amz_bild asin="B0822QM4B5"][/amz_bild]') === '<img src="https://a/b.jpg"> [amz_bild asin="B0822QM4B5"][/amz_bild]', 'Bild-Attribut: normale Bilder bleiben');
 
+$mPt = new ReflectionMethod('SAB', 'platzhalter_im_tag'); $mPt->setAccessible(true);
+ok($mPt->invoke(null, '<img src="[amz_bild asin="B0822QM4B5"][/amz_bild]" alt="x">') !== '' && $mPt->invoke(null, '<p>Text [amz_bild asin="B0822QM4B5"][/amz_bild]</p><img src="a.jpg">') === '', 'Platzhalter im Tag erkannt, im Text nicht');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

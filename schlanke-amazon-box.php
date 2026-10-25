@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.18
+ * Version: 0.75.19
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.18';
+    const VERSION = '0.75.19';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3469,6 +3469,11 @@ final class SAB {
     }
 
     /** Baut einen einzelnen Artikel um (Sicherung vorher). @return array{0:int,1:int,2:int} [umgebaute Links, übersprungen, geändert 0/1] */
+    /** Findet einen [amz_…]-Platzhalter innerhalb eines HTML-Tags (z. B. in src, href, data-src); liefert einen kurzen Ausschnitt oder ''. */
+    private static function platzhalter_im_tag(string $c): string {
+        return preg_match('#<[a-z][a-z0-9]*\b(?:[^>\[]|\[(?!amz_))*\[amz_[^>]*>#i', $c, $m) ? mb_substr($m[0], 0, 120) : '';
+    }
+
     /** Holt für alle neu entstehenden Plugin-Platzhalter die Produktdaten und nennt die ASINs, die danach kein Bild hätten. @return string[] */
     private static function umbau_bildpruefung(string $alt, string $neu): array {
         $land = self::land(''); $ohne = []; $geholt = 0;
@@ -3494,6 +3499,10 @@ final class SAB {
         for ($i = $info0; $i < count(self::$umbau_info); $i++) { self::$umbau_info[$i] = $post->post_title . ': ' . self::$umbau_info[$i]; }
         $gea = 0;
         if ($n > 0 && $neu !== $post->post_content) {
+            if (self::platzhalter_im_tag($neu) && !self::platzhalter_im_tag((string) $post->post_content)) {   // Platzhalter innerhalb eines HTML-Tags (Attribut) gibt WordPress nicht aus
+                self::$umbau_abw[] = $post->post_title . ': NICHT umgebaut, weil ein Platzhalter in einem HTML-Attribut gelandet wäre (' . self::platzhalter_im_tag($neu) . ').';
+                return [0, $sk, 0];
+            }
             $ohne = self::umbau_bildpruefung((string) $post->post_content, $neu);
             if ($ohne) {   // nie umbauen, wenn danach irgendwo ein Produktbild fehlen würde
                 self::$umbau_abw[] = $post->post_title . ': NICHT umgebaut, weil für ' . implode(', ', $ohne) . ' bei Amazon kein Bild geliefert wird. Dort bitte zuerst das Produkt ersetzen.';
@@ -4177,6 +4186,7 @@ final class SAB {
                 if (!self::hat_bild(self::produkt($pa, $vl, false, true))) { $unbrauchbar[] = $pa; }
             }
         }
+        if (($pt = self::platzhalter_im_tag($neu)) !== '' && self::platzhalter_im_tag($c) === '') { $h .= '<div class="notice notice-error inline"><p><strong>ACHTUNG: Platzhalter in einem HTML-Attribut, so würde kein Bild erscheinen. Der Umbau wird für diesen Artikel verweigert:</strong> <code>' . esc_html($pt) . '</code></p></div>'; }
         if ($unbrauchbar) { $h .= '<div class="notice notice-error inline"><p><strong>ACHTUNG, kein Bild bei Amazon: Dieser Artikel wird NICHT umgebaut, solange diese Produkte darin neu entstehen würden:</strong> ' . esc_html(implode(', ', $unbrauchbar)) . '</p></div>'; }
         $abschnitte = preg_split('#(?=<hr\b)#i', $c); $zeilen = []; $i = 0;
         foreach ($abschnitte as $ab) {
