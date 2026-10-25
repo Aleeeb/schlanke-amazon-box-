@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.29
+ * Version: 0.75.30
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.29';
+    const VERSION = '0.75.30';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4204,7 +4204,13 @@ final class SAB {
         return [$v, $n];
     }
 
+    /** Einzelvorschau; ein Fehler im Artikel erscheint als Hinweis statt als kritischer Fehler der ganzen Seite. */
     private static function umbau_vorschau(int $id): string {
+        try { return self::umbau_vorschau_roh($id); }
+        catch (\Throwable $e) { return '<div class="notice notice-error inline"><p><strong>Die Vorschau dieses Artikels ist abgebrochen:</strong> ' . esc_html($e->getMessage()) . ' (' . esc_html(basename($e->getFile())) . ':' . (int) $e->getLine() . '). Der Artikel wurde nicht verändert.</p></div>'; }
+    }
+
+    private static function umbau_vorschau_roh(int $id): string {
         $post = get_post($id);
         if (!$post) { return '<p>Artikel nicht gefunden.</p>'; }
         $c = (string) $post->post_content;
@@ -4630,7 +4636,8 @@ JS;
                     if ($pid < 1) { continue; }
                     if (microtime(true) - $t_u > 40) { $nicht_dran++; continue; }   // Zeitgrenze: Rest beim nächsten Klick
                     $abw0 = count(self::$umbau_abw);
-                    [$n, $sk, $gea] = self::umbau_artikel($pid);
+                    try { [$n, $sk, $gea] = self::umbau_artikel($pid); }
+                    catch (\Throwable $e) { self::$umbau_abw[] = get_the_title($pid) . ': Umbau abgebrochen (' . $e->getMessage() . '), Artikel unverändert'; $n = 0; $sk = 0; $gea = 0; }
                     if (count(self::$umbau_abw) > $abw0) { $uebersprungen[] = (string) get_the_title($pid); }
                     $ok += $gea; $links += $n;
                 }
@@ -4694,7 +4701,8 @@ JS;
                 $meldung = self::umbau_lauf(self::asin((string) ($_POST['sab_nur'] ?? '')));
             } elseif ($form === 'umbau_einzeln') {
                 self::$umbau_abw = []; self::$umbau_info = [];
-                [$n, $sk, $gea] = self::umbau_artikel((int) ($_POST['sab_id'] ?? 0));
+                try { [$n, $sk, $gea] = self::umbau_artikel((int) ($_POST['sab_id'] ?? 0)); }
+                catch (\Throwable $e) { self::$umbau_abw[] = 'Umbau abgebrochen (' . $e->getMessage() . '), Artikel unverändert'; $n = 0; $sk = 0; $gea = 0; }
                 $meldung = ($gea ? $n . ' Link(s) in diesem Artikel umgebaut. Bitte den Artikel ansehen; Rückgängig geht in der Liste.' : 'Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: keine Partner-ID für das Land oder Sonderinhalt)' : '') . '.')
                     . (self::$umbau_info ? ' Nach dem Bild angepasst: ' . implode(' | ', array_slice(array_unique(self::$umbau_info), 0, 8)) . '.' : '')
                     . (self::$umbau_abw ? ' NICHT umgebaut wegen Abweichung: ' . implode(' | ', array_slice(array_unique(self::$umbau_abw), 0, 8)) . '.' : '');
