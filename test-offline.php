@@ -1098,4 +1098,7 @@ $ok1 = $rm->invoke(null, ['lieferbar' => true, 'preis' => '9,99 €', 'kaufen' =
 $ok2 = $rm->invoke(null, ['lieferbar' => true, 'preis' => '', 'bilder' => ['x']], 80);
 $ok3 = $rm->invoke(null, ['lieferbar' => true, 'preis' => '9,99 €', 'kaufen' => true, 'bilder' => []], 80);
 if ($ok1 < 100 && $ok2 === 100 && $ok3 === 100) { echo "ok  Dringlichkeit: lieferbar mit Score 80 nie ganz oben, ohne Preis/Bild 100\n"; } else { $fail = true; echo "FEHLER Dringlichkeit $ok1 $ok2 $ok3\n"; }
+$k1 = SAB::kurzname_aus_titel('Pflanzenhut Schneckenschutz 24er Set aus Kunststoff, Haube für Beete');
+$k2 = SAB::kurzname_aus_titel('Gartenvlies Frostschutz Winterschutz Pflanzen weiß');
+if (preg_match('/24/', $k1) && stripos($k1, 'Pflanzenhut') !== false) { echo "ok  Kurzname behält Zahl: $k1 / $k2\n"; } else { $fail = true; echo "FEHLER Kurzname $k1\n"; }
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

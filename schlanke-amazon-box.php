@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.34
+ * Version: 0.75.35
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.34';
+    const VERSION = '0.75.35';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3135,6 +3135,10 @@ final class SAB {
         }
         elseif (preg_match('/(\d+)\s*(?:x\s*)?(?:piezas?|pcs|uds?\.?|unidades|st[üu]ck|pack\b)/iu', $t, $m) || preg_match('/(?:set|juego|paquete|lote)\s+(?:de\s+)?(\d+)/iu', $t, $m)) { $merk = 'Set de ' . $m[1]; }
         elseif (preg_match('/(\d+(?:[.,]\d+)?)\s*(kg|ml|cm|mm|m|l|g)\b/iu', $t, $m)) { $merk = str_replace('.', ',', $m[1]) . ' ' . strtolower($m[2]); }
+        if ($merk === '') {   // keine Maße oder Stückzahl erkannt: wenigstens irgendeine Zahl aus dem Titel behalten (Alexander 25.10.)
+            if (preg_match('/\b(\d{1,3})\s?-?er\b/iu', $t, $m)) { $merk = $m[1] . 'er'; }
+            elseif (preg_match('/(?<![\d.,])(\d{1,4}(?:[.,]\d+)?)(?![\d])\s*(%|teilig|-teilig|stück|x)?/iu', $t, $m) && !preg_match('/^(19|20)\d\d$/', $m[1])) { $merk = str_replace('.', ',', $m[1]) . (($m[2] ?? '') !== '' ? ' ' . ltrim($m[2], '-') : ''); }
+        }
         $t0 = $t;
         if (preg_match('/^\S+(?:\s\S+)?\s[-–|:]\s+(.{12,})$/u', $t, $mb)) { $t = $mb[1]; }   // „Marke – Produktname“: Marke vorn weglassen
         $w = preg_split('/\s+/u', $t);
@@ -3150,7 +3154,7 @@ final class SAB {
             $art = trim(implode(' ', array_slice($wl, 0, min(4, max(3, count($wl))))), " -–|,");
         }
         $art = mb_strtoupper(mb_substr($art, 0, 1)) . mb_substr($art, 1);
-        return $merk !== '' ? $art . ' | ' . $merk : $art;
+        return $merk !== '' && stripos($art, $merk) === false ? $art . ' | ' . $merk : $art;
     }
 
     /** „Kurzname (ASIN)“ für Meldungen: Kurzname aus der Produktliste oder Amazon-Titel aus dem letzten Abruf, sonst nur die ASIN. */
@@ -3815,6 +3819,7 @@ final class SAB {
         foreach ($marken as $a => $t) { if ($t === 'fav' && !isset($q[$a])) { $q[$a] = 'Favorit'; } }
         foreach (array_keys($namen) as $a) { if (!isset($q[$a])) { $q[$a] = 'Katalog'; } }
         $gruppe = []; foreach (self::gruppen() as $liste) { if (in_array($alt, $liste, true)) { $gruppe = array_merge($gruppe, $liste); } }
+        $wn = self::woerter(trim($name . ' ' . (string) ($items[$alt]['titel'] ?? '')));   // nur der Produktname selbst, ohne Artikeltext: Namensähnlichkeit
         $text = $name;   // der Textzusammenhang bringt nur etwas, wenn der Name fast nichts sagt: sonst ziehen Wörter wie „Schnecken“ aus dem Artikel unpassende Produkte heran
         if (count(self::woerter($name)) < 2) { $text .= ' ' . self::stellen_kontext($alt, $fund[$alt] ?? []); }
         $a1 = self::arten($text); $w1 = self::woerter($text);
@@ -3829,12 +3834,13 @@ final class SAB {
             $ing = in_array($a, $gruppe, true);
             $passt = $ing ? 3 : ($ar >= 1 ? 2 : ($tr >= 3 ? 1 : 0));   // nur zwei gemeinsame Wörter („caracoles“, „protección“) reichen nicht
             $sc = self::score($x)[0]; $pv = self::provision_satz($x);
+            $aehn = count(array_intersect($wn, self::woerter($tc)));
             if ($passt === 0 && ($quelle === 'Kunden kauften auch' || strpos($quelle, 'Amazon-Suche') === 0)) { $passt = 2; }   // von Amazon als zugehörig gezeigt beziehungsweise von Hand geprüft   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
             if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; if ($ok && $quelle === 'Katalog') { $rest[] = ['asin' => $a, 'quelle' => 'Bestes im Portfolio (Passung unklar)', 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => 0, 'pv' => $pv, 'rang' => $sc, 'ausgeschlossen' => false]; } continue; }
-            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
+            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
-        usort($out, fn($p, $q2) => [(int) $q2['ok'], (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann nach Score (Alexander 25.10.), bei gleichem Score nach Rang inkl. Provision
+        usort($out, fn($p, $q2) => [(int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
         $bestand = []; $neu = [];
         foreach ($out as $c) { if (strpos((string) $c['quelle'], 'Amazon-Suche') === 0) { $c['neu'] = true; $neu[] = $c; } else { $bestand[] = $c; } }
         $bs = array_slice($bestand, 0, $max);
@@ -3843,7 +3849,7 @@ final class SAB {
             usort($rest, fn($p, $q2) => $q2['score'] <=> $p['score']);
             $liste = array_merge($liste, array_slice($rest, 0, 4 - count($liste)));
         }
-        usort($liste, fn($p, $q2) => [(int) $q2['ok'], (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links der höchste Score
+        usort($liste, fn($p, $q2) => [(int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
         return ['liste' => $liste, 'aussortiert' => $aus];   // hat der Bestand wenig Passendes, füllen Treffer der Amazon-Suche auf (bis zu vier)
     }
 
