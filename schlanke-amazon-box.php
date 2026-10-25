@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.26
+ * Version: 0.75.27
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.26';
+    const VERSION = '0.75.27';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3593,6 +3593,7 @@ final class SAB {
     private static function umbau_uebersicht_html(int $seite): string {
         $seite = max(1, $seite); self::$vorschau_seite = $seite;
         $offen = array_values(array_filter(self::umbau_artikelliste(), fn($a) => !$a['fertig']));
+        usort($offen, fn($a, $b) => ($a['fest'] + $a['kurz']) <=> ($b['fest'] + $b['kurz']));   // einfache Artikel (wenige Links) zuerst, schwierige später
         $gesamt = count($offen); $seiten = max(1, (int) ceil($gesamt / self::UMBAU_PROSEITE));
         $liste = array_slice($offen, ($seite - 1) * self::UMBAU_PROSEITE, self::UMBAU_PROSEITE);
         $h = '<h3>Vorschau für alle offenen Artikel (Seite ' . $seite . ' von ' . $seiten . ', ' . $gesamt . ' Artikel offen)</h3><p class="description">Es wird nichts gespeichert. Jeder Artikel wird so geprüft wie beim Umbau. „Bereit“ heißt: kein Problem gefunden. Probleme siehst du unten, dort kannst du auch Ersatz für Produkte wählen, die Amazon nicht mehr kennt.</p>';
@@ -3610,9 +3611,9 @@ final class SAB {
             elseif (self::$kurz_offen) { $status = '<strong style="color:#b36b00">noch nicht fertig geprüft</strong>'; }
             else { $status = '<strong style="color:#1a7f37">bereit</strong>' . ($info ? ' <small>(' . $info . ' Anpassung' . ($info === 1 ? '' : 'en') . ' nach dem Bild)</small>' : ''); $bereit[] = (int) $a['id']; }
             $meld = ''; foreach (array_slice($abw, 0, 3) as $m) { $meld .= '<li>' . esc_html($m) . self::ort_links($m, (int) $a['id']) . '</li>'; }
-            $zeilen[] = '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>';
+            $zeilen[] = [$abw ? 1 : 0, '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>'];
         }
-        $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td colspan="4">Keine offenen Artikel.</td></tr>') . '</tbody></table>';
+        $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', array_column((function (array $z) { usort($z, fn($a, $b) => $a[0] <=> $b[0]); return $z; })($zeilen), 1)) : '<tr><td colspan="4">Keine offenen Artikel.</td></tr>') . '</tbody></table>';
         if ($uebrig) { $h .= '<p><strong>' . $uebrig . ' Artikel dieser Seite wurden wegen der Zeitgrenze noch nicht geprüft.</strong> Bitte die Seite noch einmal öffnen, die Kurzlinks werden dabei Stück für Stück aufgelöst.</p>'; }
         if ($kurzOffen) { $h .= '<p><strong>' . $kurzOffen . ' Kurzlinks wurden noch nicht aufgelöst</strong> (Abrufgrenze pro Aufruf), bitte diese Seite noch einmal öffnen.</p>'; }
         if ($wegAlle) {
