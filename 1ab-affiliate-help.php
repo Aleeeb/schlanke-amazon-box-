@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.16
+ * Version: 0.75.17
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.16';
+    const VERSION = '0.75.17';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4117,16 +4117,17 @@ final class SAB {
             if (preg_match('#<body\b[^>]*class=["\']([^"\']*)#i', $html, $m)) { $klasse = trim(str_replace(['home', 'blog'], '', $m[1])) . ' single single-post'; }
         }
         $out = ['kopf' => $kopf, 'klasse' => $klasse];
-        set_transient('sab_theme_kopf', $out, 6 * HOUR_IN_SECONDS);
+        set_transient('sab_theme_kopf', $out, $kopf === '' ? MINUTE_IN_SECONDS : 6 * HOUR_IN_SECONDS);
         return $out;
     }
 
     /** Zeigt HTML in einem eigenen Rahmen mit dem Aussehen der Webseite; das Admin-Aussehen kann so nichts verzerren (z. B. riesige Symbole). */
     private static function vorschau_rahmen(string $inhalt): string {
         $t = self::theme_kopf();
+        $warn = $t['kopf'] === '' ? '<p style="margin:0 0 4px;color:#a00;font-size:12px"><strong>Achtung:</strong> Das Aussehen der Webseite konnte nicht geladen werden (Startseite nicht abrufbar). Größen und Layout in dieser Vorschau sind deshalb nicht verlässlich.</p>' : '';
         $css = get_option('sab_karten_css') !== '0' ? '<style>' . self::KARTEN_CSS . '</style>' : '';
-        $doc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank">' . $t['kopf'] . $css . '<style>body{margin:0;padding:12px;background:#fff}.sab-chg{outline:2px solid #d63638;outline-offset:2px;background:rgba(214,54,56,.08);cursor:help}.sab-chg-b{display:inline-block;max-width:100%}.sab-chg-i{display:inline}</style></head><body class="' . esc_attr($t['klasse']) . '"><div class="site-content"><div class="inside-article"><div class="entry-content">' . preg_replace('#<script\b.*?</script>#is', '', $inhalt) . '</div></div></div></body></html>';
-        return '<iframe class="sab-umb-rahmen" sandbox="allow-same-origin" loading="lazy" style="width:100%;height:320px;border:1px solid #dcdcde;background:#fff" srcdoc="' . esc_attr($doc) . '" onload="try{this.style.height=Math.min(900,this.contentDocument.documentElement.scrollHeight+10)+\'px\'}catch(e){}"></iframe>';
+        $doc = '<!doctype html><html><head><meta charset="utf-8"><base href="' . esc_url(home_url('/')) . '" target="_blank">' . $t['kopf'] . $css . '<style>body{margin:0;padding:12px;background:#fff}.sab-chg{outline:2px solid #d63638;outline-offset:2px;background:rgba(214,54,56,.08);cursor:help}.sab-chg-b{display:inline-block;max-width:100%}.sab-chg-i{display:inline}</style></head><body class="' . esc_attr($t['klasse']) . '"><div class="site-content"><div class="inside-article"><div class="entry-content">' . preg_replace('#<script\b.*?</script>#is', '', $inhalt) . '</div></div></div></body></html>';
+        return $warn . '<iframe class="sab-umb-rahmen" sandbox="allow-same-origin" loading="lazy" style="width:100%;height:320px;border:1px solid #dcdcde;background:#fff" srcdoc="' . esc_attr($doc) . '" onload="try{this.style.height=Math.min(900,this.contentDocument.documentElement.scrollHeight+10)+\'px\'}catch(e){}"></iframe>';
     }
 
     /** Rot markiert, was der Umbau ändert: im Vorher die alten Boxen und Links, im Nachher die neuen Plugin-Karten (nur Vorschau, mit Erklärung beim Darüberfahren). */
