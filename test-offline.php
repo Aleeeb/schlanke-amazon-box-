@@ -1088,4 +1088,9 @@ SAB::$umbau_abw = [];
 $ok_lang = true; try { [$ul] = SAB::umbau_text($lang); } catch (\Throwable $e) { $ok_lang = false; }
 ok($ok_lang && is_string($ul), 'Umbau: sehr langer Artikel bricht nicht mit Typfehler ab');
 
+// ---- 0.75.32: Prio-Erklärung im Reiter Score ----
+$mPe = new ReflectionMethod('SAB', 'prio_erklaerung_html'); $mPe->setAccessible(true);
+$wpdb_pe = $GLOBALS["wpdb"] ?? null; $GLOBALS["wpdb"] = null; $pe = $mPe->invoke(null, SAB::SCORE_STANDARD); $GLOBALS["wpdb"] = $wpdb_pe;
+ok(strpos($pe, 'Priorität = Dringlichkeit') !== false && strpos($pe, 'sab_dr[schwelle]') !== false, 'Score-Reiter: Prio-Erklärung und Dringlichkeits-Einstellung vorhanden');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.31
+ * Version: 0.75.32
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.31';
+    const VERSION = '0.75.32';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -731,12 +731,22 @@ final class SAB {
         return [$p, 'Score ' . $score . ', erst auf ' . $seiten . ' Seiten' . ($fav ? ', Favorit' : '')];
     }
 
+    const DRINGLICHKEIT_STANDARD = ['schwelle' => 35, 'faktor' => 2.0, 'tage' => 14.0, 'tage_dr' => 40, 'sterne' => 3.5, 'sterne_dr' => 30];
+
+    /** Einstellbare Werte der Dringlichkeit (Reiter Score). */
+    private static function dringlichkeit_werte(): array {
+        $o = (array) get_option('sab_dringlichkeit', []); $out = [];
+        foreach (self::DRINGLICHKEIT_STANDARD as $k => $std) { $out[$k] = isset($o[$k]) && is_numeric($o[$k]) ? (float) $o[$k] : $std; }
+        return $out;
+    }
+
     private static function tausch_dringlichkeit(array $x, int $score): int {
         $nicht = empty($x['trotz']) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK' || ($x['preis'] ?? '') === '');
         if ($nicht || (array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null)) { return 100; }
-        $d = $score < 35 ? (int) round((35 - $score) * 2) : 0;
-        if (isset($x['liefertage']) && $x['liefertage'] !== null && (float) $x['liefertage'] > 14) { $d = max($d, 40); }
-        if (isset($x['sterne']) && $x['sterne'] !== null && (float) $x['sterne'] < 3.5) { $d = max($d, 30); }
+        $q = self::dringlichkeit_werte();
+        $d = $score < $q['schwelle'] ? (int) round(($q['schwelle'] - $score) * $q['faktor']) : 0;
+        if (isset($x['liefertage']) && $x['liefertage'] !== null && (float) $x['liefertage'] > $q['tage']) { $d = max($d, $q['tage_dr']); }
+        if (isset($x['sterne']) && $x['sterne'] !== null && (float) $x['sterne'] < $q['sterne']) { $d = max($d, $q['sterne_dr']); }
         return min(100, $d);
     }
 
@@ -2057,9 +2067,46 @@ final class SAB {
     }
 
     /** Reiter „Score“: wie der Score berechnet wird, Gewichte ändern, Rechenbeispiele mit echten Produkten. */
+    /** Ganz oben im Reiter Score: wie die Priorität (Reihenfolge in Übersicht und Austausch) entsteht, mit echtem Beispiel, Live-Rechner und einstellbarer Dringlichkeit. */
+    private static function prio_erklaerung_html(array $w): string {
+        $land = self::land(''); $d = self::uebersicht_daten($land, false); $q = self::dringlichkeit_werte();
+        $bsp = null;
+        foreach ((array) ($d['items'] ?? []) as $asin => $x) {
+            $x['trotz'] = false; [$sc, , $det] = self::score($x); $dr = self::tausch_dringlichkeit($x, $sc);
+            if ($dr > 0 && $dr < 100 && (!$bsp || $dr > $bsp['dr'])) { $bsp = ['asin' => (string) $asin, 'x' => $x, 'sc' => $sc, 'det' => $det, 'dr' => $dr]; }
+        }
+        $h = '<div style="background:#fff;border:2px solid #2271b1;border-radius:8px;padding:14px 18px;margin:10px 0 20px;max-width:1000px"><h2 style="margin-top:0">So entsteht die Priorität (Reihenfolge in Übersicht und Austausch)</h2>'
+           . '<p style="font-size:15px"><strong>Priorität = Dringlichkeit × Zahl der Seiten, auf denen das Produkt steht.</strong> Wer oben steht, wird zuerst getauscht.</p>'
+           . '<ol><li><strong>Dringlichkeit (0 bis 100):</strong> Nicht lieferbar, ohne Preis oder Status unklar = 100. Sonst gilt der Score: Liegt er unter <strong>' . (int) $q['schwelle'] . '</strong>, wächst die Dringlichkeit um <strong>' . str_replace('.', ',', (string) $q['faktor']) . '</strong> Punkte je fehlendem Score-Punkt. Dazu kommen Untergrenzen: Lieferzeit über <strong>' . str_replace('.', ',', (string) $q['tage']) . '</strong> Tage = mindestens <strong>' . (int) $q['tage_dr'] . '</strong>, Sterne unter <strong>' . str_replace('.', ',', (string) $q['sterne']) . '</strong> = mindestens <strong>' . (int) $q['sterne_dr'] . '</strong>.</li>'
+           . '<li><strong>Score (0 bis 100):</strong> gewichtete Summe aus Rang, Buy Box, Angebot, Preis, Streichpreis, Aktion, Bewertung, Konstanz, Prime, Lieferzeit und Provision. <a href="#sab-gewichte">Die Gewichte stellst du weiter unten ein.</a></li>'
+           . '<li><strong>Seiten:</strong> Wie oft das Produkt in veröffentlichten Artikeln vorkommt. Ein Produkt auf 20 Seiten ist 20-mal wichtiger als eines auf einer Seite.</li></ol>';
+        if ($bsp) {
+            $ns = count(self::fundstellen([$bsp['asin']])[$bsp['asin']] ?? []); $nm = (self::produkte()[$bsp['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($bsp['x']['titel'] ?? ''));
+            $faktoren = array_map(fn($z) => ['n' => $z[0], 'f' => (float) $z[2]], $bsp['det']);
+            $bonus = (int) ($bsp['x']['bonus'] ?? 0);
+            $h .= '<h3>Beispiel mit einem echten Produkt: ' . esc_html($nm ?: $bsp['asin']) . ' <small>(' . esc_html($bsp['asin']) . ')</small></h3>'
+               . '<p>Score <strong id="sab-bsp-score">' . (int) $bsp['sc'] . '</strong> → Dringlichkeit <strong id="sab-bsp-dr">' . (int) $bsp['dr'] . '</strong> (' . (int) $q['schwelle'] . ' − Score) × ' . str_replace('.', ',', (string) $q['faktor']) . ' · steht auf <strong>' . $ns . '</strong> Seite(n) → <strong>Priorität <span id="sab-bsp-prio">' . ($bsp['dr'] * $ns) . '</span></strong>.</p>'
+               . '<p><strong>Live-Rechner:</strong> Ändere hier ein Gewicht, und du siehst sofort, wie sich der Score dieses Produkts und seine Priorität ändern. Gespeichert wird erst weiter unten mit „Gewichte speichern“.</p><div style="display:flex;flex-wrap:wrap;gap:8px 16px">';
+            foreach (self::SCORE_NAMEN as $k => $name) {
+                $h .= '<label style="width:210px;font-size:12px">' . esc_html($name) . ' <input type="number" min="0" class="sab-lw" data-k="' . esc_attr($k) . '" value="' . (int) ($w[$k] ?? 0) . '" style="width:70px"></label>';
+            }
+            $keys = array_keys(self::SCORE_STANDARD);
+            $fj = [];
+            foreach ($bsp['det'] as $i => $z) { $fj[$keys[$i] ?? $i] = (float) $z[2]; }
+            $h .= '</div><script>(function(){var F=' . wp_json_encode($fj) . ',B=' . $bonus . ',NS=' . max(1, $ns) . ',SCH=' . (float) $q['schwelle'] . ',FAK=' . (float) $q['faktor'] . ';var els=document.querySelectorAll(".sab-lw");function rechne(){var sum=0,roh=0;els.forEach(function(e){var k=e.getAttribute("data-k"),g=Math.max(0,+e.value||0);if(F.hasOwnProperty(k)){sum+=g;roh+=g*F[k]}else{sum+=g}});'
+               . 'var r=sum>0?100*roh/sum:0,sc=Math.round(50+(r-45)*2.2)+B;sc=Math.max(-10,Math.min(110,sc));var dr=sc<SCH?Math.round((SCH-sc)*FAK):0;dr=Math.min(100,dr);document.getElementById("sab-bsp-score").textContent=sc;document.getElementById("sab-bsp-dr").textContent=dr;document.getElementById("sab-bsp-prio").textContent=dr*NS}'
+               . 'els.forEach(function(e){e.addEventListener("input",rechne)});})();</script><p class="description">Der Rechner nutzt die Faktoren dieses Produkts von heute (ohne Konstanz, falls sie fehlt) und gilt ungefähr genauso wie die echte Rechnung. Er zeigt nur die Wirkung.</p>';
+        } else { $h .= '<p><em>Zurzeit gibt es kein Produkt mit mittlerer Dringlichkeit für ein Beispiel.</em></p>'; }
+        $h .= '<h3>Dringlichkeit einstellen</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="dringlichkeit"><div style="display:flex;flex-wrap:wrap;gap:8px 18px">';
+        $lab = ['schwelle' => 'Score-Schwelle', 'faktor' => 'Punkte je fehlendem Score-Punkt', 'tage' => 'Lieferzeit ab (Tage)', 'tage_dr' => 'dann Dringlichkeit mindestens', 'sterne' => 'Sterne unter', 'sterne_dr' => 'dann Dringlichkeit mindestens'];
+        foreach ($lab as $k => $t) { $h .= '<label style="font-size:12px">' . esc_html($t) . '<br><input type="text" name="sab_dr[' . esc_attr($k) . ']" value="' . esc_attr(str_replace('.', ',', (string) $q[$k])) . '" size="6"></label>'; }
+        $h .= '</div><p><button class="button button-primary">Dringlichkeit speichern</button> <button class="button" name="sab_dr_std" value="1">Standard</button></p></form></div>';
+        return $h;
+    }
+
     private static function score_html(): string {
         $land = self::land(''); $w = self::score_gewichte(); $summe = array_sum($w);
-        $h = '<h2>Score: so wird gerechnet</h2><p>Der Score (0 bis 100) vergleicht ähnliche Produkte. Er sagt nicht, wie gut ein Produkt ist, sondern wie gut es sich nach den Amazon-Daten verkauft und wie verlässlich es lieferbar ist. Jeder Posten bekommt einen Faktor von 0 (schlecht) bis 1 (sehr gut) und wird mit seinem Gewicht multipliziert. Die Summe wird auf 100 umgerechnet, damit die Gewichte keine feste Summe brauchen.</p>'
+        $h = self::prio_erklaerung_html($w) . '<h2 id="sab-gewichte">Score: so wird gerechnet</h2><p>Der Score (0 bis 100) vergleicht ähnliche Produkte. Er sagt nicht, wie gut ein Produkt ist, sondern wie gut es sich nach den Amazon-Daten verkauft und wie verlässlich es lieferbar ist. Jeder Posten bekommt einen Faktor von 0 (schlecht) bis 1 (sehr gut) und wird mit seinem Gewicht multipliziert. Die Summe wird auf 100 umgerechnet, damit die Gewichte keine feste Summe brauchen.</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="score">'
            . '<table class="widefat striped" style="max-width:860px"><thead><tr><th>Posten</th><th style="width:110px">Gewicht</th><th>Wie der Faktor entsteht</th></tr></thead><tbody>';
         $erkl = [
@@ -4685,6 +4732,14 @@ JS;
             } elseif ($form === 'manuell') {
                 update_option('sab_manuell', sanitize_textarea_field(wp_unslash($_POST['sab_manuell'] ?? '')), false);
                 $meldung = 'Handdaten gespeichert.';
+            } elseif ($form === 'dringlichkeit') {
+                if (!empty($_POST['sab_dr_std'])) { delete_option('sab_dringlichkeit'); $meldung = 'Dringlichkeit auf den Standard zurückgesetzt.'; }
+                else {
+                    $o = [];
+                    foreach (array_keys(self::DRINGLICHKEIT_STANDARD) as $k) { $v = str_replace(',', '.', (string) wp_unslash($_POST['sab_dr'][$k] ?? '')); if (is_numeric($v)) { $o[$k] = max(0, min(1000, (float) $v)); } }
+                    update_option('sab_dringlichkeit', $o, false);
+                    $meldung = 'Dringlichkeit gespeichert. Die Reihenfolge in Übersicht und Austausch ist sofort neu berechnet.';
+                }
             } elseif ($form === 'score') {
                 if (!empty($_POST['sab_score_std'])) { delete_option('sab_score_w'); $meldung = 'Gewichte auf den Standard zurückgesetzt.'; }
                 else {
