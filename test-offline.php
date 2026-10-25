@@ -941,4 +941,7 @@ unset($GLOBALS['opt']['sab_such_kand']);
 
 $mT = new ReflectionMethod('SAB', 'tausch_dringlichkeit'); $mT->setAccessible(true);
 ok($mT->invoke(null, ['lieferbar' => false, 'preis' => ''], 20) === 100 && $mT->invoke(null, ['lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €', 'sterne' => 4.5], 85) === 0 && $mT->invoke(null, ['lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €'], 20) === 30, 'Dringlichkeit: nicht lieferbar 100, gutes Produkt 0, schwacher Score bis 30');
+$mP = new ReflectionMethod('SAB', 'potenzial'); $mP->setAccessible(true);
+$gut = ['lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €', 'prime' => true, 'liefertage' => 3];
+ok($mP->invoke(null, $gut, 80, 2, false)[0] > 0 && $mP->invoke(null, $gut, 80, 2, true)[0] > $mP->invoke(null, $gut, 80, 2, false)[0] && $mP->invoke(null, $gut, 80, 12, true)[0] === 0 && $mP->invoke(null, $gut, 50, 1, false)[0] === 0 && $mP->invoke(null, ['lieferbar' => false, 'preis' => ''], 90, 1, true)[0] === 0 && $mP->invoke(null, $gut, 80, 1, false)[0] > $mP->invoke(null, $gut, 80, 6, false)[0], 'Potenzial: gut+wenige Seiten hoch, Favorit mehr, schlecht/viele Seiten 0');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

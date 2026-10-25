@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.7
+ * Version: 0.70.8
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.7';
+    const VERSION = '0.70.8';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -687,6 +687,17 @@ final class SAB {
      * Wie dringend ein Produkt getauscht werden muss (0 bis 100), unabhängig davon, wie oft es verlinkt ist: nicht lieferbar, kein Preis oder Prime-Status
      * unklar = 100; sonst bei schwachem Score bis etwa 70, bei sehr langer Lieferzeit 40, bei unter 3,5 Sternen 30; gute Produkte 0. Mal Seitenzahl ergibt die Priorität.
      */
+    /** Potenzial zum Ausbauen: guter Score, sauber lieferbar, wenige Seiten; Favoriten zählen mehr. [Zahl, Begründung] */
+    private static function potenzial(array $x, int $score, int $seiten, bool $fav): array {
+        $nicht = empty($x['trotz']) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK' || ($x['preis'] ?? '') === '');
+        if ($nicht || $score < 60) { return [0, '']; }
+        if (array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null) { return [0, '']; }
+        if (isset($x['liefertage']) && $x['liefertage'] !== null && (float) $x['liefertage'] > 7) { return [0, '']; }
+        if ($seiten >= 10) { return [0, 'kommt schon auf ' . $seiten . ' Seiten vor']; }
+        $p = (int) round(($score - 50) * (10 - $seiten) / 10 * ($fav ? 1.5 : 1));
+        return [$p, 'Score ' . $score . ', erst auf ' . $seiten . ' Seiten' . ($fav ? ', Favorit' : '')];
+    }
+
     private static function tausch_dringlichkeit(array $x, int $score): int {
         $nicht = empty($x['trotz']) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK' || ($x['preis'] ?? '') === '');
         if ($nicht || (array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null)) { return 100; }
@@ -1834,7 +1845,7 @@ final class SAB {
             $gut = [];
             foreach ($zeilen as $i => $z) {
                 $x = $z['x'];
-                if (!$x) { $h .= '<tr><td><code>' . esc_html($z['asin']) . '</code> ' . esc_html($namen[$z['asin']] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="7"></td></tr>'; continue; }
+                if (!$x) { $h .= '<tr><td><code>' . esc_html($z['asin']) . '</code> ' . esc_html($namen[$z['asin']] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="8"></td></tr>'; continue; }
                 $brauchbar = !empty($x['trotz']) || (!empty($x['lieferbar']) && ($x['status'] ?? '') !== 'OUT_OF_STOCK') || (self::unklar($x) && isset($x['rang']) && $x['rang'] <= 20000);
                 if ($brauchbar) { $gut[] = $z['asin']; }
                 $h .= self::uebersicht_zeile($z['asin'], $x, $namen, $kz, $fund, $dp, false);
@@ -2549,7 +2560,7 @@ final class SAB {
 
     /** Kopf der Produkttabelle; ohne Markierungsspalten (Fav., Ers., Trotzdem) in den Produktgruppen. */
     private static function uebersicht_kopf(bool $marken): string {
-        $k = '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl" title="Provision laut Kategorie (Tabelle im Reiter Score) und geschätzter Betrag pro Verkauf">Prov.</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Auf wie vielen Seiten das Produkt verlinkt ist, wie oft insgesamt (Bild und Button zählen je einmal) und das Maximum auf einer Seite. Kurzlinks ohne ASIN werden nicht erkannt. „allgemein“ = auf mehr als 10 Seiten.">Seiten</th><th class="sab-zahl" title="Priorität zum Tauschen = Dringlichkeit mal Seiten. Dringlichkeit 100: nicht lieferbar, kein Preis oder Prime-Status unklar. Sonst nur bei schwachem Score (unter 35), sehr langer Lieferzeit (über 14 Tage) oder unter 3,5 Sternen. Gute Produkte haben Priorität 0, egal wie oft sie vorkommen.">Prio.</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th title="Fester Bonus (oder Malus) in Punkten, wird zum Score addiert. Für Produkte, die du bewusst nach vorn stellen willst.">Bonus</th><th>Mehr</th></tr></thead><tbody>';
+        $k = '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl" title="Provision laut Kategorie (Tabelle im Reiter Score) und geschätzter Betrag pro Verkauf">Prov.</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Auf wie vielen Seiten das Produkt verlinkt ist, wie oft insgesamt (Bild und Button zählen je einmal) und das Maximum auf einer Seite. Kurzlinks ohne ASIN werden nicht erkannt. „allgemein“ = auf mehr als 10 Seiten.">Seiten</th><th class="sab-zahl" title="Priorität zum Tauschen = Dringlichkeit mal Seiten. Dringlichkeit 100: nicht lieferbar, kein Preis oder Prime-Status unklar. Sonst nur bei schwachem Score (unter 35), sehr langer Lieferzeit (über 14 Tage) oder unter 3,5 Sternen. Gute Produkte haben Priorität 0, egal wie oft sie vorkommen.">Prio.</th><th class="sab-zahl" title="Potenzial zum Ausbauen: guter Score (ab 60), lieferbar, Prime geklärt, Lieferzeit höchstens 7 Tage und noch auf wenigen Seiten. Favoriten zählen anderthalbfach. Hohe Zahl = Kandidat, öfter einzubauen.">Potenzial</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th title="Fester Bonus (oder Malus) in Punkten, wird zum Score addiert. Für Produkte, die du bewusst nach vorn stellen willst.">Bonus</th><th>Mehr</th></tr></thead><tbody>';
         return $marken ? $k : preg_replace('#<th title="Favorit.*?</th><th title="Ersetzen.*?</th><th title="Du hast.*?</th><th title="Fester Bonus.*?</th>#s', '', $k);
     }
 
@@ -2580,6 +2591,7 @@ final class SAB {
             $fs = $fund[$asin] ?? []; $ns = count($fs); $nl = array_sum(array_column($fs, 'n')); $mx = $fs ? max(array_column($fs, 'n')) : 0;
             $seiten = $ns ? '<span title="' . esc_attr($nl . ' Links insgesamt, höchstens ' . $mx . ' auf einer Seite') . '"><strong>' . $ns . '</strong> <small>(' . $nl . '×' . ($mx > 2 ? ', max <b style="color:#a00">' . $mx . '</b>' : ', max ' . $mx) . ')</small>' . ($ns > 10 ? ' <span class="sab-chip">allgemein</span>' : '') . '</span>' : '0';
             $dr = self::tausch_dringlichkeit($x, $sc); $prio = $dr * $ns;
+            [$pot, $potwhy] = self::potenzial($x, $sc, $ns, (((array) get_option('sab_marken', []))[$asin] ?? '') === 'fav');
             $k = $kz[$asin] ?? null; $nk = $k ? (int) $k['n'] : 0;
             $klick = $k ? '<span title="Bild ' . (int) $k['b'] . ', Text/Button ' . (int) $k['x'] . '; zurückgekommen ' . (int) $k['z'] . '">' . $nk . '</span>' : '0';
             $mehr = '<details><summary>Details</summary><div style="max-width:420px;font-size:12px">'
@@ -2593,7 +2605,7 @@ final class SAB {
                . '<td data-v="' . $sc . '" title="Zahl und Balken: Score heute (etwa 0 bis 100). Die kleinen Striche darunter: Score an den einzelnen Tagen, ein Strich pro Tag seit der ersten Prüfung."><span class="sab-bal" style="width:' . max(4, (int) round(max(0, min(100, $sc)) * 0.6)) . 'px;background:' . $farbe . '"></span><strong style="color:' . $farbe . '">' . $sc . '</strong>' . (!empty($x['bonus']) ? ' <small style="color:#6a3fb0;font-weight:700" title="Von Hand vergebener Bonus, im Score enthalten">&#9998; ' . ($x['bonus'] > 0 ? '+' : '') . (int) $x['bonus'] . ' manuell</small>' : '') . (isset($x['k_anteil']) ? '<br><small title="Tage mit Score ab ' . self::K_SCHWELLE . ' in den letzten ' . (int) $x['k_tage'] . ' Tagen">' . round(100 * $x['k_anteil']) . ' % gut</small>' : '') . (!empty($x['k_reihe']) ? '<br>' . self::sparkline($x['k_reihe']) : '') . '</td>'
                . '<td>' . $chips . '</td><td class="sab-zahl" data-v="' . esc_attr((string) (self::preiszahl((string) ($x['preis'] ?? '')) ?? '')) . '">' . $preis . '</td>'
                . self::provisionszelle($x)
-               . '<td class="sab-zahl" data-v="' . (isset($x['rang']) ? (int) $x['rang'] : '') . '">' . $rang . '</td><td class="sab-zahl" data-v="' . $ns . '">' . $seiten . '</td><td class="sab-zahl" data-v="' . $prio . '">' . ($prio > 0 ? '<strong style="color:' . ($prio >= 1500 ? '#a00' : ($prio >= 500 ? '#b36b00' : '#555')) . '">' . $prio . '</strong>' : '–') . '</td><td class="sab-zahl" data-v="' . $nk . '">' . $klick . '</td>'
+               . '<td class="sab-zahl" data-v="' . (isset($x['rang']) ? (int) $x['rang'] : '') . '">' . $rang . '</td><td class="sab-zahl" data-v="' . $ns . '">' . $seiten . '</td><td class="sab-zahl" data-v="' . $prio . '">' . ($prio > 0 ? '<strong style="color:' . ($prio >= 1500 ? '#a00' : ($prio >= 500 ? '#b36b00' : '#555')) . '">' . $prio . '</strong>' : '–') . '</td><td class="sab-zahl" data-v="' . $pot . '" title="' . esc_attr($potwhy) . '">' . ($pot > 0 ? '<strong style="color:#2e7d32">' . $pot . '</strong>' : '–') . '</td><td class="sab-zahl" data-v="' . $nk . '">' . $klick . '</td>'
                . ($marken ? self::markenzellen($asin) : '') . '<td>' . $mehr . '</td></tr>';
     }
 
@@ -2613,7 +2625,7 @@ final class SAB {
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
-            if (!$x) { $h .= '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="6"></td>' . self::markenzellen($asin) . '<td></td></tr>'; continue; }
+            if (!$x) { $h .= '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'; continue; }
             $h .= self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true);
         }
         return $h . '</tbody></table>' . self::bild_gross_html() . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Wartung“.</span></p>';
