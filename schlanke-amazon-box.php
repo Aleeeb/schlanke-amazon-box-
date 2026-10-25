@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.70.0
+ * Plugin Name: 1a Amazon Box 0.70.1
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.0
+ * Version: 0.70.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.0';
+    const VERSION = '0.70.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -2119,6 +2119,15 @@ final class SAB {
      * (gleiche Produktgruppe, gleiche Stichwort-Art oder mindestens zwei gemeinsame Wörter). Danach zählen Score, Bewertung, Prime und Lieferzeit.
      * @return array{asin?:string,name?:string,score?:int,chips?:array,warn?:array,fehlt?:string}
      */
+    /** Produkte, die Tiere töten oder verletzen (Schneckenkorn, Gift, Fallen) oder Kieselgur/Eierschalen: werden nie empfohlen und tauchen im Austausch nicht auf. */
+    private static function toetend(string $t): bool {
+        return (bool) preg_match('/molusqui|antilimac|limacida|cebo\b|veneno|metaldeh|fosfato f[eé]rrico|schneckenkorn|schneckengift|slug\s*(?:pellets?|killer|x\b)|ferramol|matababos|mata\s*(?:babosas|caracoles|limacos)|trampa[^.]{0,40}(?:babosa|caracol|limaco)|insecticida|pesticida|plaguicida|herbicida|raticida|rodenticida|diatom|kieselgur|c[aá]scara de huevo|eierschal/iu', $t);
+    }
+
+    private static function toetend_asin(string $a, array $d): bool {
+        return self::toetend((string) (self::produkte()[$a] ?? '') . ' ' . (string) ($d['items'][$a]['titel'] ?? ''));
+    }
+
     private static function fav_vorschlag(string $alt, string $altname, array $d, array $trotz, array $fund): array {
         $favs = array_keys(array_filter((array) get_option('sab_marken', []), fn($t) => $t === 'fav'));
         if (!$favs) { return ['fehlt' => 'Noch keine Favoriten markiert (Reiter Übersicht).']; }
@@ -2136,6 +2145,7 @@ final class SAB {
             if (($x['prime'] ?? null) === false) { continue; }
             if (isset($x['sterne']) && $x['sterne'] !== null && (float) $x['sterne'] < 3.9) { continue; }
             $text = ($namen[$a] ?? '') . ' ' . ($x['titel'] ?? '');
+            if (self::toetend($text)) { continue; }
             $gl = array_intersect($alt_arten, self::arten($text)); $wl = array_intersect($alt_w, self::woerter($text));
             $passt = ($gruppe && in_array($a, $gruppe, true)) ? 100 : 0;
             $passt += 40 * min(2, count($gl)) + 8 * min(3, count($wl));
@@ -2184,6 +2194,7 @@ final class SAB {
             $liste = !$f ? '–' : (count($f) <= 5 ? '<ul style="margin:4px 0 0">' . $li . '</ul>' : '<details><summary>Seiten anzeigen (' . count($f) . ')</summary><ul style="margin:4px 0 0">' . $li . '</ul></details>');
             $v = self::fav_vorschlag($asin, $name, $d, $trotz, $fund);
             $c = $claude[$asin] ?? null;
+            if ($c && self::toetend_asin((string) $c[0], $d)) { $c = null; }
             $vorbelegt = $c ? $c[0] : ($v['asin'] ?? '');
             $vname = $c ? (($namen[$c[0]] ?? '') ?: self::kurzname_aus_titel((string) ($d['items'][$c[0]]['titel'] ?? ''))) : ($v['name'] ?? '');
             $z = '<td>';
@@ -3202,6 +3213,7 @@ final class SAB {
             $x = $items[$a]; $x['trotz'] = isset($trotz[$a]);
             $ok = ($x['preis'] ?? '') !== '' && !empty($x['lieferbar']) && ($x['status'] ?? '') !== 'OUT_OF_STOCK';
             $tc = ($namen[$a] ?? '') . ' ' . (string) ($x['titel'] ?? '');
+            if (self::toetend($tc)) { continue; }   // tötende Produkte nie vorschlagen
             $ar = count(array_intersect($a1, self::arten($tc))); $tr = count(array_intersect($w1, self::woerter($tc))) + (self::aehnliche_woerter($text, $tc) ? 1 : 0);
             $ing = in_array($a, $gruppe, true);
             $passt = $ing ? 3 : ($ar >= 1 ? 2 : ($tr >= 3 ? 1 : 0));   // nur zwei gemeinsame Wörter („caracoles“, „protección“) reichen nicht
@@ -3356,6 +3368,7 @@ final class SAB {
         foreach ($faelle as $alt => $grund) {
             $f = $fund[$alt] ?? []; $seiten = count($f); $n = (int) array_sum(array_column($f, 'n'));
             if ($seiten === 0) { continue; }   // steht in keinem Artikel: kein Handlungsbedarf
+            if (self::toetend_asin((string) $alt, (array) $d)) { continue; }   // tötende Produkte gar nicht erst zum Tausch zeigen
             $zeilen[] = ['alt' => $alt, 'grund' => $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => 100 * max(1, $seiten), 'f' => $f];
         }
         usort($zeilen, fn($a, $b) => $b['prio'] <=> $a['prio']);
