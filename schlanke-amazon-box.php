@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.69.4
+ * Plugin Name: 1a Amazon Box 0.70.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.69.4
+ * Version: 0.70.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.69.4';
+    const VERSION = '0.70.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -2616,12 +2616,20 @@ final class SAB {
         }
         elseif (preg_match('/(\d+)\s*(?:x\s*)?(?:piezas?|pcs|uds?\.?|unidades|st[üu]ck|pack\b)/iu', $t, $m) || preg_match('/(?:set|juego|paquete|lote)\s+(?:de\s+)?(\d+)/iu', $t, $m)) { $merk = 'Set de ' . $m[1]; }
         elseif (preg_match('/(\d+(?:[.,]\d+)?)\s*(kg|ml|cm|mm|m|l|g)\b/iu', $t, $m)) { $merk = str_replace('.', ',', $m[1]) . ' ' . strtolower($m[2]); }
+        $t0 = $t;
+        if (preg_match('/^\S+(?:\s\S+)?\s[-–|:]\s+(.{12,})$/u', $t, $mb)) { $t = $mb[1]; }   // „Marke – Produktname“: Marke vorn weglassen
         $w = preg_split('/\s+/u', $t);
         if (count($w) > 2 && (preg_match('/^[A-ZÄÖÜ0-9][A-ZÄÖÜ0-9]+$/u', $w[0]) || preg_match('/^\p{Lu}\p{L}*\p{Lu}/u', $w[0]) || preg_match('/®|™/u', $w[0]))) { array_shift($w); }   // Marke vorn
         $art = trim(preg_split('/\s[-–|]\s|[,:(]|\s(?:con|para|contra|mit|für|de\s+\d)\s/iu', implode(' ', $w), 2)[0]);
         $art = preg_replace('/\s*\d.*$/u', '', $art);   // ab der ersten Zahl abschneiden
         $art = trim(implode(' ', array_slice(preg_split('/\s+/u', $art), 0, 5)), " -–|,");
         if ($art === '') { $art = mb_substr($t, 0, 40); }
+        if (count(preg_split('/\s+/u', $art)) < 3) {   // zu kurz, um das Produkt zu beschreiben: mindestens drei Wörter aus dem Titel nehmen
+            $lang = trim(preg_replace('/\s*[\d(,].*$/u', '', $t));
+            $wl = preg_split('/\s+/u', $lang !== '' ? $lang : $t);
+            if (count($wl) < 3) { $wl = preg_split('/\s+/u', $t); }
+            $art = trim(implode(' ', array_slice($wl, 0, min(4, max(3, count($wl))))), " -–|,");
+        }
         $art = mb_strtoupper(mb_substr($art, 0, 1)) . mb_substr($art, 1);
         return $merk !== '' ? $art . ' | ' . $merk : $art;
     }

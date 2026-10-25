@@ -856,6 +856,7 @@ ok(strpos($vh5, 'Empfehlung (von Amazons Alternativen)') !== false && strpos($vh
 
 // ---- 0.57.0: Kurzname im Stil „Produktart | Merkmal“ ----
 $kn = fn($x) => SAB::kurzname_aus_titel($x);
+foreach (['Jardin202 - Malla Hexagonal Galvanizada Idea para Gallinero, 1x50 m' => 'Malla', 'Flonatur Malla gallinero 1x50 m, plástico verde' => 'Malla gallinero', 'Kerbl Pet Kit de bricolaje para caja nido, 36x12x14 cm' => 'Kit de bricolaje'] as $tit => $teil) { $k = $kn($tit); fwrite(STDERR, "KN: $k\n"); ok(count(preg_split('/\s+/u', preg_replace('/\|.*$/u', '', $k))) >= 3 && mb_stripos($k, $teil) !== false, 'Kurzname: mindestens drei Wörter, beschreibt das Produkt (' . $teil . ')'); }
 ok($kn('AOOWU Cuello de Caracol, 24 PCS Protección contra Caracoles') === 'Cuello de Caracol | Set de 24', 'Kurzname: Marke weg, Anzahl als Merkmal');
 ok($kn('PawHut Gallinero de Madera Exterior con Nidos Corral 196x76x97 cm Verde') === 'Gallinero de Madera Exterior | 196x76x97 cm', 'Kurzname: Maße als Merkmal');
 ok($kn('Cinta de Cobre Hoja 20m x 50mm, Adhesiva Conductora') === 'Cinta de Cobre Hoja | 20 m x 50 mm', 'Kurzname: Maße mit Einheit');
