@@ -1062,4 +1062,12 @@ $mAh = new ReflectionMethod('SAB', 'auch_haeufigkeit'); $mAh->setAccessible(true
 $ah = $mAh->invoke(null);
 ok(($ah['B0XXXXXXX1'] ?? 0) === 2 && ($ah['B0XXXXXXX2'] ?? 0) === 1 && !isset($ah['B0AAAAAAA2']), 'Kunden kauften auch: Häufigkeit gezählt, eigene ASIN ignoriert');
 
+// ---- 0.75.16: Bilder dürfen nie still verschwinden ----
+$GLOBALS['tr']['sab_de_B0NOIMG001'] = ['verfuegbar' => false, 'link' => 'https://www.amazon.de/dp/B0NOIMG001', 'bild' => 'https://m.media-amazon.com/x.jpg', 'titel' => 'Zaun', 'ts' => time()];
+$o1 = SAB::sc_bild(['asin' => 'B0NOIMG001', 'land' => 'de'], '');
+ok(strpos($o1, '<img') !== false, 'Bild: nicht lieferbares Produkt zeigt trotzdem sein Bild');
+$GLOBALS['tr']['sab_de_B0NOIMG002'] = ['verfuegbar' => true, 'link' => 'https://www.amazon.de/dp/B0NOIMG002', 'bild' => '', 'titel' => 'Ohne', 'ts' => time()];
+SAB::sc_bild(['asin' => 'B0NOIMG002', 'land' => 'de'], '');
+ok(array_filter(array_keys((array) get_option('sab_bildfehler', [])), fn($k) => strpos($k, 'B0NOIMG002|') === 0), 'Bild: fehlendes Bild landet in der Warnliste');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

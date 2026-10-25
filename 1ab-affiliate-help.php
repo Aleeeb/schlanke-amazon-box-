@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.15
+ * Version: 0.75.16
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.15';
+    const VERSION = '0.75.16';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -893,6 +893,37 @@ final class SAB {
         return [$idx, chr(65 + $i)];
     }
 
+    /** Produkt hat Bild und Link (auch wenn Amazon es gerade nicht liefern kann): dann zeigen wir die Karte trotzdem, statt dass sie verschwindet. */
+    private static function hat_bild(?array $p): bool {
+        return $p && !empty($p['bild']) && !empty($p['link']);
+    }
+
+    /** Rote Warnung über fehlenden Produktbildern (Priorität vor allem anderen). Behobene Fälle verschwinden von selbst. */
+    private static function bildfehler_html(): string {
+        $l = (array) get_option('sab_bildfehler', []); if (!$l) { return ''; }
+        $land = self::land(''); $zeilen = []; $rest = [];
+        foreach ($l as $k => $e) {
+            $p = get_transient("sab_{$land}_" . $e['asin']);
+            if (self::hat_bild($p)) { continue; }   // Bild ist inzwischen da
+            $rest[$k] = $e;
+            if (count($zeilen) < 40) { $zeilen[] = '<li><code>' . esc_html($e['asin']) . '</code> (' . esc_html($e['art']) . ') in <a href="' . esc_url(get_edit_post_link((int) $e['post'])) . '">' . esc_html(get_the_title((int) $e['post']) ?: ('Beitrag ' . $e['post'])) . '</a></li>'; }
+        }
+        if (count($rest) !== count($l)) { update_option('sab_bildfehler', $rest, false); }
+        if (!$rest) { return ''; }
+        return '<div class="notice notice-error" style="border-left-width:8px"><p><strong>Produktbilder fehlen (' . count($rest) . '):</strong> An diesen Stellen bekommen Besucher kein Bild. Das hat Vorrang vor allem anderen: Produkt ersetzen oder Bild bei Amazon prüfen.</p><ul style="margin-left:18px;list-style:disc">' . implode('', $zeilen) . '</ul></div>';
+    }
+
+    /** Merkt sich ein fehlendes Produktbild (ASIN, Artikel) für die Warnliste; Besucher sehen nichts, angemeldete Redakteure einen roten Hinweis. */
+    private static function bild_fehlt(string $asin, string $art = 'Bild'): string {
+        $pid = function_exists('get_the_ID') ? (int) get_the_ID() : 0;
+        $l = (array) get_option('sab_bildfehler', []); $k = $asin . '|' . $pid;
+        if (!isset($l[$k]) && count($l) < 300) { $l[$k] = ['asin' => $asin, 'post' => $pid, 'ts' => time(), 'art' => $art]; update_option('sab_bildfehler', $l, false); }
+        if (function_exists('current_user_can') && current_user_can('edit_posts')) {
+            return '<span style="display:inline-block;padding:6px 10px;background:#fcf0f1;border:2px solid #d63638;color:#8a1f1f;font:600 13px sans-serif">Produktbild fehlt: ' . esc_html($asin) . ' (nur für Redakteure sichtbar)</span>';
+        }
+        return '';
+    }
+
     private static function brauchbar(?array $p): bool {
         return $p && empty($p['weg']) && !empty($p['verfuegbar']) && !empty($p['link']) && !empty($p['bild']);
     }
@@ -1144,6 +1175,10 @@ final class SAB {
             }
             if ($p) { $ausgefallen[] = [$asin, $p]; } // nur melden, wenn Amazon geantwortet hat
         }
+        foreach ($asins as $asin) {   // Notfall: nichts ist lieferbar, aber ein Produkt hat Bild und Link: lieber das zeigen als eine leere Stelle
+            $p = self::produkt($asin, $land);
+            if (self::hat_bild($p) && empty($p['weg'])) { return ['asin' => $asin, 'p' => $p, 'ersatz' => false]; }
+        }
         return null;
     }
 
@@ -1221,7 +1256,7 @@ final class SAB {
             $liste = array_values(array_unique(array_merge([$erste], $t, $liste)));
         }
         $w = self::waehlen($liste, $land);
-        if (!$w) { return (string) $inhalt; }
+        if (!$w) { return (string) $inhalt !== '' ? (string) $inhalt : self::bild_fehlt((string) ($liste[0] ?? $sn), 'Karte'); }
         $asin = $w['asin']; $p = $w['p'];
         $p['link'] = self::lnk((string) $p['link'], (string) $a['tag']);
         if ($var && $asin !== $erste) { $var = ''; } // Variante ausgefallen: nicht als Variante zählen
@@ -1348,14 +1383,14 @@ final class SAB {
         $land = self::land($a['land']);
         $asin = self::getauscht(self::asin($a['asin']));
         $p = self::produkt($asin, $land);
-        if (!self::brauchbar($p)) { return (string) $inhalt; }  // Rückfall: bisheriger HTML-Code
+        if (!self::brauchbar($p) && !self::hat_bild($p)) { return (string) $inhalt !== '' ? (string) $inhalt : self::bild_fehlt($asin); }  // Rückfall: bisheriger HTML-Code; ohne Bild nie still verschwinden
         $p['link'] = self::lnk((string) $p['link'], (string) $a['tag']);
         [$bi, $bv] = self::bildvariante($asin, $p);
         if (ctype_digit((string) $a['bild']) && (int) $a['bild'] >= 2 && !empty($p['bilder'][(int) $a['bild'] - 1])) { $bi = (int) $a['bild'] - 1; $bv = ''; }   // image="2" / "3" aus AAWP: zweites/drittes Bild
         $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $a['class']));
         return self::bild_html($p, $asin, $land, $a['alt'] ?: $p['titel'], (int) $a['breite'], $bv !== '' ? 'bild-' . $asin : '', $cls, $bi, $bv)
             ?: ($bi ? self::bild_html($p, $asin, $land, $a['alt'] ?: $p['titel'], (int) $a['breite'], '', $cls) : '')
-            ?: (string) $inhalt;
+            ?: ((string) $inhalt !== '' ? (string) $inhalt : self::bild_fehlt($asin));
     }
 
     /**
@@ -2603,7 +2638,7 @@ final class SAB {
         $land = self::land('');
         $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
         $namen = self::produkte();
-        $h = '<h2>Problemprodukte (' . esc_html($land) . ')</h2>'
+        $h = self::bildfehler_html() . '<h2>Problemprodukte (' . esc_html($land) . ')</h2>'
            . (get_option('sab_uebersicht_teilfehler', '') !== '' ? '<div class="notice notice-warning inline"><p><strong>Beim letzten Abruf gab es Fehler (einige Produkte fehlen deshalb):</strong> ' . esc_html((string) get_option('sab_uebersicht_teilfehler', '')) . '</p></div>' : '')
            . ((array) get_option('sab_ungueltige_asins', []) ? '<div class="notice notice-info inline"><p>Von Amazon als ungültig abgewiesen: <code>' . esc_html(implode(', ', (array) get_option('sab_ungueltige_asins', []))) . '</code></p></div>' : '')
            . '<p class="description">Stand höchstens 1 Stunde alt. Gezählt werden die Produkte, die per Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) eingebunden sind, samt allen Stellen in Artikeln dieser Webseite, auch feste Links.</p>'
@@ -2944,7 +2979,7 @@ final class SAB {
         if (!empty($_POST['sab_neu'])) { delete_transient('sab_alle_asins'); }   // Produktliste aus den Artikeln neu einlesen
         $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
         $namen = self::produkte(); $ja = fn($v) => $v === null ? '?' : ($v ? '<strong style="color:#1a7f37">ja</strong>' : '<strong style="color:#a00">nein</strong>');
-        $h = '<h2>Übersicht aller Produkte (' . esc_html($land) . ')</h2>'
+        $h = self::bildfehler_html() . '<h2>Übersicht aller Produkte (' . esc_html($land) . ')</h2>'
            . '<p class="description">Stand höchstens 1 Stunde alt. Bilder kommen hier direkt von Amazon (nur im Admin-Bereich, nicht für Besucher). Die Lieferzeit liefert die API nicht; sie ist nur auf der Amazon-Seite mit spanischer Lieferadresse sichtbar.</p>'
            . '<p class="description"><strong>Reihenfolge:</strong> nach Priorität. Priorität = Dringlichkeit (0 bis 100: nicht lieferbar oder Status unklar = 100, sonst schwacher Score, sehr lange Lieferzeit oder wenig Sterne) mal Zahl der Seiten, auf denen das Produkt steht. Oben steht also, was auf vielen Seiten dringend geprüft werden muss. Spaltenkopf anklicken, um anders zu sortieren.</p>'
            . '<p><button class="button" name="sab_neu" value="1">Übersicht neu laden</button></p>';
@@ -3425,6 +3460,20 @@ final class SAB {
     }
 
     /** Baut einen einzelnen Artikel um (Sicherung vorher). @return array{0:int,1:int,2:int} [umgebaute Links, übersprungen, geändert 0/1] */
+    /** Holt für alle neu entstehenden Plugin-Platzhalter die Produktdaten und nennt die ASINs, die danach kein Bild hätten. @return string[] */
+    private static function umbau_bildpruefung(string $alt, string $neu): array {
+        $land = self::land(''); $ohne = []; $geholt = 0;
+        $vorher = []; if (preg_match_all('/\[amz_(?:produkt|bild)\b[^\]]*\basin="([A-Za-z0-9]{10})"/', $alt, $m0)) { $vorher = array_flip(array_map('strtoupper', $m0[1])); }
+        if (!preg_match_all('/\[amz_(?:produkt|bild)\b[^\]]*\basin="([A-Za-z0-9]{10})"/', $neu, $m)) { return []; }
+        foreach (array_unique(array_map('strtoupper', $m[1])) as $a) {
+            if (isset($vorher[$a])) { continue; }
+            $a = self::getauscht($a);
+            if (!get_transient("sab_{$land}_{$a}")) { if ($geholt >= 25) { continue; } $geholt++; }
+            if (!self::hat_bild(self::produkt($a, $land, false, true))) { $ohne[] = $a; }
+        }
+        return $ohne;
+    }
+
     private static function umbau_artikel(int $id, string $nur = ''): array {
         $post = get_post($id);
         if (!$post) { return [0, 0, 0]; }
@@ -3436,6 +3485,11 @@ final class SAB {
         for ($i = $info0; $i < count(self::$umbau_info); $i++) { self::$umbau_info[$i] = $post->post_title . ': ' . self::$umbau_info[$i]; }
         $gea = 0;
         if ($n > 0 && $neu !== $post->post_content) {
+            $ohne = self::umbau_bildpruefung((string) $post->post_content, $neu);
+            if ($ohne) {   // nie umbauen, wenn danach irgendwo ein Produktbild fehlen würde
+                self::$umbau_abw[] = $post->post_title . ': NICHT umgebaut, weil für ' . implode(', ', $ohne) . ' bei Amazon kein Bild geliefert wird. Dort bitte zuerst das Produkt ersetzen.';
+                return [0, $sk, 0];
+            }
             self::namen_merken(self::$neue_namen);
             if (get_post_meta($id, '_sab_umbau_backup', true) === '') { update_post_meta($id, '_sab_umbau_backup', wp_slash($post->post_content)); }
             wp_update_post(['ID' => $id, 'post_content' => wp_slash($neu)]);
@@ -4110,10 +4164,10 @@ final class SAB {
         if (preg_match_all('/\[amz_(?:produkt|bild|link)\b[^\]]*\basin="([A-Za-z0-9]{10})"/', $neu, $mm)) {
             foreach (array_unique(array_map([__CLASS__, 'asin'], $mm[1])) as $pa) {
                 if (!get_transient("sab_{$vl}_{$pa}")) { if ($geholt >= 20) { continue; } $geholt++; }
-                if (!self::brauchbar(self::produkt($pa, $vl, false, true))) { $unbrauchbar[] = $pa; }
+                if (!self::hat_bild(self::produkt($pa, $vl, false, true))) { $unbrauchbar[] = $pa; }
             }
         }
-        if ($unbrauchbar) { $h .= '<div class="notice notice-warning inline"><p><strong>Diese Produkte zeigen keine Karte, weil Amazon gerade kein lieferbares Angebot oder kein Bild liefert:</strong> ' . esc_html(implode(', ', $unbrauchbar)) . '</p></div>'; }
+        if ($unbrauchbar) { $h .= '<div class="notice notice-error inline"><p><strong>ACHTUNG, kein Bild bei Amazon: Dieser Artikel wird NICHT umgebaut, solange diese Produkte darin neu entstehen würden:</strong> ' . esc_html(implode(', ', $unbrauchbar)) . '</p></div>'; }
         $abschnitte = preg_split('#(?=<hr\b)#i', $c); $zeilen = []; $i = 0;
         foreach ($abschnitte as $ab) {
             [$nab] = self::umbau_text($ab);
