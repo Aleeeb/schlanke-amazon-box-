@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.7
+ * Version: 0.75.8
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.7';
+    const VERSION = '0.75.8';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -458,7 +458,7 @@ final class SAB {
     }
 
     /** Standard-Gewichte des Scores (Summe 100). „prime“ bleibt 0, solange die Schnittstelle Prime nicht liefert. */
-    const SCORE_STANDARD = ['rang' => 27, 'buybox' => 18, 'angebot' => 13, 'preis' => 9, 'streich' => 9, 'deal' => 4, 'bewertung' => 16, 'konstanz' => 10, 'prime' => 0, 'liefer' => 0, 'provision' => 0];
+    const SCORE_STANDARD = ['rang' => 27, 'buybox' => 20, 'angebot' => 13, 'preis' => 20, 'streich' => 20, 'deal' => 10, 'bewertung' => 100, 'konstanz' => 10, 'prime' => 42, 'liefer' => 42, 'provision' => 50];
     /** Kategorien, in denen ein Verkaufsrang für Garten-Produkte zählt (Hauptkategorie und typische Unterkategorien). */
     const GARTEN_KAT = '/jard[ií]n|garten|giardin|garden|lawn|c[eé]sped|outdoor|plaga|control de (?:aves|animales|plagas|insectos|roedores|caracoles)|babosa|caracol|\baves?\b|cerca|valla|huerto|plantas?\b|riego|cultivo|abono|maceta|invernadero|semill|poda|jardiner/iu';
     const SCORE_NAMEN = [
@@ -1983,8 +1983,8 @@ final class SAB {
             'deal'    => '1 bei einer Aktion, einem Coupon oder einem Deal.',
             'bewertung' => 'Sterne und Anzahl von Hand eingetragen (unten). Wenige Bewertungen zählen vorsichtig: 4,0 Sterne ist der Mittelwert. 3 Sterne ergibt 0, 5 Sterne 1. Ohne Angabe 0,5.',
             'konstanz' => 'Das Plugin hält jeden Tag den Score (ohne diesen Posten) fest. Zählt der Anteil der Tage mit Score ab 60 in den letzten 30 Tagen: 100 % ergibt 1, 0 % ergibt 0. Ein Produkt, das nur an einem guten Tag glänzt, kommt so nicht nach oben. Erst ab 5 aufgezeichneten Tagen, vorher 0,5.',
-            'prime'   => 'Prime von Hand eingetragen (die Amazon-Schnittstelle liefert es nicht): ja 1, nein 0, unbekannt 0,5. Gewicht standardmäßig 0.',
-            'liefer'  => 'Durchschnittliche Lieferzeit in Tagen zu den eingetragenen Hauptstädten: 1 Tag oder weniger ergibt 1, 7 Tage oder mehr 0. Ohne Angabe 0,5. Gewicht standardmäßig 0.',
+            'prime'   => 'Prime von Hand eingetragen (die Amazon-Schnittstelle liefert es nicht): ja 1, nein 0, unbekannt 0,5.',
+            'liefer'  => 'Durchschnittliche Lieferzeit in Tagen zu den eingetragenen Hauptstädten: 1 Tag oder weniger ergibt 1, 7 Tage oder mehr 0. Ohne Angabe 0,5.',
         ];
         foreach (self::SCORE_NAMEN as $k => $name) {
             $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="1000000" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:100px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
