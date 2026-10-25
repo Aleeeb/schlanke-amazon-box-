@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.64.1
+ * Plugin Name: 1a Amazon Box 0.65.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.64.1
+ * Version: 0.65.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.64.1';
+    const VERSION = '0.65.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -942,6 +942,7 @@ final class SAB {
         $st = get_option('sab_uebersicht_stand_' . self::land('')); $nm = self::produkte();
         if (is_array($st) && !empty($st['items'])) {   // auch Produkte, die Amazon gar nicht mehr kennt, stehen hier (nach dem letzten Abruf der Übersicht)
             foreach (self::alle_asins() as $a) {
+                if (preg_match('/^\d{9}[\dX]$/', (string) $a)) { continue; }   // Bücher (ISBN-10) werden von der Schnittstelle nicht geliefert
                 if (!isset($st['items'][$a]) && !isset($liste[$a])) { $liste[$a] = ['name' => ($nm[$a] ?? ''), 'grund' => 'Amazon kennt das Produkt nicht mehr', 'seit' => (int) ($st['ts'] ?? time()), 'ersatz' => '', 'seite' => '']; }
             }
         }
@@ -3117,6 +3118,7 @@ final class SAB {
     private static function tausch_faelle(array $d, array $trotz): array {
         $out = [];
         foreach (self::alle_asins() as $asin) {
+            if (preg_match('/^\d{9}[\dX]$/', (string) $asin)) { continue; }   // Bücher (ISBN-10): die Schnittstelle liefert sie nicht, das heißt nicht „ausgefallen“
             $x = $d['items'][$asin] ?? null;
             if (!$x) { $out[$asin] = 'Amazon kennt das Produkt nicht mehr'; continue; }
             if (isset($trotz[$asin])) { continue; }
@@ -3164,11 +3166,11 @@ final class SAB {
             if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; continue; }
             $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
         }
-        // Gezielt gesuchte Treffer (Amazon-Suche / Amazons Alternativen) haben Vorrang: gibt es davon zwei oder mehr, kommen Favoriten und Katalog nicht dazu
-        $gezielt = array_filter($out, fn($c) => strpos((string) $c['quelle'], 'Amazon-') === 0);
-        if (count($gezielt) >= 2) { $out = array_values($gezielt); }
+        // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
         usort($out, fn($p, $q2) => [(int) $q2['ok'], (float) $q2['rang']] <=> [(int) $p['ok'], (float) $p['rang']]);
-        return ['liste' => array_slice($out, 0, $max), 'aussortiert' => $aus];
+        $bestand = []; $neu = [];
+        foreach ($out as $c) { if (strpos((string) $c['quelle'], 'Amazon-Suche') === 0) { $c['neu'] = true; $neu[] = $c; } else { $bestand[] = $c; } }
+        return ['liste' => array_merge(array_slice($bestand, 0, $max), array_slice($neu, 0, 2)), 'aussortiert' => $aus];
     }
 
     // ---------- Haufen entzerren: Produktblöcke dorthin schieben, wo der Artikel über sie schreibt ----------
@@ -3301,7 +3303,7 @@ final class SAB {
     /** Reiter „Austausch“: Produkte, die getauscht werden müssen, nach Priorität, mit bis zu drei passenden Ersatzkandidaten (mit Bild), eigener ASIN und Automatik. */
     private static function austausch_html(): string {
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte();
-        $h = '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2><p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>';
+        $h = '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2><p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten aus dem eigenen Bestand plus bis zu zwei neue Treffer der Amazon-Suche (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>';
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         $faelle = self::tausch_faelle((array) $d, $trotz);
         $fund = self::fundstellen(array_keys($faelle) ?: ['XXXXXXXXXX']);
@@ -3327,12 +3329,12 @@ final class SAB {
             if ($z['f']) {
                 $an = ''; $ed = ''; $nr = 0;
                 foreach ($z['f'] as $pid => $f) {
-                    if (++$nr > 15) { break; }
+                    if (++$nr > 10) { break; }
                     $tt = ' title="' . esc_attr((string) ($f['titel'] ?: ('Beitrag ' . $pid)) . ' (' . (int) $f['n'] . '×)') . '"';
                     $an .= ' <a href="' . esc_url(add_query_arg('sab_zeige', $alt, (string) get_permalink((int) $pid))) . '" target="_blank" rel="noopener"' . $tt . '>' . $nr . '</a>';
                     $ed .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $alt)) . '" target="_blank" rel="noopener"' . $tt . '>' . $nr . '</a>';
                 }
-                $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 15 ? ' …' : '');
+                $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
             }
             $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
                 . '<div><strong>Zu tauschen:</strong> <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><small style="color:#a00">' . esc_html($z['grund']) . '</small> · ' . $wo . '</div></div>'
@@ -3341,7 +3343,7 @@ final class SAB {
                 $x = $c['x']; $pv = $c['pv'] ?? null; $nm = ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
                 $pvStil = $pv !== null && $pv >= 5 ? 'background:#e3f4e7;color:#1a7f37' : ($pv !== null && $pv >= 4 ? 'background:#fdf0d8;color:#8a5a00' : 'background:#eef0f0;color:#333');
                 $h .= '<label style="flex:1 1 300px;max-width:340px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="' . esc_attr($c['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . '>'
-                    . self::mini_bild($c['asin'], $x) . '<span><strong>' . esc_html($nm !== '' ? $nm : '(noch keine Daten)') . '</strong><br><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($c['asin']) . '</code></a><br>'
+                    . self::mini_bild($c['asin'], $x) . '<span>' . (!empty($c['neu']) ? '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#dbe9ff;color:#0b3d91;font-size:11px;font-weight:700">NEU durch Amazon-Suche</span><br>' : '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#eee;color:#444;font-size:11px">aus dem Bestand</span><br>') . '<strong>' . esc_html($nm !== '' ? $nm : '(noch keine Daten)') . '</strong><br><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($c['asin']) . '</code></a><br>'
                     . '<small>' . esc_html($c['quelle']) . ' · <strong>Score ' . ($c['score'] !== null ? (int) $c['score'] : '?') . '</strong>' . ($x && ($x['preis'] ?? '') !== '' ? ' · ' . esc_html((string) $x['preis']) : '') . ($x && isset($x['sterne']) && $x['sterne'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' ★' : '') . ($x && isset($x['prime']) && $x['prime'] !== null ? ($x['prime'] ? ' · Prime' : ' · kein Prime') : '') . ($x && isset($x['liefertage']) && $x['liefertage'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : '') . '</small><br>'
                     . ($pv !== null ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;' . $pvStil . '">' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision</span>' : '<span style="color:#a00">Provision unbekannt</span>')
                     . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . '</span></label>';
