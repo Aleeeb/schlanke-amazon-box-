@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.69.0
+ * Plugin Name: 1a Amazon Box 0.69.4
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.69.0
+ * Version: 0.69.4
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.69.0';
+    const VERSION = '0.69.4';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -319,7 +319,7 @@ final class SAB {
                 'x-marketplace' => $mp,
             ],
             'body' => wp_json_encode([
-                'itemIds'     => [$asin],
+                'itemIds'     => [(string) $asin],
                 'itemIdType'  => 'ASIN',
                 'marketplace' => $mp,
                 'partnerTag'  => $tag,
@@ -956,7 +956,6 @@ final class SAB {
         $st = get_option('sab_uebersicht_stand_' . self::land('')); $nm = self::produkte();
         if (is_array($st) && !empty($st['items'])) {   // auch Produkte, die Amazon gar nicht mehr kennt, stehen hier (nach dem letzten Abruf der Übersicht)
             foreach (self::alle_asins() as $a) {
-                if (preg_match('/^\d{9}[\dX]$/', (string) $a)) { continue; }   // Bücher (ISBN-10) werden von der Schnittstelle nicht geliefert
                 if (!isset($st['items'][$a]) && !isset($liste[$a])) { $liste[$a] = ['name' => ($nm[$a] ?? ''), 'grund' => 'Amazon kennt das Produkt nicht mehr', 'seit' => (int) ($st['ts'] ?? time()), 'ersatz' => '', 'seite' => '']; }
             }
         }
@@ -1536,7 +1535,7 @@ final class SAB {
                 }
             }
         }
-        $alle = array_values(array_unique(array_filter($alle)));
+        $alle = array_map('strval', array_values(array_unique(array_filter($alle))));   // reine Ziffern (Bücher) werden von PHP zu Zahlen: Amazon lehnt sie dann als ungültig ab
         set_transient('sab_alle_asins', $alle, 10 * MINUTE_IN_SECONDS);
         return $alle;
     }
@@ -1591,7 +1590,7 @@ final class SAB {
             return self::api_post([
                 'timeout' => 15,
                 'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
-                'body'    => wp_json_encode(['itemIds' => $paket, 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag, 'resources' => $ressourcen]),
+                'body'    => wp_json_encode(['itemIds' => array_map('strval', $paket), 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag, 'resources' => $ressourcen]),
             ]);
         };
         $ok_pakete = 0; $ungueltig = [];
@@ -2210,22 +2209,23 @@ final class SAB {
 
     /** Listen: Produkte, die Amazon nicht mehr kennt, und Produkte, die nicht verfügbar sind, je mit Artikeln und Häufigkeit. */
     /** Fragt Amazon für eine einzige ASIN ab und gibt Code und rohe Antwort zurück (ohne Zugangsdaten): zeigt, warum ein Produkt „nicht bekannt“ ist. */
-    private static function asin_rohantwort(string $asin): string {
+    private static function asin_rohantwort(string $eingabe): string {
+        $liste = array_slice(array_filter(array_map([__CLASS__, 'asin'], preg_split('/[\s,;]+/', $eingabe))), 0, 10); $asin = implode(', ', $liste);
         $land = self::land(''); $mp = self::LAENDER[$land][0] ?? ''; $token = self::token($land); $tag = self::tag($land);
         if (!$token || !$tag) { return 'Zugangsdaten oder Partner-ID fehlen.'; }
         $r = self::api_post([
             'timeout' => 15,
             'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
-            'body'    => wp_json_encode(['itemIds' => [$asin], 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag, 'resources' => ['itemInfo.title', 'offersV2.listings.availability', 'offersV2.listings.price']]),
+            'body'    => wp_json_encode(['itemIds' => array_values($liste), 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag, 'resources' => ['images.primary.large', 'images.variants.large', 'itemInfo.title', 'offersV2.listings.availability', 'offersV2.listings.price', 'offersV2.listings.isBuyBoxWinner', 'offersV2.listings.merchantInfo', 'offersV2.listings.dealDetails', 'offersV2.listings.type', 'browseNodeInfo.browseNodes', 'browseNodeInfo.websiteSalesRank']]),
         ]);
         if (is_wp_error($r)) { return 'Netzfehler: ' . $r->get_error_message(); }
-        return 'Antwort von Amazon für ' . $asin . ' (Code ' . wp_remote_retrieve_response_code($r) . '): ' . mb_substr((string) wp_remote_retrieve_body($r), 0, 1500);
+        return 'Antwort von Amazon für ' . $asin . ' (Code ' . wp_remote_retrieve_response_code($r) . '): ' . mb_substr((string) wp_remote_retrieve_body($r), 0, 4000);
     }
 
     private static function asin_diag_html(): string {
         return '<hr style="margin:2em 0"><h3>Eine ASIN bei Amazon nachfragen</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="asin_diag">'
             . '<p class="description">Zeigt die rohe Antwort der Schnittstelle, zum Beispiel für ein Buch, das als „Amazon kennt das Produkt nicht“ gilt.</p>'
-            . '<p><input type="text" name="sab_diag_asin" size="14" maxlength="10" placeholder="ASIN"> <button class="button">Rohantwort zeigen</button></p></form>';
+            . '<p><input type="text" name="sab_diag_asin" size="40" maxlength="130" placeholder="ASIN (mehrere mit Komma)"> <button class="button">Rohantwort zeigen</button></p></form>';
     }
 
     private static function problem_html(): string {
@@ -2233,6 +2233,8 @@ final class SAB {
         $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
         $namen = self::produkte();
         $h = '<h2>Problemprodukte (' . esc_html($land) . ')</h2>'
+           . (get_option('sab_uebersicht_teilfehler', '') !== '' ? '<div class="notice notice-warning inline"><p><strong>Beim letzten Abruf gab es Fehler (einige Produkte fehlen deshalb):</strong> ' . esc_html((string) get_option('sab_uebersicht_teilfehler', '')) . '</p></div>' : '')
+           . ((array) get_option('sab_ungueltige_asins', []) ? '<div class="notice notice-info inline"><p>Von Amazon als ungültig abgewiesen: <code>' . esc_html(implode(', ', (array) get_option('sab_ungueltige_asins', []))) . '</code></p></div>' : '')
            . '<p class="description">Stand höchstens 1 Stunde alt. Gezählt werden die Produkte, die per Plugin-Platzhalter (<code>[amz_…]</code>, <code>[aawp]</code>) eingebunden sind, samt allen Stellen in Artikeln dieser Webseite, auch feste Links.</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><p><button class="button" name="sab_neu" value="1">Neu laden</button></p></form>';
         $h .= self::stand_hinweis($d);
@@ -3152,7 +3154,6 @@ final class SAB {
     private static function tausch_faelle(array $d, array $trotz): array {
         $out = [];
         foreach (self::alle_asins() as $asin) {
-            if (preg_match('/^\d{9}[\dX]$/', (string) $asin)) { continue; }   // Bücher (ISBN-10): die Schnittstelle liefert sie nicht, das heißt nicht „ausgefallen“
             $x = $d['items'][$asin] ?? null;
             if (!$x) { $out[$asin] = 'Amazon kennt das Produkt nicht mehr'; continue; }
             if (isset($trotz[$asin])) { continue; }
@@ -3695,8 +3696,8 @@ JS;
                     $meldung = self::tausch_ausfuehren($alt, $neu, trim(sanitize_text_field(wp_unslash($_POST['sab_name'] ?? ''))));
                 }
             } elseif ($form === 'asin_diag') {
-                $da = self::asin((string) wp_unslash($_POST['sab_diag_asin'] ?? ''));
-                $meldung = strlen($da) === 10 ? self::asin_rohantwort($da) : 'Bitte eine ASIN mit 10 Zeichen eintragen.';
+                $da = trim((string) wp_unslash($_POST['sab_diag_asin'] ?? ''));
+                $meldung = $da !== '' ? self::asin_rohantwort($da) : 'Bitte eine ASIN eintragen (mehrere mit Komma, höchstens 10).';
             } elseif ($form === 'austausch_viele' && !empty($_POST['sab_such_anfrage'])) {
                 update_option('sab_such_anfrage', gmdate('Y-m-d H:i'), false);
                 $meldung = 'Angefordert. Die Mac-Sitzung sucht vor der nächsten Austauschrunde bei Amazon und trägt die Treffer hier ein.';
