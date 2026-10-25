@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.66.2
+ * Plugin Name: 1a Amazon Box 0.67.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.66.2
+ * Version: 0.67.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.66.2';
+    const VERSION = '0.67.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -640,7 +640,7 @@ final class SAB {
         if ($groesse === null && isset($x['kat_groesse_s'])) { $groesse = (int) $x['kat_groesse_s']; $geschaetzt = true; }
         if ($r !== null && $kat !== '' && $groesse === null && !preg_match(self::GARTEN_KAT, $kat)) { $fremd = true; }   // andere Kategorie ohne bekannte Größe: Rang zählt abgeschwächt
         $f = [];
-        if ($r === null) { $f['rang'] = [0.0, 'ohne Verkaufsrang']; }
+        if ($r === null) { $f['rang'] = [0.5, 'ohne Verkaufsrang']; }   // neue Produkte haben noch keinen Rang: neutral, nicht schlecht
         elseif ($groesse) {   // Rang im Verhältnis zur Zahl der Produkte der Kategorie
             $pz = max(1, $r) / max(1, $groesse);
             $f['rang'] = [max(0.0, min(1.0, 1 - log10(max($pz, 1e-4) / 1e-4) / log10(5000))), 'Platz ' . number_format((int) $r, 0, ',', '.') . ' von ' . ($geschaetzt ? 'ca. ' : '') . number_format((int) $groesse, 0, ',', '.') . ' (' . round(100 * $pz, 2) . ' %)'];
@@ -674,11 +674,19 @@ final class SAB {
             $roh += $pt; $det[] = [self::SCORE_NAMEN[$k], $w[$k], $f[$k][0], round($pt, 1), $f[$k][1]];
         }
         $score = (int) round(50 + ($roh - 45) * 2.2);   // gespreizt um die Mitte: statt 30 bis 60 etwa 15 bis 85, Ausreißer dürfen leicht unter 0 oder über 100 liegen
-        if ($r === null) { $score = min($score, 60); }   // ohne Rang höchstens 60
         $hinweis = '';
         if ($r === null) { $hinweis = $f['rang'][1]; } elseif ($fremd) { $hinweis = 'Kategoriegröße von „' . $kat . '“ fehlt (Reiter Score)'; }
         if (self::unklar($x) && empty($x['trotz']) && $r !== null && $r <= 20000) { $hinweis = 'Schnittstelle prüfen: guter Rang, aber kein Angebot'; }
         return [max(-10, min(110, $score)), $hinweis, $det];
+    }
+
+    /** Prime als Schildchen: blau mit Haken, bei „kein Prime“ grau und durchgestrichen, bei unbekannt gestrichelt (eigene Gestaltung, nicht das Amazon-Logo). */
+    private static function prime_zeichen($prime): string {
+        $b = 'display:inline-block;padding:0 7px;border-radius:4px;font-size:11px;font-weight:700;font-style:italic;line-height:17px;vertical-align:baseline;';
+        if ($prime === null) { return '<span style="' . $b . 'border:1px dashed #999;color:#888" title="Prime unbekannt">prime ?</span>'; }
+        return $prime
+            ? '<span style="' . $b . 'background:#0a6fb7;color:#fff" title="Prime">&#10003; prime</span>'
+            : '<span style="' . $b . 'background:#eee;color:#999;text-decoration:line-through" title="kein Prime">prime</span>';
     }
 
     private static function scorezelle(array $x): string {
@@ -2494,7 +2502,7 @@ final class SAB {
                    . '<span class="sab-chip ' . (($x['kaufen'] ?? null) ? 'ok' : 'bad') . '" title="Buy Box = Kaufen-Button">Buy Box ' . (($x['kaufen'] ?? null) === null ? '?' : (($x['kaufen']) ? 'ja' : 'nein')) . '</span>'
                    . (!empty($x['deal']) ? '<span class="sab-chip warn">' . esc_html($x['deal']) . '</span>' : '')
                    . (isset($x['sterne']) && $x['sterne'] !== null ? '<span class="sab-chip" title="von Hand gepflegt' . (!empty($x['manuell_stand']) ? ', Stand ' . esc_attr($x['manuell_stand']) : '') . '">★ ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')</span>' : '')
-                   . (isset($x['prime']) && $x['prime'] !== null ? '<span class="sab-chip ' . ($x['prime'] ? 'ok' : '') . '">' . ($x['prime'] ? 'Prime' : 'kein Prime') . '</span>' : '')
+                   . '<span class="sab-chip" style="padding:0;background:none">' . self::prime_zeichen(isset($x['prime']) ? $x['prime'] : null) . '</span>'
                    . (isset($x['liefertage']) && $x['liefertage'] !== null ? '<span class="sab-chip ' . ($x['liefertage'] <= 3 ? 'ok' : ($x['liefertage'] >= 7 ? 'bad' : 'warn')) . '" title="Lieferzeit Ø in Tagen: ' . esc_attr((string) ($x['liefertext'] ?? '')) . '">&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T</span>' : '');
             if (!isset($x['sterne']) || $x['sterne'] === null || !isset($x['prime']) || $x['prime'] === null || !isset($x['liefertage']) || $x['liefertage'] === null) { $chips .= '<span class="sab-chip warn" title="Sterne, Prime oder Lieferzeit fehlen (Reiter Score, Handdaten)">Handdaten fehlen</span>'; }
             $sp = (array) ($x['spar'] ?? []);
@@ -3349,7 +3357,7 @@ final class SAB {
                 $pvStil = $pv !== null && $pv >= 5 ? 'background:#e3f4e7;color:#1a7f37' : ($pv !== null && $pv >= 4 ? 'background:#fdf0d8;color:#8a5a00' : 'background:#eef0f0;color:#333');
                 $h .= '<label style="flex:1 1 300px;max-width:340px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="' . esc_attr($c['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . '>'
                     . self::mini_bild($c['asin'], $x) . '<span>' . (!empty($c['neu']) ? '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#dbe9ff;color:#0b3d91;font-size:11px;font-weight:700">NEU durch Amazon-Suche</span><br>' : '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#eee;color:#444;font-size:11px">aus dem Bestand</span><br>') . '<strong>' . esc_html($nm !== '' ? $nm : '(noch keine Daten)') . '</strong><br><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($c['asin']) . '</code></a><br>'
-                    . '<small>' . esc_html($c['quelle']) . ' · <strong>Score ' . ($c['score'] !== null ? (int) $c['score'] : '?') . '</strong>' . ($x && ($x['preis'] ?? '') !== '' ? ' · ' . esc_html((string) $x['preis']) : '') . ($x && isset($x['sterne']) && $x['sterne'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' ★' . (isset($x['anzahl']) && $x['anzahl'] !== null ? ' (' . number_format((int) $x['anzahl'], 0, ',', '.') . ')' : '') : '') . ($x && isset($x['prime']) && $x['prime'] !== null ? ($x['prime'] ? ' · Prime' : ' · kein Prime') : '') . ($x && isset($x['liefertage']) && $x['liefertage'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : '') . '</small><br>'
+                    . '<small>' . esc_html($c['quelle']) . ' · <strong>Score ' . ($c['score'] !== null ? (int) $c['score'] : '?') . '</strong>' . ($x && ($x['preis'] ?? '') !== '' ? ' · ' . esc_html((string) $x['preis']) : '') . ($x && isset($x['sterne']) && $x['sterne'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' ★' . (isset($x['anzahl']) && $x['anzahl'] !== null ? ' (' . number_format((int) $x['anzahl'], 0, ',', '.') . ')' : '') : '') . ' · ' . self::prime_zeichen($x && isset($x['prime']) ? $x['prime'] : null) . ($x && isset($x['liefertage']) && $x['liefertage'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : '') . '</small><br>'
                     . ($pv !== null ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;' . $pvStil . '">' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision</span>' : '<span style="color:#a00">Provision unbekannt</span>')
                     . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . '</span></label>';
             }
