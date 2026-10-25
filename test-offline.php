@@ -421,6 +421,8 @@ ok($p1 >= 93 && $h1 === '', 'Score: bestes Produkt nahe 100');
 ok($p2 >= 40 && $p2 <= 48 && strpos($h2, 'Schnittstelle prüfen') !== false, 'Score: guter Rang ohne Angebot = Hinweis');
 [$p3, $h3] = $mSc->invoke(null, ['kaufen' => false, 'status' => 'OUT_OF_STOCK', 'lieferbar' => false]);
 ok($p3 <= 10 && $h3 === 'ohne Verkaufsrang', 'Score: nichts ist (fast) 0');
+[$pb0] = $mSc->invoke(null, ['rang' => 500, 'kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '9 €']); [$pb1, $hb1] = $mSc->invoke(null, ['rang' => 500, 'kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '9 €', 'bonus' => 10]);
+ok($pb1 === min(110, $pb0 + 10) && strpos($hb1, 'Bonus') !== false, 'Score: fester Bonus wird addiert');
 
 // Produktgruppen
 $GLOBALS['opt']['sab_gruppen'] = "Kupferband: B0AAAAAAA1, B0BBBBBBB1\nLeer: B0ZZZZZZZ9";

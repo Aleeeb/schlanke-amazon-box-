@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.67.0
+ * Plugin Name: 1a Amazon Box 0.68.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.67.0
+ * Version: 0.68.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.67.0';
+    const VERSION = '0.68.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -466,6 +466,7 @@ final class SAB {
         $v = (array) get_option('sab_verlauf', []); $heute = gmdate('Y-m-d'); $neu = false;
         foreach ($d['items'] as $a => $x) {
             $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$a]);
+            $x['bonus'] = (int) (((array) get_option('sab_bonus', []))[$a] ?? 0);
             if ($speichern && empty($d['fehler'])) {
                 $sc = self::score($x, true)[0];
                 if (($v[$a][$heute] ?? null) !== $sc) { $v[$a][$heute] = $sc; $neu = true; }
@@ -673,9 +674,11 @@ final class SAB {
             $pt = $summe > 0 ? 100 * $w[$k] * $f[$k][0] / $summe : 0;
             $roh += $pt; $det[] = [self::SCORE_NAMEN[$k], $w[$k], $f[$k][0], round($pt, 1), $f[$k][1]];
         }
-        $score = (int) round(50 + ($roh - 45) * 2.2);   // gespreizt um die Mitte: statt 30 bis 60 etwa 15 bis 85, Ausreißer dürfen leicht unter 0 oder über 100 liegen
+        $bonus = (int) ($x['bonus'] ?? 0);
+        $score = (int) round(50 + ($roh - 45) * 2.2) + $bonus;   // gespreizt um die Mitte: statt 30 bis 60 etwa 15 bis 85, Ausreißer dürfen leicht unter 0 oder über 100 liegen
         $hinweis = '';
         if ($r === null) { $hinweis = $f['rang'][1]; } elseif ($fremd) { $hinweis = 'Kategoriegröße von „' . $kat . '“ fehlt (Reiter Score)'; }
+        if ($bonus !== 0 && $hinweis === '') { $hinweis = 'inkl. Bonus ' . ($bonus > 0 ? '+' : '') . $bonus; }
         if (self::unklar($x) && empty($x['trotz']) && $r !== null && $r <= 20000) { $hinweis = 'Schnittstelle prüfen: guter Rang, aber kein Angebot'; }
         return [max(-10, min(110, $score)), $hinweis, $det];
     }
@@ -2460,7 +2463,8 @@ final class SAB {
         $m = (array) get_option('sab_marken', []); $t = $m[$asin] ?? '';
         return '<td><input type="checkbox" name="sab_fav[' . esc_attr($asin) . ']" value="1"' . ($t === 'fav' ? ' checked' : '') . '></td>'
              . '<td><input type="checkbox" name="sab_ers[' . esc_attr($asin) . ']" value="1"' . ($t === 'ers' ? ' checked' : '') . '></td>'
-             . '<td><input type="checkbox" name="sab_trotz[' . esc_attr($asin) . ']" value="1"' . (isset(((array) get_option('sab_trotz', []))[$asin]) ? ' checked' : '') . '></td>';
+             . '<td><input type="checkbox" name="sab_trotz[' . esc_attr($asin) . ']" value="1"' . (isset(((array) get_option('sab_trotz', []))[$asin]) ? ' checked' : '') . '></td>'
+             . '<td data-v="' . (int) (((array) get_option('sab_bonus', []))[$asin] ?? 0) . '"><input type="number" step="1" name="sab_bonus[' . esc_attr($asin) . ']" value="' . (int) (((array) get_option('sab_bonus', []))[$asin] ?? 0) . '" style="width:56px"></td>';
     }
 
     private static function klickzellen(?array $k): string {
@@ -2480,8 +2484,8 @@ final class SAB {
 
     /** Kopf der Produkttabelle; ohne Markierungsspalten (Fav., Ers., Trotzdem) in den Produktgruppen. */
     private static function uebersicht_kopf(bool $marken): string {
-        $k = '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl" title="Provision laut Kategorie (Tabelle im Reiter Score) und geschätzter Betrag pro Verkauf">Prov.</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Auf wie vielen Seiten das Produkt verlinkt ist, wie oft insgesamt (Bild und Button zählen je einmal) und das Maximum auf einer Seite. Kurzlinks ohne ASIN werden nicht erkannt. „allgemein“ = auf mehr als 10 Seiten.">Seiten</th><th class="sab-zahl" title="Priorität zum Tauschen: (100 minus Score) mal Seiten. Hoch = schlechter Score auf vielen Seiten.">Prio.</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th>Mehr</th></tr></thead><tbody>';
-        return $marken ? $k : preg_replace('#<th title="Favorit.*?</th><th title="Ersetzen.*?</th><th title="Du hast.*?</th>#s', '', $k);
+        $k = '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl" title="Provision laut Kategorie (Tabelle im Reiter Score) und geschätzter Betrag pro Verkauf">Prov.</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Auf wie vielen Seiten das Produkt verlinkt ist, wie oft insgesamt (Bild und Button zählen je einmal) und das Maximum auf einer Seite. Kurzlinks ohne ASIN werden nicht erkannt. „allgemein“ = auf mehr als 10 Seiten.">Seiten</th><th class="sab-zahl" title="Priorität zum Tauschen: (100 minus Score) mal Seiten. Hoch = schlechter Score auf vielen Seiten.">Prio.</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th title="Fester Bonus (oder Malus) in Punkten, wird zum Score addiert. Für Produkte, die du bewusst nach vorn stellen willst.">Bonus</th><th>Mehr</th></tr></thead><tbody>';
+        return $marken ? $k : preg_replace('#<th title="Favorit.*?</th><th title="Ersetzen.*?</th><th title="Du hast.*?</th><th title="Fester Bonus.*?</th>#s', '', $k);
     }
 
     /** Großansicht der Mini-Bilder (Klick auf ein kleines Bild). */
@@ -3764,6 +3768,10 @@ JS;
                 $tr = [];
                 foreach ((array) ($_POST['sab_trotz'] ?? []) as $a => $x) { $a = self::asin((string) $a); if ($a) { $tr[$a] = 1; } }
                 update_option('sab_trotz', $tr, false);
+                $bo = [];
+                foreach ((array) ($_POST['sab_bonus'] ?? []) as $a => $x) { $a = self::asin((string) $a); $n = (int) $x; if ($a && $n !== 0) { $bo[$a] = max(-100, min(100, $n)); } }
+                update_option('sab_bonus', $bo, false);
+                delete_transient('sab_alle_asins');
                 $meldung = 'Markierungen gespeichert.';
             } elseif ($form === 'umbau' && !empty($_POST['sab_bestaetigt'])) {
                 $meldung = self::umbau_lauf(self::asin((string) ($_POST['sab_nur'] ?? '')));
