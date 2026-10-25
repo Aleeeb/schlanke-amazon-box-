@@ -1070,4 +1070,10 @@ $GLOBALS['tr']['sab_de_B0NOIMG002'] = ['verfuegbar' => true, 'link' => 'https://
 SAB::sc_bild(['asin' => 'B0NOIMG002', 'land' => 'de'], '');
 ok(array_filter(array_keys((array) get_option('sab_bildfehler', [])), fn($k) => strpos($k, 'B0NOIMG002|') === 0), 'Bild: fehlendes Bild landet in der Warnliste');
 
+// ---- 0.75.18: Platzhalter im Bild-Attribut ----
+$kaputt = '<a href="https://x"><img src="[amz_bild asin="B0822QM4B5" land="de"][/amz_bild]" data-src="[amz_bild asin="B0822QM4B5" land="de"][/amz_bild]" alt="Mischung"></a> Text';
+$rep = SAB::attr_reparieren($kaputt);
+ok($rep === '[amz_bild asin="B0822QM4B5" land="de"][/amz_bild] Text', 'Bild-Attribut: Platzhalter im src wird zum ganzen Bild-Platzhalter');
+ok(SAB::attr_reparieren('<img src="https://a/b.jpg"> [amz_bild asin="B0822QM4B5"][/amz_bild]') === '<img src="https://a/b.jpg"> [amz_bild asin="B0822QM4B5"][/amz_bild]', 'Bild-Attribut: normale Bilder bleiben');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

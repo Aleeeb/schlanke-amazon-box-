@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.17
+ * Version: 0.75.18
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.17';
+    const VERSION = '0.75.18';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -96,6 +96,7 @@ final class SAB {
         add_filter('pre_do_shortcode_tag', [__CLASS__, 'ord_pre'], 10, 4);
         add_filter('do_shortcode_tag',     [__CLASS__, 'ord_post'], 10, 4);
         add_filter('the_content',          [__CLASS__, 'ord_reset'], 9);
+        add_filter('the_content',          [__CLASS__, 'attr_reparieren'], 8);
         add_action('wp_footer',            [__CLASS__, 'stellen_skript'], 97);
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
@@ -3330,6 +3331,14 @@ final class SAB {
     }
 
     /** Wandelt feste Amazon-Links eines Textes um. @return array{0:string,1:int,2:int} [neuer Text, umgewandelt, übersprungen] */
+    /** Ein Platzhalter im src-Attribut eines Bildes wird von WordPress nicht ausgegeben (kaputtes Bild). Hier wird das ganze Bild-Element (samt umgebendem Link) durch den Platzhalter ersetzt, der Bild und Link selbst ausgibt. */
+    public static function attr_reparieren($c) {
+        if (!is_string($c) || strpos($c, '[amz_') === false) { return $c; }
+        $re = '#(?:<a\b[^>]*>\s*)?<img\b[^>]*?\bsrc=(["\'])(\[amz_bild\b[^\]]*\](?:\[/amz_bild\])?)\1[^>]*>(?:\s*</a>)?#is';
+        $neu = preg_replace_callback($re, function ($m) { $sc = $m[2]; return substr($sc, -11) === '[/amz_bild]' ? $sc : $sc . '[/amz_bild]'; }, $c);
+        return $neu ?? $c;
+    }
+
     public static function umbau_text(string $c, string $nur = ''): array {
         $fest = [];
         // bereits vorhandene Plugin-Platzhalter schützen
@@ -3388,7 +3397,7 @@ final class SAB {
             $n++;
             return '[amz_link' . $attr . ']' . str_replace(['[', ']'], '', $text) . '[/amz_link]';
         }, $c);
-        return [strtr($c, $fest), $n + self::$karten_n, $skip];
+        return [self::attr_reparieren(strtr($c, $fest)), $n + self::$karten_n, $skip];
     }
 
     /** Analyse (nur Lesen): je ASIN Anzahl Stellen und Artikel, und was bereits im Plugin läuft. */
