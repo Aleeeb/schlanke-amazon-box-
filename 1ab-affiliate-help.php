@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.5
+ * Version: 0.75.6
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.5';
+    const VERSION = '0.75.6';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2912,6 +2912,7 @@ final class SAB {
 
     private static function uebersicht_html(): string {
         $land = self::land('');
+        if (!empty($_POST['sab_neu'])) { delete_transient('sab_alle_asins'); }   // Produktliste aus den Artikeln neu einlesen
         $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
         $namen = self::produkte(); $ja = fn($v) => $v === null ? '?' : ($v ? '<strong style="color:#1a7f37">ja</strong>' : '<strong style="color:#a00">nein</strong>');
         $h = '<h2>Übersicht aller Produkte (' . esc_html($land) . ')</h2>'
@@ -2922,7 +2923,7 @@ final class SAB {
         if ($d['fehler']) { $h .= '<div class="notice notice-warning inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         if ($d['fehler']) { return $h; }
         $kz = self::klickzahlen(); $fund = self::fundstellen(self::alle_asins()); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
-        $h .= self::uebersicht_css();
+        $h .= self::uebersicht_css() . '<!--SABPAGER-->';
         $h .= self::uebersicht_kopf(true);
         $zl = []; $unbenutzt = [];
         foreach (self::alle_asins() as $asin) {
@@ -2930,16 +2931,28 @@ final class SAB {
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
             if (!$x) {
                 if ($ns === 0) { $unbenutzt[] = $asin; continue; }   // Amazon kennt es nicht und es steht auf keiner Seite: kein Handlungsbedarf, nicht ganz oben anzeigen
-                $zl[] = ['prio' => 100 * $ns, 'dr' => 100, 'sc' => -1, 'h' => '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'];
+                $zl[] = ['asin' => $asin, 'prio' => 100 * $ns, 'dr' => 100, 'sc' => -1, 'h' => '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'];
                 continue;
             }
             $sc = self::score($x)[0];
-            $zl[] = ['prio' => self::tausch_dringlichkeit($x, $sc) * $ns, 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
+            $zl[] = ['asin' => $asin, 'prio' => self::tausch_dringlichkeit($x, $sc) * $ns, 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
         }
         usort($zl, fn($a, $b) => [$b['prio'], $b['dr'], $a['sc']] <=> [$a['prio'], $a['dr'], $b['sc']]);   // wichtigste zuerst, dann dringlichste, dann schwächster Score
-        foreach ($zl as $z) { $h .= $z['h']; }
+        $gesamt = count($zl);
+        $pp = isset($_GET['sab_pp']) ? (string) $_GET['sab_pp'] : '25'; $pp = $pp === 'alle' ? max(1, $gesamt) : (in_array((int) $pp, [10, 25, 50, 100], true) ? (int) $pp : 25);
+        $seiten_n = max(1, (int) ceil($gesamt / $pp)); $sn = max(1, min($seiten_n, (int) ($_GET['sab_s'] ?? 1)));
+        $zeigen = array_slice($zl, ($sn - 1) * $pp, $pp);
+        foreach ($zeigen as $z) { $h .= $z['h']; }
+        $liste_feld = '<input type="hidden" name="sab_zeile_liste" value="' . esc_attr(implode(',', array_map(fn($z) => $z['asin'] ?? '', $zeigen))) . '">';
+        $pager = '<p class="sab-pager"><strong>' . $gesamt . ' Produkte</strong> · Seite ' . $sn . ' von ' . $seiten_n . ' · ';
+        if ($sn > 1) { $pager .= '<a class="button" href="' . esc_url(add_query_arg(['sab_s' => $sn - 1, 'sab_pp' => $_GET['sab_pp'] ?? 25])) . '">‹ zurück</a> '; }
+        if ($sn < $seiten_n) { $pager .= '<a class="button" href="' . esc_url(add_query_arg(['sab_s' => $sn + 1, 'sab_pp' => $_GET['sab_pp'] ?? 25])) . '">weiter ›</a> '; }
+        $pager .= ' pro Seite: ';
+        foreach ([10, 25, 50, 100, 'alle'] as $o) { $pager .= '<a href="' . esc_url(add_query_arg(['sab_s' => 1, 'sab_pp' => $o])) . '"' . (($o === 'alle' ? ($pp === max(1, $gesamt) && ($_GET['sab_pp'] ?? '') === 'alle') : $pp === $o) ? ' style="font-weight:700"' : '') . '>' . $o . '</a> '; }
+        $pager .= '</p>';
         $nb = $unbenutzt ? '<details style="margin:10px 0"><summary>' . count($unbenutzt) . ' Produkt(e), die Amazon nicht kennt und die auf keiner Seite stehen (nicht in der Tabelle)</summary><p><code>' . esc_html(implode(', ', $unbenutzt)) . '</code></p></details>' : '';
-        return $h . '</tbody></table>' . $nb . self::bild_gross_html() . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Wartung“.</span></p>';
+        $h = str_replace('<!--SABPAGER-->', $pager, $h);
+        return $h . '</tbody></table>' . $pager . $liste_feld . $nb . self::bild_gross_html() . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Wartung“.</span></p>';
     }
 
     // ---------- Umbau-Werkzeug: feste Amazon-Links in Artikeln => Plugin-Platzhalter ----------
@@ -4409,14 +4422,16 @@ JS;
                 delete_transient('sab_alle_asins');
                 $meldung = 'Gruppen gespeichert.';
             } elseif ($form === 'marken' && !empty($_POST['sab_markieren'])) {
-                $m = [];
+                $gezeigt = array_filter(array_map([__CLASS__, 'asin'], explode(',', (string) ($_POST['sab_zeile_liste'] ?? ''))));   // nur die angezeigte Seite überschreiben, Markierungen der anderen Seiten bleiben
+                $behalte = fn($opt) => array_diff_key((array) get_option($opt, []), array_flip($gezeigt));
+                $m = $behalte('sab_marken');
                 foreach ((array) ($_POST['sab_fav'] ?? []) as $a => $x) { $a = self::asin((string) $a); if ($a) { $m[$a] = 'fav'; } }
                 foreach ((array) ($_POST['sab_ers'] ?? []) as $a => $x) { $a = self::asin((string) $a); if ($a) { $m[$a] = 'ers'; } } // „Ersetzen“ gewinnt
                 update_option('sab_marken', $m, false);
-                $tr = [];
+                $tr = $behalte('sab_trotz');
                 foreach ((array) ($_POST['sab_trotz'] ?? []) as $a => $x) { $a = self::asin((string) $a); if ($a) { $tr[$a] = 1; } }
                 update_option('sab_trotz', $tr, false);
-                $bo = [];
+                $bo = $behalte('sab_bonus');
                 foreach ((array) ($_POST['sab_bonus'] ?? []) as $a => $x) { $a = self::asin((string) $a); $n = (int) $x; if ($a && $n !== 0) { $bo[$a] = max(-100, min(100, $n)); } }
                 update_option('sab_bonus', $bo, false);
                 delete_transient('sab_alle_asins');
