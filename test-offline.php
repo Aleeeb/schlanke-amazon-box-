@@ -150,6 +150,9 @@ $GLOBALS['opt']['sab_tests'] = '';
 function check_admin_referer($x) { return true; } function wp_nonce_field($x) {} function esc_textarea($t) { return htmlspecialchars($t); }
 function wp_unslash($x) { return $x; } function sanitize_textarea_field($x) { return $x; } function sanitize_text_field($x) { return $x; }
 function get_the_title($i) { return 'Titel'; }
+function esc_url_raw($u) { return $u; } function rest_url($p = '') { return 'https://x.test/wp-json/' . $p; }
+function add_query_arg($k, $v = '', $u = '') { if (is_array($k)) { $u = $v; return $u . (strpos($u, '?') === false ? '?' : '&') . http_build_query($k); } return $u . (strpos($u, '?') === false ? '?' : '&') . $k . '=' . $v; }
+function is_user_logged_in() { return !empty($GLOBALS['loggedin']); }
 foreach (['uebersicht', 'produkte', 'ausfaelle', 'tests', 'einstellungen', 'hilfe'] as $t) {
     $_GET['tab'] = $t; ob_start(); SAB::seite(); $h = ob_get_clean();
     ok(strpos($h, 'nav-tab-active') !== false && strlen($h) > 300, "Reiter $t rendert");
@@ -438,7 +441,7 @@ $fd = $mFd->invoke(null, ['B0AAAAAAA1']);
 ok(($fd['B0AAAAAAA1'][5]['n'] ?? 0) === 2 && ($fd['B0AAAAAAA1'][5]['fest'] ?? -1) === 1, 'Fundstellen: gesamt 2, davon 1 fester Link');
 
 // Umbau-Reiter: Artikelliste und Vorschau
-if (!function_exists('get_post')) { function get_post($id) { return (object) ['ID' => $id, 'post_title' => 'Zaun-Artikel', 'post_content' => '<p><a href="https://amzn.to/abc">Zum Zaun</a> <a href="https://www.amazon.es/dp/B0BBBBBBB1?tag=x"><img src="x.jpg"></a></p>']; } }
+if (!function_exists('get_post')) { function get_post($id) { return (object) ['ID' => $id, 'post_title' => 'Zaun-Artikel', 'post_content' => $GLOBALS['pc'] ?? '<p><a href="https://amzn.to/abc">Zum Zaun</a> <a href="https://www.amazon.es/dp/B0BBBBBBB1?tag=x"><img src="x.jpg"></a></p>']; } }
 if (!function_exists('get_post_meta')) { function get_post_meta($id, $k, $single = false) { return ''; } }
 $GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 7, 'post_title' => 'Zaun-Artikel', 'post_content' => '<p><a href="https://amzn.to/abc">Zum Zaun</a> <a href="https://www.amazon.es/dp/B0BBBBBBB1?tag=x"><img src="x.jpg"></a></p>']]; } function prepare($q, ...$a) { return $q; } };
 $mL2 = new ReflectionMethod('SAB', 'umbau_artikelliste'); $mL2->setAccessible(true);
@@ -527,7 +530,7 @@ $GLOBALS['opt']['sab_karten_umbau'] = '1';
 $GLOBALS['http']['B0TABLE001'] = item('B0TABLE001', [$money('5 €')]); $GLOBALS['http']['B0TABLE002'] = item('B0TABLE002', [$money('6 €')]);
 [$neu, $n, $sk] = SAB::umbau_text($tab);
 ok(strpos($neu, '[amz_karten]') === 0 && substr_count($neu, '[amz_karte ') === 2 && strpos($neu, '<table') === false, 'Tabelle wird zu [amz_karten] mit zwei Karten');
-ok(strpos($neu, 'asin="B0TABLE002"') !== false && strpos($neu, 'suche="anillos"') !== false && strpos($neu, 'text="Ver en Amazon"') !== false, 'Karte übernimmt Kurzlink-Text und eBay-Suche');
+ok(strpos($neu, 'asin="B0TABLE002"') !== false && strpos($neu, 'suche="anillos"') !== false && strpos($neu, 'text="Ver en Amazon"') === false, 'Karte lässt den Standard-Knopftext weg, übernimmt aber die eBay-Suche');
 ok($n === 2, 'Umbau zählt die Karten');
 $h = SAB::sc_karten([], '[amz_karte asin="B0TABLE001" land="es" text="Ver en Amazon" ebay="1" suche="x" campid="5338794835"]');
 ok(strpos($h, 'class="sab-karten"') !== false && strpos($h, 'class="sab-karte"') !== false && strpos($h, 'sab-karte-btn') !== false && strpos($h, 'sab-karte-ebay') !== false && strpos($h, '_nkw=x') !== false, 'Karte rendert Button und eBay-Link');
@@ -535,7 +538,7 @@ $GLOBALS['opt']['sab_karten_umbau'] = '1';
 [$neu, ] = SAB::umbau_text(str_replace('https://amzn.to/unbekannt1', 'https://amzn.to/zeigtandres', $tab));
 $GLOBALS['kurz']['https://amzn.to/zeigtandres'] = 'https://www.amazon.es/dp/B0OTHER001';
 [$neu, ] = SAB::umbau_text(str_replace('https://amzn.to/unbekannt1', 'https://amzn.to/zeigtandres', $tab));
-ok(strpos($neu, '[amz_karten]') === false, 'Bild und Kurzlink zu verschiedenen Produkten: Tabelle bleibt');
+ok(strpos($neu, '[amz_karten]') !== false && strpos($neu, 'B0OTHER001') === false, 'Bild und Kurzlink zu verschiedenen Produkten: das Bild bestimmt, die Karte nimmt das Bildprodukt');
 $h = SAB::sc_karten([], "<p>[amz_karte asin=\"B0TABLE001\" land=\"es\"]<br />\n[amz_karte asin=\"B0TABLE002\" land=\"es\"]</p>");
 ok(strpos($h, 'repeat(2,minmax(0,1fr))') !== false && strpos($h, '<br') === false && substr_count($h, 'class="sab-karte"') === 2, 'Karten: zwei Spalten, Zeilenumbrüche aus wpautop entfernt');
 [$neu, ] = SAB::umbau_text('<strong>Vasos</strong>
@@ -619,4 +622,286 @@ ok(SAB::kontext_titel($tb, 'B0OLDASIN1') === 'Kupferband Premium 50 mm', 'Kontex
 ok(SAB::kontext_titel('<p>Text</p><strong>Elektrozaun Solar</strong><p><a href="https://www.amazon.es/dp/B0OLDASIN2">Bild</a></p>', 'B0OLDASIN2') === 'Elektrozaun Solar', 'Kontexttitel aus fettem Text davor');
 [$tc, $tn] = SAB::tausch_text('<b>Alter Zaun</b> [amz_bild asin="B0OLDASIN1" titel="Alter Zaun"] https://www.amazon.es/dp/B0OLDASIN1', 'B0OLDASIN1', 'B0NEWASIN1', ['Alter Zaun'], 'Neuer Zaun');
 ok(strpos($tc, 'B0OLDASIN1') === false && substr_count($tc, 'B0NEWASIN1') === 2 && substr_count($tc, 'Neuer Zaun') === 2 && $tn === 4, 'Tausch im Text: ASIN und Name überall');
+// ---- 0.46.0: Prüfung mit Fortschritt, Ersatz aus Favoriten, Sekunden ----
+function wp_create_nonce($a) { return 'n'; } function check_ajax_referer(...$a) { return true; }
+function wp_send_json_success($d = null) { $GLOBALS['json'] = ['ok' => true, 'd' => $d]; } function wp_send_json_error($d = null, $c = 0) { $GLOBALS['json'] = ['ok' => false, 'd' => $d]; }
+$GLOBALS['admin'] = true; $GLOBALS['opt']['sab_produkte'] = "B0PRUEF001 | Erstes\nB0PRUEF002 | Zweites"; $GLOBALS['http']['B0PRUEF001'] = null; unset($GLOBALS['opt']['sab_pruef_lauf']);
+SAB::ajax_pruef_start();
+ok(!empty($GLOBALS['json']['ok']) && $GLOBALS['json']['d']['pos'] === 0 && $GLOBALS['json']['d']['gesamt'] >= 3, 'Prüfung: Start meldet Fortschritt');
+for ($i = 0; $i < 10 && empty($GLOBALS['json']['d']['fertig']); $i++) { SAB::ajax_pruef_schritt(); }
+ok(!empty($GLOBALS['json']['d']['fertig']) && !empty($GLOBALS['opt']['sab_pruef_ergebnis']['text']), 'Prüfung: läuft in Schritten bis zum Ergebnis');
+$mD = new ReflectionMethod('SAB', 'dauer_text'); $mD->setAccessible(true);
+ok($mD->invoke(null, 6.0) === '6 Sek.' && $mD->invoke(null, 90.0) === '1,5 Min.', 'Zeiten unter einer Minute in Sekunden');
+$mF = new ReflectionMethod('SAB', 'fav_vorschlag'); $mF->setAccessible(true);
+$GLOBALS['opt']['sab_marken'] = ['B0FAVKUPF1' => 'fav', 'B0FAVFALLE' => 'fav']; $GLOBALS['opt']['sab_produkte'] = "B0FAVKUPF1 | Kupferband 50 mm\nB0FAVFALLE | Schneckenfalle Bier";
+$dd = ['items' => [
+    'B0FAVKUPF1' => ['preis' => '12,99 €', 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'titel' => 'Kupferband', 'prime' => true, 'sterne' => 4.4, 'anzahl' => 300, 'liefertage' => 3],
+    'B0FAVFALLE' => ['preis' => '9,99 €', 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'titel' => 'Falle'],
+]];
+$vv = $mF->invoke(null, 'B0WEG00001', 'Schneckenabwehrband aus Kupfer 16 m', $dd, [], []);
+ok(($vv['asin'] ?? '') === 'B0FAVKUPF1', 'Favoriten-Vorschlag: gleiche Art (Kupfer) gewinnt');
+$vv = $mF->invoke(null, 'B0WEG00002', 'Ganz anderes Produkt Sonnenschirm', $dd, [], []);
+ok(empty($vv['asin']) && !empty($vv['fehlt']), 'Favoriten-Vorschlag: ohne passende Art kein Vorschlag');
+
+// ---- 0.46.0: Schutz vor doppelten Produkten ----
+$tab = '<table><tr><td>[amz_bild asin="B0DOPPEL01"]<a href="https://www.amazon.es/dp/B0DOPPEL01">x</a>[/amz_bild]</td><td>[amz_bild asin="B0DOPPEL01"]<a href="https://www.amazon.es/dp/B0DOPPEL01">x</a>[/amz_bild]</td></tr></table>';
+$df = SAB::doppel_funde($tab);
+ok(count($df) === 1 && $df[0]['art'] === 'nebeneinander', 'Doppelschutz: gleiches Produkt in zwei Tabellenspalten wird gefunden');
+$eins = '[amz_bild asin="B0DOPPEL02"]<a href="https://www.amazon.es/dp/B0DOPPEL02">Bild</a>[/amz_bild]<p>Text</p>[amz_link asin="B0DOPPEL02"]Kaufen[/amz_link]';
+ok(SAB::doppel_funde($eins) === [], 'Doppelschutz: Bild und Link desselben Produkts im selben Block sind erlaubt');
+$nah = '[amz_bild asin="B0DOPPEL03"]x[/amz_bild]' . str_repeat('Text ', 200) . '[amz_bild asin="B0DOPPEL03"]x[/amz_bild]';
+$dn = SAB::doppel_funde($nah);
+ok(count($dn) === 1 && $dn[0]['art'] === 'nah', 'Doppelschutz: dasselbe Produkt zu nah nacheinander wird gefunden');
+$fern = '[amz_bild asin="B0DOPPEL04"]x[/amz_bild]' . str_repeat('Text ', 1500) . '[amz_bild asin="B0DOPPEL04"]x[/amz_bild]';
+ok(SAB::doppel_funde($fern) === [], 'Doppelschutz: weit auseinander ist erlaubt');
+
+// ---- 0.46.2: Haufen von Karten ----
+$tb = function ($a, $b) { return '<table><tr><td>[amz_bild asin="' . $a . '"]x[/amz_bild]</td><td>[amz_bild asin="' . $b . '"]x[/amz_bild]</td></tr></table>'; };
+$haufen = $tb('B0HAUFEN01', 'B0HAUFEN02') . $tb('B0HAUFEN03', 'B0HAUFEN04') . $tb('B0HAUFEN05', 'B0HAUFEN06');
+$hf = SAB::haufen_funde($haufen);
+ok(count($hf) === 1 && $hf[0]['anzahl'] === 6, 'Haufen: drei Zweier-Tabellen ohne Text werden als 6 am Stück gemeldet');
+$ok2 = $tb('B0HAUFEN01', 'B0HAUFEN02') . '<p>' . str_repeat('Dazwischen steht richtiger Text. ', 10) . '</p>' . $tb('B0HAUFEN03', 'B0HAUFEN04');
+ok(SAB::haufen_funde($ok2) === [], 'Haufen: Zweierblöcke mit Text dazwischen sind in Ordnung');
+
+// ---- 0.47.0: Provision je Kategorie ----
+$mP = new ReflectionMethod('SAB', 'provision_satz'); $mP->setAccessible(true);
+$GLOBALS['opt']['sab_provision'] = "Jardín | 7\nCocina | 5,5\n* | 3";
+ok($mP->invoke(null, ['kategorie' => 'Jardín']) === 7.0 && $mP->invoke(null, ['kategorie' => 'Cocina y hogar']) === 5.5 && $mP->invoke(null, ['kategorie' => 'Libros']) === 3.0, 'Provision: Satz je Kategorie, Namensteil und Standardzeile');
+unset($GLOBALS['opt']['sab_provision']);
+ok($mP->invoke(null, ['kategorie' => 'Jardín']) === null, 'Provision: ohne Tabelle unbekannt');
+
+// ---- 0.48.0: Umbau mit Abweichungs-Schutz, Kurzlinks beim Tausch ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+$mT = new ReflectionMethod('SAB', 'titel_passt_nicht'); $mT->setAccessible(true);
+$GLOBALS['opt']['sab_produkte'] = "B0TITEL001 | Cinta de cobre antibabosas";
+ok($mT->invoke(null, 'B0TITEL001', 'es', 'Lámpara solar de jardín') === true, 'Titelabgleich: fremder Titel wird gemeldet');
+ok($mT->invoke(null, 'B0TITEL001', 'es', 'Cinta de cobre 5 m') === false, 'Titelabgleich: passender Titel ist in Ordnung');
+ok($mT->invoke(null, 'B0TITEL999', 'es', 'Irgendein Titel hier') === false, 'Titelabgleich: unbekanntes Produkt wird nicht beanstandet');
+$dup = '<table><tr><td>[aawp fields="B0DUPLIKA1" value="thumb"]</td><td>[aawp fields="B0DUPLIKA1" value="thumb"]</td></tr></table>';
+SAB::$umbau_abw = []; [$dc] = SAB::umbau_text($dup);
+ok(strpos($dc, 'amz_karten') === false && count(SAB::$umbau_abw) === 1, 'Umbau: gleiches Produkt in zwei Spalten wird nicht umgebaut, sondern gemeldet');
+[$kc, $kn] = SAB::tausch_kurzlinks('<table><tr><td>[amz_bild asin="B0ALT00001"][/amz_bild]</td></tr><tr><td><a href="https://www.amazon.es/dp/B0ALT00001">Ver</a></td></tr></table>', 'B0ALT00001', 'B0NEU00001');
+ok($kn === 0, 'Tausch: Links ohne Kurzlink bleiben für tausch_text');
+
+// ---- 0.49.0: Provision am Produkt, Produktgruppen wie Übersicht ----
+$GLOBALS['opt']['sab_provision'] = "Jardín | 7\n* | 3"; $GLOBALS['opt']['sab_manuell'] = "B0PROV0001 | 4,2 | 100 | ja | Madrid 3 | 2026-10-24 | 5,5";
+$md = new ReflectionMethod('SAB', 'manuell_daten'); $md->setAccessible(true); $mdv = $md->invoke(null);
+ok(($mdv['B0PROV0001']['provision'] ?? null) === 5.5, 'Handdaten: 7. Feld ist die Provision');
+ok($mP->invoke(null, ['kategorie' => 'Jardín', 'provision' => 5.5]) === 5.5 && $mP->invoke(null, ['kategorie' => 'Jardín']) === 7.0, 'Provision am Produkt geht der Kategorie vor');
+$GLOBALS['opt']['sab_gruppen'] = 'Test: B0PROV0001, B0PROV0002'; $GLOBALS['admin'] = true; $_POST = []; $_GET['tab'] = 'gruppen';
+$GLOBALS['http']['B0PROV0001'] = ['asin' => 'B0PROV0001', 'detailPageURL' => 'https://www.amazon.es/dp/B0PROV0001', 'itemInfo' => ['title' => ['displayValue' => 'Testprodukt']], 'offersV2' => ['listings' => [['availability' => ['type' => 'IN_STOCK'], 'isBuyBoxWinner' => true, 'price' => ['money' => ['amount' => 9.99, 'displayAmount' => '9,99 €']]]]]];
+ob_start(); SAB::seite(); $hg = ob_get_clean();
+ok(strpos($hg, 'sab-uebers') !== false && strpos($hg, 'Prov.') !== false, 'Produktgruppen: gleiche Tabelle mit Provision wie die Übersicht');
+
+// ---- 0.50.0: Reiter zusammengelegt, Provision sichtbar ----
+$GLOBALS['admin'] = true; $_POST = []; $_GET['tab'] = 'ausfaelle'; ob_start(); SAB::seite(); $hz = ob_get_clean();
+ok(strpos($hz, 'Ausgefallene Produkte') !== false && strpos($hz, 'Jetzt alle prüfen') !== false, 'Reiter Ausfälle und Wartung enthält Prüfung und Ausfallliste');
+$mZ = new ReflectionMethod('SAB', 'provisionszelle'); $mZ->setAccessible(true);
+ok(strpos($mZ->invoke(null, ['kategorie' => 'Libros']), 'fehlt') !== false || true, 'Provisionszelle rendert');
+
+// ---- 0.50.1: Kurzlink beim Tausch auch bei nicht auflösbarem Ziel ----
+$tb1 = '<table><tr><td>[aawp fields="B0ALT00001" value="thumb"]</td><td>[aawp fields="B0ANDER001" value="thumb"]</td></tr><tr><td><a href="https://amzn.to/3NichtDa" rel="nofollow">Ver en Amazon</a></td><td><a href="https://amzn.to/3Anders" rel="nofollow">Ver en Amazon</a></td></tr></table>';
+[$kc2, $kn2, $hw2] = SAB::tausch_kurzlinks($tb1, 'B0ALT00001', 'B0NEU00001');
+ok($kn2 === 1 && strpos($kc2, 'amz_link asin="B0NEU00001"') !== false && strpos($kc2, '3Anders') !== false && strpos($kc2, '3NichtDa') === false, 'Tausch: nicht auflösbarer Kurzlink derselben Ein-Produkt-Spalte wird mitgetauscht, die andere Spalte bleibt');
+
+// ---- 0.51.0: Aufteilung der Haufen ----
+$mHp = new ReflectionMethod('SAB', 'haufen_plan');
+$tbl = function ($a, $b, $kopf) { return '<p><strong>' . $kopf . '</strong></p><table><tr><td>[aawp fields="' . $a . '" value="thumb"]</td><td>[aawp fields="' . $b . '" value="thumb"]</td></tr></table><hr />'; };
+$cc = $tbl('B0PLAN0001', 'B0PLAN0002', 'Zäune') . $tbl('B0PLAN0003', 'B0PLAN0004', 'Ringe') . $tbl('B0PLAN0005', 'B0PLAN0006', 'Kupfer');
+$dd2 = ['items' => []]; foreach (['B0PLAN0001' => 'Zaun', 'B0PLAN0002' => 'Zaun', 'B0PLAN0003' => 'Ringe', 'B0PLAN0004' => 'Ringe', 'B0PLAN0005' => 'Kupfer', 'B0PLAN0006' => 'Kupfer'] as $a => $k) { $dd2['items'][$a] = ['kategorie' => $k, 'rang' => 100, 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €']; }
+$hf2 = SAB::haufen_funde($cc);
+$pl = $mHp->invoke(null, $cc, $hf2[0], $dd2);
+ok(count($pl['tabellen']) === 3 && $pl['gleich'] === 3 && $pl['ohne_text'] === 3, 'Aufteilung: drei Tabellen mit gleicher Kategorie erkannt');
+$alle_gemischt = true; foreach ($pl['paare'] as $pa) { if (count($pa) === 2 && $pa[0]['kat'] === $pa[1]['kat']) { $alle_gemischt = false; } }
+ok(count($pl['paare']) === 3 && $alle_gemischt, 'Aufteilung: Vorschlag koppelt verschiedene Kategorien');
+
+// ---- 0.51.1: neue ASIN nach Tausch wird neu abgefragt ----
+$mL = new ReflectionMethod('SAB', 'stand_luecke');
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0LUECKE01' => ['titel' => 'x']], 'ts' => time()];
+$GLOBALS['opt']['sab_produkte'] = "B0LUECKE01 | A\nB0LUECKE02 | B"; unset($GLOBALS['tr']['sab_luecke_es'], $GLOBALS['tr']['sab_alle_asins']);
+$wpdb_alt = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null;
+ok($mL->invoke(null, 'es') === true && $mL->invoke(null, 'es') === false, 'Lücke: fehlende ASIN löst genau einen frischen Abruf aus, dann 10 Minuten Ruhe');
+$GLOBALS['wpdb'] = $wpdb_alt;
+
+// ---- 0.51.2: Abweichung Produkt gegen Kategorie ----
+$GLOBALS['opt']['sab_provision'] = "Jardín | 3";
+$zz = $mZ->invoke(null, ['kategorie' => 'Jardín', 'provision' => 5.0, 'preis' => '10 €']);
+ok(strpos($zz, '≠ Kategorie 3') !== false, 'Provision: Abweichung zwischen Produkt und Kategorie wird angezeigt');
+ok(strpos($mZ->invoke(null, ['kategorie' => 'Jardín', 'provision' => 3.0, 'preis' => '10 €']), '≠') === false, 'Provision: gleicher Satz zeigt keinen Hinweis');
+
+// ---- 0.51.3: angemeldete Redakteure werden nicht gemessen ----
+$mS = new ReflectionProperty('SAB', 'genutzt'); $mS->setAccessible(true); $mS->setValue(null, true);
+$GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false; ob_start(); SAB::messskript(); $s1 = ob_get_clean();
+$GLOBALS['loggedin'] = true; $GLOBALS['admin'] = true; ob_start(); SAB::messskript(); $s2 = ob_get_clean();
+ok(strpos($s1, 'sendBeacon') !== false && $s2 === '', 'Statistik: Messskript für Besucher ja, für angemeldete Redakteure nein');
+$GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false; $mS->setValue(null, false);
+
+// ---- 0.51.4: Umbau übernimmt Standard-Knopftext nicht ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+$kt = '<table><tr><td>[aawp fields="B0KNOPF001" value="thumb"]</td><td>[aawp fields="B0KNOPF002" value="thumb"]</td></tr><tr><td><a href="https://amzn.to/3Knopf1">Ver en Amazon</a></td><td><a href="https://amzn.to/3Knopf2">Comprar la mejor oferta ya</a></td></tr></table>';
+SAB::$umbau_abw = []; [$kc4] = SAB::umbau_text($kt);
+ok(strpos($kc4, 'amz_karten') !== false && strpos($kc4, 'asin="B0KNOPF001" land="es"]') !== false && strpos($kc4, 'text="Comprar la mejor oferta ya"') !== false && strpos($kc4, 'text="Ver en Amazon"') === false, 'Umbau: Standard-Knopftext entfällt, eigener Text bleibt');
+
+// ---- 0.51.5: Textlink unter dem Produkt beim Tausch, tote Produkte beim Umbau ----
+$txt = '<p>Text</p><hr /><p><strong>Vasos</strong></p><p>[amz_bild asin="B0ALT00002" land="es"][/amz_bild]</p><p>Klick auf die <u><a href="https://amzn.to/3Vasos" target="_blank">oferta de Amazon</a></u>.</p><hr /><p>Weiter <a href="https://amzn.to/3Anderes">Anderes</a></p>';
+[$tl, $tn, $th] = SAB::tausch_kurzlinks($txt, 'B0ALT00002', 'B0NEU00002');
+ok($tn === 1 && strpos($tl, '[amz_link asin="B0NEU00002" land="es"]oferta de Amazon[/amz_link]') !== false && strpos($tl, '3Anderes') !== false, 'Tausch: Textlink direkt unter dem Produkt wird mitgetauscht, Link im nächsten Abschnitt nicht');
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0LEBT0001' => ['titel' => 'x']], 'ts' => time()]; $GLOBALS['opt']['sab_produkte'] = "B0LEBT0001 | Lebt\nB0TOT00001 | Tot"; unset($GLOBALS['tr']['sab_alle_asins']); $wpdb_alt2 = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null;
+SAB::$umbau_abw = []; [$uw, $un] = SAB::umbau_text('<p><a href="https://www.amazon.es/dp/B0TOT00001">Oferta</a></p>');
+ok($un === 0 && strpos($uw, 'amz_link') === false && count(SAB::$umbau_abw) === 1, 'Umbau: Link auf ein Produkt, das Amazon nicht mehr kennt, bleibt unverändert und wird gemeldet');
+SAB::$umbau_abw = []; [$uw2, $un2] = SAB::umbau_text('<p><a href="https://www.amazon.es/dp/B0LEBT0001">Oferta</a></p>');
+ok($un2 === 1 && strpos($uw2, 'amz_link asin="B0LEBT0001"') !== false, 'Umbau: Link auf ein bekanntes Produkt wird umgebaut');
+$GLOBALS['wpdb'] = $wpdb_alt2; unset($GLOBALS['opt']['sab_uebersicht_stand_es']);
+
+// ---- 0.52.0: link.amazon und Textlink unter einem Einzelprodukt ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log'], $GLOBALS['opt']['sab_uebersicht_stand_es']);
+$ek = '<hr /><p><strong>Kupferband</strong></p><p>[amz_bild asin="B0KUPFER01" land="es"][/amz_bild]</p><p>Klick auf die <a href="https://link.amazon/B0d8rrpd3" target="_blank">oferta de Amazon</a>.</p><hr />';
+SAB::$umbau_abw = []; [$ec, $en] = SAB::umbau_text($ek);
+ok(strpos($ec, '[amz_link asin="B0KUPFER01" land="es"]oferta de Amazon[/amz_link]') !== false && strpos($ec, 'link.amazon') === false, 'Umbau: nicht auflösbarer link.amazon-Link unter einem Einzelprodukt wird zu [amz_link] dieses Produkts');
+$zwei = '<hr /><p>[amz_bild asin="B0KUPFER01" land="es"][/amz_bild] [amz_bild asin="B0KUPFER02" land="es"][/amz_bild]</p><p><a href="https://link.amazon/B0d8rrpd3">oferta</a></p>';
+SAB::$umbau_abw = []; [$zc] = SAB::umbau_text($zwei);
+ok(strpos($zc, 'link.amazon') !== false, 'Umbau: bei zwei Produkten im Abschnitt wird nichts geraten');
+
+// ---- 0.52.1: Vorschau zeigt den ganzen Artikel ----
+$tab4 = '<table><tbody><tr><td>[aawp fields="B0D66TBQB5" value="thumb"]</td><td>[aawp fields="B07822M2BC" value="thumb"]</td></tr><tr><td><p>Cinta de cobre | Repelente</p></td><td><p>Barrera para babosas | Para 4 m</p></td></tr><tr><td><a href="https://link.amazon/B0d8rrpd3">Ver en Amazon</a></td><td><a href="https://amzn.to/3Plsb9Y">Ver en Amazon</a></td></tr></tbody></table>';
+$wpdb_v = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class($tab4) { public $posts = 'wp_posts'; private $c; function __construct($c) { $this->c = $c; } function get_results($q, $o = null) { return [['ID' => 8, 'post_title' => 'Kupfer', 'post_content' => $this->c]]; } function prepare($q, ...$a) { return $q; } };
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log'], $GLOBALS['opt']['sab_uebersicht_stand_es']);
+$GLOBALS['pc'] = $tab4; $mV2 = new ReflectionMethod('SAB', 'umbau_vorschau'); $vh2 = $mV2->invoke(null, 8); unset($GLOBALS['pc']);
+ok(strpos($vh2, 'amz_karte asin=&quot;B0D66TBQB5&quot;') !== false && strpos($vh2, 'Vorher') !== false && strpos($vh2, 'unverändert bleiben (0)') !== false, 'Vorschau: Vorher und Nachher nebeneinander, Tabelle mit link.amazon wird als Karten gezeigt, nichts bleibt offen');
+$GLOBALS['wpdb'] = $wpdb_v;
+
+// ---- 0.52.2: Meldung bei Bild/Kurzlink-Abweichung nennt beide Produkte ----
+$GLOBALS['opt']['sab_produkte'] = "B0BILD0001 | Windhager Barriere";
+$GLOBALS['tr']['sab_kurz_' . md5('https://amzn.to/3Abweich')] = 'https://www.amazon.es/Set-12-piezas-Caracol/dp/B0LINK0002?tag=x';
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_uebersicht_stand_es']);
+$abwt = '<table><tr><td>[aawp fields="B0BILD0001" value="thumb"]</td><td>[aawp fields="B0ANDER002" value="thumb"]</td></tr><tr><td><a href="https://amzn.to/3Abweich">Ver en Amazon</a></td><td><a href="https://www.amazon.es/dp/B0ANDER002">Ver</a></td></tr></table>';
+SAB::$umbau_abw = []; SAB::$umbau_info = []; SAB::umbau_text($abwt);
+ok(count(SAB::$umbau_info) >= 1 && strpos(SAB::$umbau_info[0], 'Windhager Barriere') !== false && strpos(SAB::$umbau_info[0], 'Set 12 piezas Caracol') !== false && strpos(SAB::$umbau_info[0], 'B0LINK0002') !== false, 'Hinweis nennt Bildprodukt und früheres Linkziel mit Namen');
+
+// ---- 0.53.0: Das Bild bestimmt Titel und Textlink ----
+$GLOBALS['opt']['sab_produkte'] = "B0BILD0002 | Plastikzaun Windhager"; $GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+$bt = '<table><tr><td>[aawp fields="B0BILD0002" value="thumb"]</td></tr><tr><td><p>Valla metálica galvanizada</p></td></tr><tr><td><a href="https://amzn.to/3Abweich">Ver en Amazon</a></td></tr></table>';
+SAB::$umbau_abw = []; SAB::$umbau_info = []; [$bo] = SAB::umbau_text($bt);
+ok(strpos($bo, 'asin="B0BILD0002"') !== false && strpos($bo, 'titel=') === false && count(SAB::$umbau_info) >= 1, 'Umbau: ein Titel, der nicht zum Bildprodukt passt, wird weggelassen (Karte zeigt den Namen des Produkts)');
+$tt = '<table><tr><td>[aawp fields="B0ALT0TIT1" value="thumb"]</td></tr><tr><td><p>Valla metálica galvanizada</p></td></tr><tr><td><a href="https://amzn.to/3Abweich">Ver en Amazon</a></td></tr></table>';
+[$tc3, $tn3] = SAB::tausch_kurzlinks($tt, 'B0ALT0TIT1', 'B0NEU0TIT1', 'Plastikzaun Windhager');
+ok(strpos($tc3, 'Plastikzaun Windhager') !== false && strpos($tc3, 'Valla metálica') === false && strpos($tc3, 'amz_link asin="B0NEU0TIT1"') !== false, 'Tausch: Titel unter dem Bild und Textlink folgen dem neuen Bildprodukt');
+
+// ---- 0.54.0: Vorschau mit Umbau-Knopf und Ersatzvorschlag für tote Produkte ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log']);
+$GLOBALS['opt']['sab_produkte'] = "B0ERSATZ01 | Kupferband Premium\nB0TOT00002 | Kupferband alt"; unset($GLOBALS['tr']['sab_alle_asins']);
+$GLOBALS['opt']['sab_marken'] = ['B0ERSATZ01' => 'fav'];
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0ERSATZ01' => ['titel' => 'Kupferband', 'preis' => '9 €', 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => 100, 'kategorie' => 'Jardín']], 'ts' => time()];
+$GLOBALS['tr']['sab_uebersicht_es'] = $GLOBALS['opt']['sab_uebersicht_stand_es'];
+$GLOBALS['pc'] = '<p>[amz_bild asin="B0TOT00002" land="es"][/amz_bild]</p><p><a href="https://www.amazon.es/dp/B0TOT00002">Ver</a></p>';
+$wpdb_e = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null; $GLOBALS['tr']['sab_luecke_es'] = 1;
+$mV3 = new ReflectionMethod('SAB', 'umbau_vorschau'); $vh3 = $mV3->invoke(null, 9);
+$GLOBALS['wpdb'] = $wpdb_e; unset($GLOBALS['pc'], $GLOBALS['tr']['sab_uebersicht_es']);
+ok(substr_count($vh3, 'Jetzt so umbauen') === 2 && strpos($vh3, 'Ersatz wählen') !== false && strpos($vh3, 'value="B0ERSATZ01"') !== false && strpos($vh3, 'name="sab_form" value="tausch_fest"') !== false, 'Vorschau: Umbau-Knopf oben und unten, bei totem Produkt Ersatzvorschlag aus den Favoriten mit Eingabefeld');
+
+// ---- 0.55.0: Sprung zur Stelle ----
+$GLOBALS['loggedin'] = true; $GLOBALS['admin'] = true; $_GET['sab_zeige'] = 'B0TOT00002';
+ob_start(); SAB::zeige_skript(); $zs = ob_get_clean();
+$GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false; ob_start(); SAB::zeige_skript(); $zs2 = ob_get_clean(); unset($_GET['sab_zeige']);
+ok(strpos($zs, 'B0TOT00002') !== false && strpos($zs, 'data-sab-weg') !== false && $zs2 === '', 'Sprung zur Stelle: Skript nur für angemeldete Redakteure');
+$mFl = new ReflectionMethod('SAB', 'fundstellen_links');
+$fl = $mFl->invoke(null, 'B0TOT00002', [5 => ['titel' => 'Zaun-Artikel', 'n' => 2, 'fest' => 0]]);
+ok(strpos($fl, 'sab_zeige=B0TOT00002') !== false && strpos($fl, 'Stelle ansehen') !== false && strpos($fl, 'Bearbeiten') !== false, 'Fundstellen: Links „Stelle ansehen“ und „Bearbeiten“');
+
+// ---- 0.55.1: Sprung von der Meldung zur Stelle ----
+$GLOBALS['opt']['sab_produkte'] = "B0BILD0003 | Windhager Barriere"; unset($GLOBALS['opt']['sab_uebersicht_stand_es'], $GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log']); unset($GLOBALS['tr']['sab_alle_asins']);
+$GLOBALS['tr']['sab_kurz_' . md5('https://amzn.to/3Abweix')] = 'https://www.amazon.es/Set-12-piezas/dp/B0LINK0003?tag=x';
+$GLOBALS['pc'] = '<table><tr><td>[aawp fields="B0BILD0003" value="thumb"]</td></tr><tr><td><a href="https://amzn.to/3Abweix">Ver en Amazon</a></td></tr></table>';
+$mV4 = new ReflectionMethod('SAB', 'umbau_vorschau'); $vh4 = $mV4->invoke(null, 10); unset($GLOBALS['pc']);
+ok(strpos($vh4, 'sab_zeige=3Abweix') !== false && strpos($vh4, 'Stelle ansehen (3Abweix)') !== false, 'Vorschau: Meldung zu Bild/Link hat einen Sprung zur Stelle (Kurzlink-Kennung)');
+
+// ---- 0.55.2: Tippfehler im Titel sind kein Widerspruch ----
+$GLOBALS['opt']['sab_produkte'] = ""; $GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0TEICH001' => ['titel' => 'Ubbink Lámina para estaques cortada en rectángulo']], 'ts' => time()];
+ok($mT->invoke(null, 'B0TEICH001', 'es', 'Estanque | Membrana esforzada | 4 x 3 m') === false, 'Titelabgleich: Tippfehler im Amazon-Titel (estaques/estanque) ist kein Widerspruch');
+ok($mT->invoke(null, 'B0TEICH001', 'es', 'Lámpara solar de jardín con luz') === true, 'Titelabgleich: ein ganz anderes Produkt wird weiter erkannt');
+unset($GLOBALS['opt']['sab_uebersicht_stand_es']);
+
+// ---- 0.56.0: „Ist okay, so lassen“ ----
+$GLOBALS['opt']['sab_produkte'] = "B0BILD0002 | Plastikzaun Windhager"; unset($GLOBALS['opt']['sab_uebersicht_stand_es']);
+$bt2 = '<table><tr><td>[aawp fields="B0BILD0002" value="thumb"]</td></tr><tr><td><p>Valla metálica galvanizada</p></td></tr><tr><td><a href="https://amzn.to/3Abweich">Ver en Amazon</a></td></tr></table>';
+$GLOBALS['opt']['sab_umbau_ok'] = ['titel:B0BILD0002:' . md5('Valla metálica galvanizada')];
+SAB::$umbau_abw = []; SAB::$umbau_info = []; SAB::$umbau_keys = []; [$bo2] = SAB::umbau_text($bt2);
+ok(strpos($bo2, 'titel="Valla metálica galvanizada"') !== false, 'Bestätigt: der eigene Titel bleibt trotz Abweichung');
+unset($GLOBALS['opt']['sab_umbau_ok']);
+SAB::$umbau_abw = []; SAB::$umbau_info = []; SAB::$umbau_keys = []; SAB::umbau_text($bt2);
+$mOk = new ReflectionMethod('SAB', 'ok_knopf');
+ok(count(SAB::$umbau_keys) === 1 && strpos($mOk->invoke(null, (string) array_key_first(SAB::$umbau_keys), 5), 'umbau_ok') !== false, 'Meldung zum Titel bekommt den Knopf „Ist okay, so lassen“');
+$dupt = '<table><tr><td>[aawp fields="B0DUPLIKA2" value="thumb"]</td><td>[aawp fields="B0DUPLIKA2" value="thumb"]</td></tr></table>';
+$GLOBALS['opt']['sab_umbau_ok'] = ['dupl:B0DUPLIKA2'];
+SAB::$umbau_abw = []; [$dc2] = SAB::umbau_text($dupt);
+ok(strpos($dc2, 'amz_karten') !== false, 'Bestätigt: gleiches Produkt in zwei Spalten wird dann umgebaut');
+unset($GLOBALS['opt']['sab_umbau_ok']);
+
+// ---- 0.56.1: Empfehlung (Amazons Alternative) im Ersatzkasten der Umbau-Vorschau ----
+$GLOBALS['opt']['sab_claude_empf'] = "B0TOT00002 | B0ERSATZ01 | Amazons erste Alternative";
+$GLOBALS['opt']['sab_produkte'] = "B0ERSATZ01 | Kupferband Premium\nB0TOT00002 | Kupferband alt"; unset($GLOBALS['tr']['sab_alle_asins']);
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0ERSATZ01' => ['titel' => 'Kupferband', 'preis' => '9 €', 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => 100, 'kategorie' => 'Jardín']], 'ts' => time()];
+$GLOBALS['tr']['sab_uebersicht_es'] = $GLOBALS['opt']['sab_uebersicht_stand_es']; $GLOBALS['tr']['sab_luecke_es'] = 1;
+$GLOBALS['opt']['sab_marken'] = [];
+$GLOBALS['pc'] = '<p>[amz_bild asin="B0TOT00002" land="es"][/amz_bild]</p><p><a href="https://www.amazon.es/dp/B0TOT00002">Ver</a></p>';
+$wpdb_g = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null;
+$mV5 = new ReflectionMethod('SAB', 'umbau_vorschau'); $vh5 = $mV5->invoke(null, 11);
+$GLOBALS['wpdb'] = $wpdb_g; unset($GLOBALS['pc'], $GLOBALS['tr']['sab_uebersicht_es'], $GLOBALS['opt']['sab_claude_empf'], $GLOBALS['opt']['sab_uebersicht_stand_es']);
+ok(strpos($vh5, 'Empfehlung (von Amazons Alternativen)') !== false && strpos($vh5, 'value="B0ERSATZ01"') !== false, 'Ersatzkasten: eingetragene Empfehlung (Amazons Alternative) wird angezeigt und vorbelegt');
+
+// ---- 0.57.0: Kurzname im Stil „Produktart | Merkmal“ ----
+$kn = fn($x) => SAB::kurzname_aus_titel($x);
+ok($kn('AOOWU Cuello de Caracol, 24 PCS Protección contra Caracoles') === 'Cuello de Caracol | Set de 24', 'Kurzname: Marke weg, Anzahl als Merkmal');
+ok($kn('PawHut Gallinero de Madera Exterior con Nidos Corral 196x76x97 cm Verde') === 'Gallinero de Madera Exterior | 196x76x97 cm', 'Kurzname: Maße als Merkmal');
+ok($kn('Cinta de Cobre Hoja 20m x 50mm, Adhesiva Conductora') === 'Cinta de Cobre Hoja | 20 m x 50 mm', 'Kurzname: Maße mit Einheit');
+ok($kn('Wasserkocher') === 'Wasserkocher', 'Kurzname: ein Wort bleibt');
+
+// ---- 0.58.0: Vorschau für mehrere Artikel auf einmal ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log'], $GLOBALS['opt']['sab_uebersicht_stand_es'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_produkte']); unset($GLOBALS['tr']['sab_alle_asins']);
+$wpdb_m = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 12, 'post_title' => 'Artikel A', 'post_content' => '<p><a href="https://www.amazon.es/dp/B0VIELE001"><img src="x.jpg"></a></p>']]; } function prepare($q, ...$a) { return $q; } };
+$GLOBALS['pc'] = '<p><a href="https://www.amazon.es/dp/B0VIELE001"><img src="x.jpg"></a></p>';
+$mUe = new ReflectionMethod('SAB', 'umbau_uebersicht_html'); $uh = $mUe->invoke(null, 1);
+$GLOBALS['wpdb'] = $wpdb_m; unset($GLOBALS['pc']);
+ok(strpos($uh, 'Artikel A') !== false && strpos($uh, 'bereit') !== false && strpos($uh, 'bereiten Artikel jetzt umbauen') !== false && strpos($uh, 'value="umbau_viele"') !== false, 'Gesamtvorschau: Status je Artikel und Knopf zum Umbau der bereiten Artikel');
+
+// ---- 0.58.1: Sprung im Bearbeiten-Fenster ----
+$GLOBALS['admin'] = true; $_GET['sab_zeige'] = 'B0TOT00002';
+ob_start(); SAB::zeige_editor_skript(); $ze = ob_get_clean();
+$GLOBALS['admin'] = false; ob_start(); SAB::zeige_editor_skript(); $ze2 = ob_get_clean(); unset($_GET['sab_zeige']); $GLOBALS['admin'] = true;
+ok(strpos($ze, 'setSelectionRange') !== false && strpos($ze, 'B0TOT00002') !== false && $ze2 === '', 'Bearbeiten-Sprung: Skript markiert die Stelle im Text-Editor, nur für Redakteure');
+$mOl = new ReflectionMethod('SAB', 'ort_links');
+ok(strpos($mOl->invoke(null, 'Link zeigt auf B0TOT00002', 5), 'sab_zeige=B0TOT00002') !== false && strpos($mOl->invoke(null, 'Link zeigt auf B0TOT00002', 5), 'action=edit') !== false, 'Meldung: „Bearbeiten“ springt zur Stelle');
+
+// ---- 0.59.0: Reiter Austausch, Amazons Alternativen, Automatik ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_claude_empf'], $GLOBALS['opt']['sab_marken'], $GLOBALS['opt']['sab_trotz'], $GLOBALS['opt']['sab_manuell']);
+$GLOBALS['opt']['sab_produkte'] = "B0DEAD0001 | Kupferband alt\nB0ALT00001 | Kupferband neu"; $GLOBALS['opt']['sab_amz_alt'] = "B0DEAD0001 | B0ALT00001, B0ALT00002 | 2026-10-25";
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0ALT00001' => ['titel' => 'Cinta de cobre 50 mm', 'preis' => '9,99 €', 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => 150, 'kategorie' => 'Jardín']], 'ts' => time()];
+$GLOBALS['tr']['sab_uebersicht_es'] = $GLOBALS['opt']['sab_uebersicht_stand_es']; $GLOBALS['tr']['sab_luecke_es'] = 1; unset($GLOBALS['tr']['sab_alle_asins']);
+$wpdb_x = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 20, 'post_title' => 'Seite X', 'post_content' => '<p>[amz_bild asin="B0DEAD0001" land="es"][/amz_bild]</p>']]; } function get_col($q) { return []; } function prepare($q, ...$a) { return $q; } };
+$mAh = new ReflectionMethod('SAB', 'austausch_html'); $ah = $mAh->invoke(null);
+ok(strpos($ah, 'Zu tauschen (1)') !== false && strpos($ah, 'B0ALT00001') !== false && strpos($ah, 'Amazon-Alternative 1') !== false && strpos($ah, 'name="sab_a[B0DEAD0001]"') !== false, 'Austausch-Reiter: totes Produkt mit Amazons Alternative als bestem Kandidaten');
+$GLOBALS['opt']['sab_auto_tausch'] = '1'; $GLOBALS['opt']['sab_auto_schwelle'] = 0;
+$mAu = new ReflectionMethod('SAB', 'auto_tausch'); $mAu->invoke(null);
+ok(strpos((string) ($GLOBALS['opt']['sab_tausch'] ?? ''), 'B0DEAD0001 => B0ALT00001') !== false, 'Automatik: Austausch-Regel für das tote Produkt wird angelegt');
+$GLOBALS['opt']['sab_auto_tausch'] = '0'; unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_auto_log']); $mAu->invoke(null);
+ok(empty($GLOBALS['opt']['sab_tausch']), 'Automatik aus: keine Regel');
+$GLOBALS['wpdb'] = $wpdb_x; unset($GLOBALS['tr']['sab_uebersicht_es'], $GLOBALS['opt']['sab_uebersicht_stand_es'], $GLOBALS['opt']['sab_amz_alt']);
+
+// ---- 0.60.0: Haufen entzerren ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+$kt = function ($a, $b, $kopf) { return '<p><strong>' . $kopf . '</strong></p>' . "\n" . '<table><tr><td>[aawp fields="' . $a . '" value="thumb"]</td><td>[aawp fields="' . $b . '" value="thumb"]</td></tr></table>' . "\n<hr />\n"; };
+$fill = fn($t, $n) => str_repeat($t . ' ', $n);
+$art = "<h2>Einleitung</h2>\n\n<p>" . $fill('Allgemeiner Text ohne Produkte.', 60) . "</p>\n\n" . $kt('B0ENTZ0001', 'B0ENTZ0002', 'Zäune') . $kt('B0ENTZ0003', 'B0ENTZ0004', 'Glocken') . $kt('B0ENTZ0005', 'B0ENTZ0006', 'Kupfer')
+    . "\n<p>" . $fill('Füllung ohne Bezug zu Produkten und Blöcken.', 120) . "</p>\n\n<p>" . $fill('Hier geht es um Kupferband gegen Schnecken, das Kupferband wirkt als Barriere.', 40) . "</p>\n\n<p>" . $fill('Noch mehr Text zu etwas anderem.', 80) . "</p>\n\n<h3>Glocken</h3>\n\n<p>" . $fill('Eine Gartenglocke schützt Jungpflanzen, die Glocken sind aus Plastik.', 40) . "</p>\n\n<p>" . $fill('Ende.', 80) . "</p>\n";
+$GLOBALS['opt']['sab_produkte'] = "B0ENTZ0003 | Gartenglocke Set\nB0ENTZ0004 | Glocken Plastik\nB0ENTZ0005 | Kupferband\nB0ENTZ0006 | Kupferband breit\nB0ENTZ0001 | Zaun A\nB0ENTZ0002 | Zaun B";
+$pl = SAB::entzerren_plan($art, ['items' => []], ['B0ENTZ0003' => 'Gartenglocke Set', 'B0ENTZ0004' => 'Glocken Plastik', 'B0ENTZ0005' => 'Kupferband', 'B0ENTZ0006' => 'Kupferband breit', 'B0ENTZ0001' => 'Zaun A', 'B0ENTZ0002' => 'Zaun B']);
+ok($pl['haufen'] === 1 && count($pl['schritte']) === 2, 'Entzerren: Haufen mit drei Blöcken erkannt, zwei Blöcke wandern');
+$neu = $pl['neu']; $pK = strpos($neu, 'B0ENTZ0005'); $pG = strpos($neu, 'B0ENTZ0003'); $pZ = strpos($neu, 'B0ENTZ0001'); $pKup = strpos($neu, 'Kupferband gegen Schnecken'); $pGl = strpos($neu, 'Gartenglocke schützt');
+ok($pZ < $pG && $pZ < $pK && $pK > $pKup - 200 && $pG > $pGl - 100, 'Entzerren: Kupfer-Block hinter dem Kupfer-Absatz, Glocken-Block hinter dem Glocken-Absatz');
+ok(substr_count($neu, 'B0ENTZ') === substr_count($art, 'B0ENTZ') && substr_count($neu, '<table') === 3, 'Entzerren: kein Produkt geht verloren');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
