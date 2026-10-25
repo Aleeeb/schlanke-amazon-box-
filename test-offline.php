@@ -1082,4 +1082,10 @@ ok(SAB::attr_reparieren('<img src="https://a/b.jpg"> [amz_bild asin="B0822QM4B5"
 $mPt = new ReflectionMethod('SAB', 'platzhalter_im_tag'); $mPt->setAccessible(true);
 ok($mPt->invoke(null, '<img src="[amz_bild asin="B0822QM4B5"][/amz_bild]" alt="x">') !== '' && $mPt->invoke(null, '<p>Text [amz_bild asin="B0822QM4B5"][/amz_bild]</p><img src="a.jpg">') === '', 'Platzhalter im Tag erkannt, im Text nicht');
 
+// ---- 0.75.29: lange Artikel dürfen den Umbau nicht abbrechen ----
+$lang = str_repeat('<p>Ein langer Absatz mit viel Text ohne Klammern, damit der Artikel groß wird. ' . str_repeat('Wort ', 60) . '</p>', 1500) . '[amazon box="B0LANG0001"] und [amazon link="B0LANG0002"]Text[/amazon]';
+SAB::$umbau_abw = [];
+$ok_lang = true; try { [$ul] = SAB::umbau_text($lang); } catch (\Throwable $e) { $ok_lang = false; }
+ok($ok_lang && is_string($ul), 'Umbau: sehr langer Artikel bricht nicht mit Typfehler ab');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

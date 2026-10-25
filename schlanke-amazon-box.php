@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.28
+ * Version: 0.75.29
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.28';
+    const VERSION = '0.75.29';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3360,14 +3360,17 @@ final class SAB {
     public static function umbau_text(string $c, string $nur = ''): array {
         $fest = [];
         // bereits vorhandene Plugin-Platzhalter schützen
+        $c_orig = $c;
         $c = preg_replace_callback('#\[amz_(bild|produkt|link|ebay)\b[^\]]*\].*?\[/amz_\1\]#is', function ($m) use (&$fest) {
             // die Marke behält Produkt und Art, damit spätere Schritte (Nachbarhilfe) wissen, was dort stand
             $k = "\0SAB" . count($fest) . ($m[1] === 'link' ? '[amz_link' : '') . (preg_match('/asin=["\']?([A-Za-z0-9]{10})/', $m[0], $am) ? ' asin="' . strtoupper($am[1]) . '"' : '') . "\0"; $fest[$k] = $m[0]; return $k;
         }, $c);
+        if ($c === null) { $c = $c_orig; $fest = []; }
         self::$karten_n = 0;
-        $c = self::tabellen_zu_karten($c, $nur);
+        $c0 = $c; $c = self::tabellen_zu_karten($c, $nur); if (!is_string($c)) { $c = $c0; self::$umbau_abw[] = 'Schritt tabellen_zu_karten abgebrochen (PCRE-Grenze), Artikel nicht vollständig geprüft'; }
         // AAWP- und [amazon]-Platzhalter => Plugin-Platzhalter: fields+thumb => [amz_bild], box => [amz_produkt], link => [amz_link]; tracking_id bleibt als tag, image="2|3" als bild
-        $c = preg_replace_callback('#\[(aawp|amazon)\b([^\]]*)\](?:((?:(?!\[(?:aawp|amazon)\b).)*?)\[/\1\])?#is', function ($m) use ($nur) {
+        $vor_aawp = $c;
+        $c = preg_replace_callback('#\[(aawp|amazon)\b([^\]]*)\](?:([^\[]{0,1500})\[/\1\])?#is', function ($m) use ($nur) {
             $x = html_entity_decode($m[2]);
             $land = self::land('');
             if (!self::tag($land)) { return $m[0]; }
@@ -3394,9 +3397,10 @@ final class SAB {
             self::$karten_n++;
             return '[amz_bild asin="' . $asin . '" land="' . $land . '"' . $w . $bi . $tagattr . '][/amz_bild]';
         }, $c);
-        $c = self::kurzlink_spaltenhilfe($c);
-        $c = self::kurzlink_nachbarhilfe($c);
-        $c = self::tabellen_umbau($c, $nur);
+        if ($c === null) { $c = $vor_aawp; }   // PCRE-Fehler (zu langer Artikel): lieber nichts umbauen als abbrechen
+        $c0 = $c; $c = self::kurzlink_spaltenhilfe($c); if (!is_string($c)) { $c = $c0; self::$umbau_abw[] = 'Schritt kurzlink_spaltenhilfe abgebrochen (PCRE-Grenze), Artikel nicht vollständig geprüft'; }
+        $c0 = $c; $c = self::kurzlink_nachbarhilfe($c); if (!is_string($c)) { $c = $c0; self::$umbau_abw[] = 'Schritt kurzlink_nachbarhilfe abgebrochen (PCRE-Grenze), Artikel nicht vollständig geprüft'; }
+        $c0 = $c; $c = self::tabellen_umbau($c, $nur); if (!is_string($c)) { $c = $c0; self::$umbau_abw[] = 'Schritt tabellen_umbau abgebrochen (PCRE-Grenze), Artikel nicht vollständig geprüft'; }
         $n = 0; $skip = 0;
         $c = preg_replace_callback('#<a\b([^>]*)>(.*?)</a>#is', function ($m) use (&$n, &$skip, $nur) {
             if (!preg_match('#href=(["\'])(.*?)\1#is', $m[1], $h)) { return $m[0]; }
