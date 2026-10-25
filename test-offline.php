@@ -37,6 +37,7 @@ function wp_date($f, $t) { return date($f, $t); }
 require __DIR__ . '/schlanke-amazon-box.php';
 
 
+if (!function_exists("wpautop")) { function wpautop($t) { return $t; } }
 function do_shortcode_lite($t) {
     foreach (['amz_bild', 'amz_link'] as $sc) {
         $t = preg_replace_callback('#\[' . $sc . '\b([^\]]*)\](.*?)\[/' . $sc . '\]#is', function ($m) use ($sc) {
