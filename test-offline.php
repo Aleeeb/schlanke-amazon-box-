@@ -939,4 +939,6 @@ $mSl = new ReflectionMethod('SAB', 'such_link');
 ok(strpos($mSl->invoke(null, 'Valla metálica 4 m'), '/s?k=Valla%20met%C3%A1lica%204%20m') !== false, 'Suchlink enthält den Produkttitel');
 unset($GLOBALS['opt']['sab_such_kand']);
 
+$mT = new ReflectionMethod('SAB', 'tausch_dringlichkeit'); $mT->setAccessible(true);
+ok($mT->invoke(null, ['lieferbar' => false, 'preis' => ''], 20) === 100 && $mT->invoke(null, ['lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €', 'sterne' => 4.5], 85) === 0 && $mT->invoke(null, ['lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €'], 20) === 30, 'Dringlichkeit: nicht lieferbar 100, gutes Produkt 0, schwacher Score bis 30');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

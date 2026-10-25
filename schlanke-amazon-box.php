@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.70.6
+ * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.6
+ * Version: 0.70.7
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.6';
+    const VERSION = '0.70.7';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -681,6 +681,19 @@ final class SAB {
         if ($bonus !== 0 && $hinweis === '') { $hinweis = 'inkl. Bonus ' . ($bonus > 0 ? '+' : '') . $bonus; }
         if (self::unklar($x) && empty($x['trotz']) && $r !== null && $r <= 20000) { $hinweis = 'Schnittstelle prüfen: guter Rang, aber kein Angebot'; }
         return [max(-10, min(110, $score)), $hinweis, $det];
+    }
+
+    /**
+     * Wie dringend ein Produkt getauscht werden muss (0 bis 100), unabhängig davon, wie oft es verlinkt ist: nicht lieferbar, kein Preis oder Prime-Status
+     * unklar = 100; sonst bei schwachem Score bis etwa 70, bei sehr langer Lieferzeit 40, bei unter 3,5 Sternen 30; gute Produkte 0. Mal Seitenzahl ergibt die Priorität.
+     */
+    private static function tausch_dringlichkeit(array $x, int $score): int {
+        $nicht = empty($x['trotz']) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK' || ($x['preis'] ?? '') === '');
+        if ($nicht || (array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null)) { return 100; }
+        $d = $score < 35 ? (int) round((35 - $score) * 2) : 0;
+        if (isset($x['liefertage']) && $x['liefertage'] !== null && (float) $x['liefertage'] > 14) { $d = max($d, 40); }
+        if (isset($x['sterne']) && $x['sterne'] !== null && (float) $x['sterne'] < 3.5) { $d = max($d, 30); }
+        return min(100, $d);
     }
 
     /** Prime als Schildchen: blau mit Haken, bei „kein Prime“ grau und durchgestrichen, bei unbekannt gestrichelt (eigene Gestaltung, nicht das Amazon-Logo). */
@@ -2302,7 +2315,7 @@ final class SAB {
         foreach ($nv as $a) { $faelle[$a] = 'Nicht lieferbar'; }
         foreach ($p1x as $a) { $faelle[$a] = 'Priorität 1: Prime-Status unklar, vermutlich nicht verfügbar'; }
         foreach ($p2x as $a) { $faelle[$a] = 'Priorität 2: ' . ($grund2[$a] ?? 'schwach'); }
-        $gew = function ($a) use ($fund, $d, $p2x) { $n = array_sum(array_column($fund[$a] ?? [], 'n')); return in_array($a, $p2x, true) ? (100 - self::score((array) $d['items'][$a])[0]) * $n : 1000000 + $n; };
+        $gew = function ($a) use ($fund, $d, $p2x) { $n = array_sum(array_column($fund[$a] ?? [], 'n')); return in_array($a, $p2x, true) ? self::tausch_dringlichkeit((array) $d['items'][$a], self::score((array) $d['items'][$a])[0]) * $n : 1000000 + $n; };
         uksort($faelle, fn($a, $b) => $gew($b) <=> $gew($a));
         $h .= self::doppel_html((array) $d) . '<hr style="margin:2em 0">' . self::weg_html($weg, (array) $d, $fund, $trotz, $dp) . '<hr style="margin:2em 0">' . self::assistent_html(array_diff_key($faelle, array_flip($weg)), (array) $d, $empf, $fund, $dp) . '<hr style="margin:2em 0"><h3>Alle Problemprodukte als Liste</h3>';
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_neu">'
@@ -2536,7 +2549,7 @@ final class SAB {
 
     /** Kopf der Produkttabelle; ohne Markierungsspalten (Fav., Ers., Trotzdem) in den Produktgruppen. */
     private static function uebersicht_kopf(bool $marken): string {
-        $k = '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl" title="Provision laut Kategorie (Tabelle im Reiter Score) und geschätzter Betrag pro Verkauf">Prov.</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Auf wie vielen Seiten das Produkt verlinkt ist, wie oft insgesamt (Bild und Button zählen je einmal) und das Maximum auf einer Seite. Kurzlinks ohne ASIN werden nicht erkannt. „allgemein“ = auf mehr als 10 Seiten.">Seiten</th><th class="sab-zahl" title="Priorität zum Tauschen: (100 minus Score) mal Seiten. Hoch = schlechter Score auf vielen Seiten.">Prio.</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th title="Fester Bonus (oder Malus) in Punkten, wird zum Score addiert. Für Produkte, die du bewusst nach vorn stellen willst.">Bonus</th><th>Mehr</th></tr></thead><tbody>';
+        $k = '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl" title="Provision laut Kategorie (Tabelle im Reiter Score) und geschätzter Betrag pro Verkauf">Prov.</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Auf wie vielen Seiten das Produkt verlinkt ist, wie oft insgesamt (Bild und Button zählen je einmal) und das Maximum auf einer Seite. Kurzlinks ohne ASIN werden nicht erkannt. „allgemein“ = auf mehr als 10 Seiten.">Seiten</th><th class="sab-zahl" title="Priorität zum Tauschen = Dringlichkeit mal Seiten. Dringlichkeit 100: nicht lieferbar, kein Preis oder Prime-Status unklar. Sonst nur bei schwachem Score (unter 35), sehr langer Lieferzeit (über 14 Tage) oder unter 3,5 Sternen. Gute Produkte haben Priorität 0, egal wie oft sie vorkommen.">Prio.</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th title="Fester Bonus (oder Malus) in Punkten, wird zum Score addiert. Für Produkte, die du bewusst nach vorn stellen willst.">Bonus</th><th>Mehr</th></tr></thead><tbody>';
         return $marken ? $k : preg_replace('#<th title="Favorit.*?</th><th title="Ersetzen.*?</th><th title="Du hast.*?</th><th title="Fester Bonus.*?</th>#s', '', $k);
     }
 
@@ -2566,7 +2579,7 @@ final class SAB {
             $rang = isset($x['rang']) && $x['rang'] !== null ? '<span title="' . esc_attr((string) ($x['kategorie'] ?? '')) . '">' . number_format((int) $x['rang'], 0, ',', '.') . '</span>' : '–';
             $fs = $fund[$asin] ?? []; $ns = count($fs); $nl = array_sum(array_column($fs, 'n')); $mx = $fs ? max(array_column($fs, 'n')) : 0;
             $seiten = $ns ? '<span title="' . esc_attr($nl . ' Links insgesamt, höchstens ' . $mx . ' auf einer Seite') . '"><strong>' . $ns . '</strong> <small>(' . $nl . '×' . ($mx > 2 ? ', max <b style="color:#a00">' . $mx . '</b>' : ', max ' . $mx) . ')</small>' . ($ns > 10 ? ' <span class="sab-chip">allgemein</span>' : '') . '</span>' : '0';
-            $prio = (100 - $sc) * $ns;
+            $dr = self::tausch_dringlichkeit($x, $sc); $prio = $dr * $ns;
             $k = $kz[$asin] ?? null; $nk = $k ? (int) $k['n'] : 0;
             $klick = $k ? '<span title="Bild ' . (int) $k['b'] . ', Text/Button ' . (int) $k['x'] . '; zurückgekommen ' . (int) $k['z'] . '">' . $nk . '</span>' : '0';
             $mehr = '<details><summary>Details</summary><div style="max-width:420px;font-size:12px">'
