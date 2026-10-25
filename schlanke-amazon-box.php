@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.72.1
+ * Version: 0.73.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,8 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.72.1';
+    const VERSION = '0.73.0';
+    const NAME = '1a Amazon Box';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -926,8 +927,8 @@ final class SAB {
     /** Mails nach dem Lauf: neue Ausfälle, Schnittstelle tot, Wochenbericht. */
     private static function pruef_abschluss(array $lauf): void {
         $gesamt = count($lauf['liste']);
-        if ($lauf['neu']) { self::alarm('ausfall', 'Neue Produkte nicht mehr verfügbar', "Seit dem letzten Lauf ausgefallen:\n  " . implode("\n  ", $lauf['neu']) . "\n\nDas Plugin setzt, wo eine Ersatzliste hinterlegt ist, automatisch den nächsten Ersatz ein.\nÜbersicht: Seitenleiste > 1a Amazon Box > Ausfälle und Wartung"); }
-        if ($gesamt > 0 && $lauf['unerreichbar'] === $gesamt) { self::alarm('api', 'Amazon-Schnittstelle antwortet nicht', "Beim täglichen Lauf konnte kein einziges Produkt von Amazon abgerufen werden.\nMögliche Ursachen: Zugangsdaten (Credentials) abgelaufen, Amazon-Konto gesperrt oder Amazon vorübergehend nicht erreichbar.\nDie Seiten zeigen weiter die zwischengespeicherten Daten, solange sie vorhanden sind.\nPrüfen: Seitenleiste > 1a Amazon Box > Übersicht."); }
+        if ($lauf['neu']) { self::alarm('ausfall', 'Neue Produkte nicht mehr verfügbar', "Seit dem letzten Lauf ausgefallen:\n  " . implode("\n  ", $lauf['neu']) . "\n\nDas Plugin setzt, wo eine Ersatzliste hinterlegt ist, automatisch den nächsten Ersatz ein.\nÜbersicht: Seitenleiste > " . self::NAME . " > Ausfälle und Wartung"); }
+        if ($gesamt > 0 && $lauf['unerreichbar'] === $gesamt) { self::alarm('api', 'Amazon-Schnittstelle antwortet nicht', "Beim täglichen Lauf konnte kein einziges Produkt von Amazon abgerufen werden.\nMögliche Ursachen: Zugangsdaten (Credentials) abgelaufen, Amazon-Konto gesperrt oder Amazon vorübergehend nicht erreichbar.\nDie Seiten zeigen weiter die zwischengespeicherten Daten, solange sie vorhanden sind.\nPrüfen: Seitenleiste > " . self::NAME . " > Übersicht."); }
         self::auto_tausch();
         self::auto_tausch();
         self::wochenmail();
@@ -1069,7 +1070,7 @@ final class SAB {
         if ($an === '') { return; }
         $z = (array) get_option('sab_alarm_zuletzt', []);
         if (time() - (int) ($z[$art] ?? 0) < 20 * HOUR_IN_SECONDS) { return; }
-        if (wp_mail($an, '1a Amazon Box: ' . $betreff, $text)) { $z[$art] = time(); update_option('sab_alarm_zuletzt', $z, false); }
+        if (wp_mail($an, self::NAME . ': ' . $betreff, $text)) { $z[$art] = time(); update_option('sab_alarm_zuletzt', $z, false); }
     }
 
     /** Wöchentliche Mail (Adresse unter Einstellungen): Klicks der letzten 7 Tage, Ausfälle, Seiten mit vielen Links. Läuft im täglichen Lauf, nie beim Seitenaufruf. */
@@ -1084,12 +1085,12 @@ final class SAB {
         }
         $warn = array_filter((array) get_option('sab_linkwarnung', []), fn($x) => ($x['n'] ?? 0) >= self::LINK_WARNUNG);
         $text = self::wochenmail_text($k, (array) get_option('sab_ausfall', []), $warn);
-        if (wp_mail($an, '1a Amazon Box: Wochenbericht', $text)) { update_option('sab_mail_zuletzt', time(), false); }
+        if (wp_mail($an, self::NAME . ': Wochenbericht', $text)) { update_option('sab_mail_zuletzt', time(), false); }
     }
 
     private static function wochenmail_text(array $klicks, array $ausfall, array $warn): string {
         $namen = self::produkte();
-        $z = ['1a Amazon Box: die letzten 7 Tage', ''];
+        $z = [self::NAME . ': die letzten 7 Tage', ''];
         $z[] = 'Klicks auf Amazon-Links: ' . array_sum(array_map(fn($r) => (int) $r['n'], $klicks));
         foreach (array_slice($klicks, 0, 5) as $r) { $z[] = '  ' . (int) $r['n'] . ' x ' . (($namen[$r['asin']] ?? '') ?: $r['asin']); }
         $z[] = '';
@@ -1298,7 +1299,7 @@ final class SAB {
                 }
             }
             if (function_exists('current_user_can') && current_user_can('manage_options')) {
-                echo '<div style="position:fixed;left:8px;bottom:8px;z-index:99999;background:#fff3cd;border:1px solid #d4a017;color:#000;padding:6px 10px;font:13px sans-serif">1a Amazon Box: ' . (int) $n . ' Partnerlinks auf dieser Seite (Warnung ab ' . self::LINK_WARNUNG . ')</div>';
+                echo '<div style="position:fixed;left:8px;bottom:8px;z-index:99999;background:#fff3cd;border:1px solid #d4a017;color:#000;padding:6px 10px;font:13px sans-serif">' . esc_html(self::NAME) . ': ' . (int) $n . ' Partnerlinks auf dieser Seite (Warnung ab ' . self::LINK_WARNUNG . ')</div>';
             }
         }
     }
@@ -2143,15 +2144,20 @@ final class SAB {
                 if ($ids) { $units[] = [$off, $off + strlen($t), count($ids)]; }
             }
         }
-        if (preg_match_all('#\[(amz_bild|amz_produkt|amz_karte|amz_karten|aawp)\b[^\]]*\]#i', $c, $sm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        $kbl = [];   // [amz_karten]-Blöcke: eine Einheit mit so vielen Produkten, wie Karten darin stehen (nicht zusätzlich die einzelnen Karten zählen)
+        if (preg_match_all('#\[amz_karten\].*?\[/amz_karten\]#is', $c, $km, PREG_OFFSET_CAPTURE)) {
+            foreach ($km[0] as [$t, $off]) { $n = preg_match_all('#\[amz_karte\b#i', $t); $kbl[] = [$off, $off + strlen($t)]; $units[] = [$off, $off + strlen($t), max(1, $n)]; }
+        }
+        if (preg_match_all('#\[(amz_bild|amz_produkt|amz_karte|aawp)\b[^\]]*\]#i', $c, $sm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
             foreach ($sm as $x) {
                 $p = (int) $x[0][1]; $in = false;
                 foreach ($tabellen as [$ts, $te]) { if ($p >= $ts && $p <= $te) { $in = true; break; } }
+                foreach ($kbl as [$ks, $ke]) { if ($p >= $ks && $p < $ke) { $in = true; break; } }
                 if ($in || !preg_match($karte, $x[0][0])) { continue; }
                 $end = $p + strlen($x[0][0]);
                 $z = stripos($c, '[/' . $x[1][0] . ']', $end);
                 if ($z !== false && $z - $end < 3000) { $end = $z + strlen($x[1][0]) + 3; }
-                $units[] = [$p, $end, strtolower($x[1][0]) === 'amz_karten' ? 2 : 1];
+                $units[] = [$p, $end, 1];
             }
         }
         usort($units, fn($a, $b) => $a[0] <=> $b[0]);
@@ -3517,6 +3523,48 @@ final class SAB {
         return $e;
     }
 
+    /**
+     * Zerlegt einen Block mit mehr als zwei Produkten (Kartenblock oder Tabelle mit mehr als zwei Produktspalten) in Paare:
+     * das erste Paar bleibt, die weiteren werden eigene Zweierblöcke (ein übrig bleibendes einzelnes Produkt wird ein Einerblock).
+     * @return array{bleibt:string,extra:string[]}|null
+     */
+    private static function entz_zerlegen(string $html): ?array {
+        if (preg_match('#^(.*?)\[amz_karten\](.*)\[/amz_karten\](.*)$#is', $html, $m)) {
+            $teile = preg_split('#(?=\[amz_karte\b)#i', $m[2], -1, PREG_SPLIT_NO_EMPTY);
+            if (!$teile || count($teile) <= self::HAUFEN_MAX) { return null; }
+            $paare = array_chunk($teile, 2); $extra = [];
+            foreach (array_slice($paare, 1) as $pp) { $extra[] = '[amz_karten]' . implode('', $pp) . '[/amz_karten]'; }
+            return ['bleibt' => $m[1] . '[amz_karten]' . implode('', $paare[0]) . '[/amz_karten]' . $m[3], 'extra' => $extra];
+        }
+        if (preg_match('#^(.*?)(<table\b[^>]*>)(.*)</table>(.*)$#is', $html, $m) && stripos($m[3], '<table') === false && stripos($m[3], 'colspan') === false && stripos($m[3], 'rowspan') === false) {
+            if (!preg_match_all('#(<tr\b[^>]*>)(.*?)</tr>#is', $m[3], $rm, PREG_SET_ORDER)) { return null; }
+            $zeilen = []; $n = null;
+            foreach ($rm as $r) {
+                if (!preg_match_all('#(<t[dh]\b[^>]*>.*?</t[dh]>)#is', $r[2], $cm)) { return null; }
+                if ($n === null) { $n = count($cm[1]); } elseif ($n !== count($cm[1])) { return null; }
+                $zeilen[] = [$r[1], $cm[1]];
+            }
+            if ($n === null || $n <= self::HAUFEN_MAX) { return null; }
+            $tb = stripos($m[3], '<tbody') !== false;
+            $bau = function (array $spalten) use ($zeilen, $m, $tb): string {
+                $o = '';
+                foreach ($zeilen as [$tr, $cells]) { $o .= $tr . implode('', array_map(fn($i) => $cells[$i], $spalten)) . '</tr>'; }
+                return $m[2] . ($tb ? '<tbody>' . $o . '</tbody>' : $o) . '</table>';
+            };
+            $paare = array_chunk(range(0, $n - 1), 2); $extra = [];
+            foreach (array_slice($paare, 1) as $pp) { $extra[] = $bau($pp); }
+            return ['bleibt' => $m[1] . $bau($paare[0]) . $m[4], 'extra' => $extra];
+        }
+        return null;
+    }
+
+    /** ASINs eines Blocks (ein Eintrag je Produkt). */
+    private static function entz_asins(string $html): array {
+        $re = '#(?:asin|fields|box|link|data-sab-asin)\s*=\s*["\']?([A-Z0-9]{10})\b|/(?:dp|gp/product|product)/([A-Z0-9]{10})\b#i'; $o = [];
+        if (preg_match_all($re, $html, $am, PREG_SET_ORDER)) { foreach ($am as $x) { $o[strtoupper(($x[1] ?? '') !== '' ? $x[1] : ($x[2] ?? ''))] = 1; } }
+        return array_keys($o);
+    }
+
     /** Stellen im Text, an denen ein Block stehen darf: nach einem Absatz, einer Überschrift oder Leerzeile, außerhalb von Tabellen, Listen, Bildunterschriften usw. @return int[] */
     private static function entz_stellen(string $c): array {
         $out = []; $tiefe = 0;
@@ -3546,16 +3594,33 @@ final class SAB {
             $cl[] = $i;
         }
         if ($cl) { $haufen[] = $cl; }
-        $bewegen = [];
+        $bewegen = []; $teilen = [];
         foreach ($haufen as $h) {
             $anz = 0; foreach ($h as $i) { $anz += max(1, count($u[$i]['asins'])); }
-            if ($anz > self::HAUFEN_MAX && count($h) > 1) { foreach (array_slice($h, 1) as $i) { $bewegen[] = $i; } }
+            if ($anz <= self::HAUFEN_MAX) { continue; }
+            foreach ($h as $k => $i) {
+                if ($k > 0) { $bewegen[] = $i; }
+                elseif (self::entz_zerlegen($u[$i]['html']) !== null) { $teilen[] = $i; }   // der erste Block bleibt, hat er mehr als zwei Produkte, wird er aufgeteilt
+            }
         }
-        $res = ['neu' => $c, 'schritte' => [], 'haufen' => count(array_filter($haufen, fn($h) => count($h) > 1))];
-        if (!$bewegen) { return $res; }
-        // Blöcke herausnehmen (von hinten nach vorn), Überreste nach Doppel-Trennlinien aufräumen
+        $res = ['neu' => $c, 'schritte' => [], 'haufen' => count(array_filter($haufen, fn($h) => count($h) > 1 || self::entz_zerlegen($u[$h[0]]['html']) !== null))];
+        if (!$bewegen && !$teilen) { return $res; }
+        // Blöcke herausnehmen bzw. verkleinern (von hinten nach vorn), Überreste nach Doppel-Trennlinien aufräumen
         $rest = $c; $raus = [];
-        foreach (array_reverse($bewegen) as $i) { $raus[$i] = $u[$i]; $rest = substr($rest, 0, $u[$i]['s']) . substr($rest, $u[$i]['e']); }
+        $ops = [];
+        foreach ($bewegen as $i) {
+            $z = self::entz_zerlegen($u[$i]['html']);
+            if ($z) { foreach ($z['extra'] as $n => $ex) { $raus[sprintf('%05d-%02d', $i, $n + 1)] = array_merge($u[$i], ['html' => $ex, 'asins' => self::entz_asins($ex)]); } $raus[sprintf('%05d-00', $i)] = array_merge($u[$i], ['html' => $z['bleibt'], 'asins' => self::entz_asins($z['bleibt'])]); }
+            else { $raus[sprintf('%05d-00', $i)] = $u[$i]; }
+            $ops[] = [$u[$i]['s'], $u[$i]['e'], ''];
+        }
+        foreach ($teilen as $i) {
+            $z = self::entz_zerlegen($u[$i]['html']);
+            foreach ($z['extra'] as $n => $ex) { $raus[sprintf('%05d-%02d', $i, $n + 1)] = array_merge($u[$i], ['html' => $ex, 'asins' => self::entz_asins($ex)]); }
+            $ops[] = [$u[$i]['s'], $u[$i]['e'], $z['bleibt']];
+        }
+        usort($ops, fn($a, $b) => $b[0] <=> $a[0]);
+        foreach ($ops as [$os, $oe, $ersatz]) { $rest = substr($rest, 0, $os) . $ersatz . substr($rest, $oe); }
         $rest = preg_replace('#(<hr\s*/?>\s*){2,}#i', '<hr />' . "\n", $rest);
         $stellen = self::entz_stellen($rest); $plaetze = [];   // bereits vergebene Stellen
         // Wörter, die fast überall im Artikel vorkommen (z. B. „Pflanzen“, „Schnecken“), sagen nichts über die passende Stelle
@@ -3749,7 +3814,7 @@ final class SAB {
         $zeilen = []; foreach (array_merge($regeln, $neu_regeln) as $a => $b) { $zeilen[] = $a . ' => ' . $b; }
         update_option('sab_tausch', implode("\n", $zeilen), false); update_option('sab_auto_log', array_slice($log, -50), false); delete_transient('sab_alle_asins');
         $t = []; foreach ($neu_regeln as $a => $b) { $t[] = '  ' . $a . ' => ' . $b; }
-        self::alarm('auto', 'Produkte automatisch ersetzt', "Das Plugin hat Produkte ersetzt, die Amazon nicht mehr kennt (Austausch-Regeln):\n" . implode("\n", $t) . "\n\nRückgängig: Seitenleiste > 1a Amazon Box > Produkte und Ersatzlisten > Austausch-Regeln, Zeile löschen.");
+        self::alarm('auto', 'Produkte automatisch ersetzt', "Das Plugin hat Produkte ersetzt, die Amazon nicht mehr kennt (Austausch-Regeln):\n" . implode("\n", $t) . "\n\nRückgängig: Seitenleiste > " . self::NAME . " > Produkte und Ersatzlisten > Austausch-Regeln, Zeile löschen.");
     }
 
     /** Zu Produkten, die Amazon nicht mehr kennt: Ersatz-ASIN eingeben oder den Vorschlag (Favorit mit hohem Score, passende Art) übernehmen; tauscht in allen Artikeln, danach öffnet sich die Vorschau neu. */
@@ -3877,7 +3942,7 @@ final class SAB {
         wp_add_inline_script('sab-block', self::BLOCK_JS);
         register_block_type('sab/produkt', [
             'api_version'     => 2,
-            'title'           => 'Amazon-Produkt (1a Amazon Box)',
+            'title'           => 'Amazon-Produkt (' . self::NAME . ')',
             'category'        => 'widgets',
             'icon'            => 'cart',
             'attributes'      => ['quelle' => ['type' => 'string', 'default' => ''], 'darstellung' => ['type' => 'string', 'default' => 'karte'], 'text' => ['type' => 'string', 'default' => '']],
@@ -3924,10 +3989,10 @@ JS;
 
     /** Eigener Punkt "1a Amazon Box" in der Seitenleiste des Backends, mit einem Untermenü je Reiter. */
     public static function menue(): void {
-        add_menu_page('1a Amazon Box', '1a Amazon Box', 'manage_options', 'sab', [__CLASS__, 'seite'], 'dashicons-cart', 58);
+        add_menu_page(self::NAME, self::NAME, 'manage_options', 'sab', [__CLASS__, 'seite'], 'dashicons-cart', 58);
         foreach (self::TABS as $k => $name) {
             // „Produkte und Ersatzlisten“ (Kurznamen, Austauschregeln) wird kaum noch gebraucht: nicht im Menü, nur über den Link unten im Austausch-Reiter
-            add_submenu_page($k === 'produkte' ? null : 'sab', $name . ' - 1a Amazon Box', $name, 'manage_options', $k === 'uebersicht' ? 'sab' : 'sab-' . $k, [__CLASS__, 'seite']);
+            add_submenu_page($k === 'produkte' ? null : 'sab', $name . ' - ' . self::NAME, $name, 'manage_options', $k === 'uebersicht' ? 'sab' : 'sab-' . $k, [__CLASS__, 'seite']);
         }
     }
 
@@ -4141,7 +4206,7 @@ JS;
             }
         }
 
-        echo '<div class="wrap"><h1>1a Amazon Box <small style="font-size:12px;color:#666">Version ' . esc_html(self::VERSION) . '</small></h1>';
+        echo '<div class="wrap"><h1>' . esc_html(self::NAME) . ' <small style="font-size:12px;color:#666">Version ' . esc_html(self::VERSION) . '</small></h1>';
         if ($meldung) { echo '<div class="notice notice-success"><p>' . esc_html($meldung) . '</p></div>'; }
         echo '<h2 class="nav-tab-wrapper">';
         foreach ($tabs as $k => $name) {

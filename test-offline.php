@@ -980,4 +980,23 @@ $_POST = ['post' => 1, 'ord' => 1, 'asin' => 'B0AAAAAAA1', 'neu' => 'B0DDDDDDD1'
 SAB::ajax_stelle_tausch();
 ok(substr_count($GLOBALS['gespeichert'] ?? '', 'B0DDDDDDD1') === 2 && substr_count($GLOBALS['gespeichert'] ?? '', 'B0BBBBBBB1') === 1, 'Stelle tauschen: Bild und Link derselben Zelle zusammen');
 unset($GLOBALS['pc'], $_POST);
+
+// ---- 0.73.0: Viererblöcke aufteilen, Kartenblock nicht doppelt zählen ----
+$lor = function ($n) { return substr(str_repeat('Texto sobre babosas y jardines. ', intval($n / 32) + 1), 0, $n); };
+$kk = function ($a) { return '[amz_karte asin="' . $a . '" land="es" titel="Producto ' . $a . '" ebay="1"]'; };
+$zw = '<p>' . $lor(2800) . '</p><h3>Vallas</h3>[amz_karten]' . $kk('B0VIER0001') . $kk('B0VIER0002') . '[/amz_karten]<p>' . $lor(6000) . '</p>';
+ok(SAB::haufen_funde($zw) === [], 'Haufen: ein Zweier-Kartenblock ist kein Haufen');
+$v4 = '<p>' . $lor(2800) . '</p><h3>Vallas</h3>[amz_karten]' . $kk('B0VIER0001') . $kk('B0VIER0002') . $kk('B0VIER0003') . $kk('B0VIER0004') . '[/amz_karten]<p>' . $lor(9000) . '</p><h2>Otro</h2><p>' . $lor(9000) . '</p>';
+ok(count(SAB::haufen_funde($v4)) === 1 && SAB::haufen_funde($v4)[0]['anzahl'] === 4, 'Haufen: Kartenblock mit vier Karten = vier Produkte, ein Haufen');
+$pv = SAB::entzerren_plan($v4, ['items' => []], []);
+ok(count($pv['schritte']) === 1 && $pv['haufen'] === 1, 'Entzerren: Viererblock liefert einen Zweierblock zum Verschieben');
+ok(substr_count($pv['neu'], '[amz_karten]') === 2 && substr_count($pv['neu'], '[amz_karte ') === 4 && preg_match_all('#\[amz_karten\](\[amz_karte [^\]]*\]){2}\[/amz_karten\]#', $pv['neu']) === 2, 'Entzerren: zwei Zweierblöcke, vier Karten, keine verloren');
+$p1 = strpos($pv['neu'], 'B0VIER0001'); $p3 = strpos($pv['neu'], 'B0VIER0003');
+ok($p3 - $p1 >= 3000, 'Entzerren: der neue Zweierblock steht weit vom alten entfernt');
+ok($mTx->invoke(null, $v4) === $mTx->invoke(null, $pv['neu']), 'Entzerren: Text bleibt identisch (Viererblock)');
+$tz = fn($a, $b, $c2, $d2) => '<table><tbody><tr><td>[amz_bild asin="' . $a . '"]</td><td>[amz_bild asin="' . $b . '"]</td><td>[amz_bild asin="' . $c2 . '"]</td><td>[amz_bild asin="' . $d2 . '"]</td></tr><tr><td>[amz_link asin="' . $a . '"]Eins[/amz_link]</td><td>[amz_link asin="' . $b . '"]Zwei[/amz_link]</td><td>[amz_link asin="' . $c2 . '"]Drei[/amz_link]</td><td>[amz_link asin="' . $d2 . '"]Vier[/amz_link]</td></tr></tbody></table>';
+$vt = '<p>' . $lor(2800) . '</p>' . $tz('B0TAB40001', 'B0TAB40002', 'B0TAB40003', 'B0TAB40004') . '<p>' . $lor(9000) . '</p><h2>Otro</h2><p>' . $lor(9000) . '</p>';
+$pt = SAB::entzerren_plan($vt, ['items' => []], []);
+ok(count($pt['schritte']) === 1 && substr_count($pt['neu'], '<table') === 2 && substr_count($pt['neu'], 'B0TAB4000') === substr_count($vt, 'B0TAB4000'), 'Entzerren: Tabelle mit vier Spalten wird in zwei Zweiertabellen geteilt');
+ok(preg_match_all('#<tr><td>\[amz_bild asin="B0TAB4000[0-9]"\]</td><td>\[amz_bild asin="B0TAB4000[0-9]"\]</td></tr>#', $pt['neu']) === 2, 'Entzerren: jede neue Tabelle hat zwei Spalten');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
