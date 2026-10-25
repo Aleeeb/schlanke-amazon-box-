@@ -1,15 +1,15 @@
 <?php
 /**
- * Plugin Name: 1A Affiliate Helper
+ * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.74.0
+ * Version: 0.75.0
  * Requires PHP: 7.4
  */
 
 if (!defined('ABSPATH')) { exit; }
 
 /*
- * Zugangsdaten: am einfachsten unter Seitenleiste > 1A Affiliate Helper eintragen.
+ * Zugangsdaten: am einfachsten unter Seitenleiste > 1AB Affiliate Help eintragen.
  * Sicherer (nicht in der Datenbank) ist die wp-config.php, sie hat dann Vorrang:
  *
  * define('SAB_CLIENT_ID',     'Credential ID');
@@ -27,8 +27,10 @@ if (!defined('ABSPATH')) { exit; }
  * Rückfall: Steht zwischen [amz_produkt]...[/amz_produkt] bzw. [amz_bild]...[/amz_bild] der bisherige HTML-Code,
  * erscheint genau dieser Code, wenn Amazon nicht antwortet oder kein Produkt der Liste brauchbar ist.
  *
- * Einstellungen: Seitenleiste > 1A Affiliate Helper (Produkte mit Kurznamen, Ersatzlisten, Ausfälle).
+ * Einstellungen: Seitenleiste > 1AB Affiliate Help (Produkte mit Kurznamen, Ersatzlisten, Ausfälle).
  */
+
+if (!class_exists('SAB', false)) {   // Doppel-Ladeschutz: alte und neue Fassung dürfen nebeneinander aktiv sein, die zuerst geladene gewinnt
 
 final class SAB {
 
@@ -45,8 +47,8 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.74.0';
-    const NAME = '1A Affiliate Helper';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
+    const VERSION = '0.75.0';
+    const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -105,7 +107,7 @@ final class SAB {
 
     // ---------- Zugang ----------
 
-    // Zugangsdaten: wp-config.php hat Vorrang, sonst die Eingabemaske unter Seitenleiste > 1A Affiliate Helper
+    // Zugangsdaten: wp-config.php hat Vorrang, sonst die Eingabemaske unter Seitenleiste > 1AB Affiliate Help
 
     private static function zugang(): array {
         return [
@@ -3987,7 +3989,7 @@ JS;
         return '<div class="sab-karten" style="grid-template-columns:repeat(' . max(1, min(4, count($teile))) . ',minmax(0,1fr))">' . implode('', $teile) . '</div>';
     }
 
-    /** Eigener Punkt "1A Affiliate Helper" in der Seitenleiste des Backends, mit einem Untermenü je Reiter. */
+    /** Eigener Punkt "1AB Affiliate Help" in der Seitenleiste des Backends, mit einem Untermenü je Reiter. */
     public static function menue(): void {
         add_menu_page(self::NAME, self::NAME, 'manage_options', 'sab', [__CLASS__, 'seite'], 'dashicons-cart', 58);
         foreach (self::TABS as $k => $name) {
@@ -4449,3 +4451,7 @@ JS;
     }
 }
 SAB::init();
+
+} else {
+    add_action('admin_notices', function () { echo '<div class="notice notice-warning"><p>1AB Affiliate Help: Die Fassung in „' . esc_html(basename(__DIR__)) . '“ wurde nicht geladen, weil schon eine andere Fassung des Plugins aktiv ist. Bitte nur eine davon aktiv lassen.</p></div>'; });
+}
