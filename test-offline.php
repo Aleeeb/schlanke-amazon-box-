@@ -1042,4 +1042,12 @@ $mIds = new ReflectionMethod('SAB', 'ids_scan'); $mIds->setAccessible(true);
 $ids = $mIds->invoke(null);
 ok(isset($ids['amazon']['cpflanzhilfe-21'], $ids['amazon']['schneckenhilfe-21'], $ids['amazon']['abc-21'], $ids['ebay']['5338780569'], $ids['ebay']['5338619899']), 'IDs im Inhalt: Amazon-tag, tracking_id, eBay-campid gefunden');
 $GLOBALS['wpdb'] = $wpdb_ids;
+// ---- 0.75.10: verwaiste Produkte entfernen ----
+$GLOBALS['opt']['sab_produkte'] = "B0ORPHAN01 | Alt\nB0KEEPKEEP1 | Neu";
+$GLOBALS['opt']['sab_slots'] = "s1: B0ORPHAN01, B0KEEPKEEP1\ns2: B0ORPHAN01";
+$GLOBALS['opt']['sab_tausch'] = "B0ORPHAN01 => B0KEEPKEEP1";
+$mV = new ReflectionMethod('SAB', 'verwaiste_entfernen'); $mV->setAccessible(true);
+$nv = $mV->invoke(null, ['B0ORPHAN01']);
+ok($nv === 1 && strpos($GLOBALS['opt']['sab_produkte'], 'ORPHAN') === false && strpos($GLOBALS['opt']['sab_produkte'], 'KEEPKEEP1') !== false && $GLOBALS['opt']['sab_slots'] === 's1: B0KEEPKEEP1' && $GLOBALS['opt']['sab_tausch'] === '', 'Verwaiste Produkte: aus allen Listen entfernt, Rest bleibt');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

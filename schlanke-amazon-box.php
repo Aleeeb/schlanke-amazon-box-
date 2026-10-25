@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.9
+ * Version: 0.75.10
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.9';
+    const VERSION = '0.75.10';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1691,6 +1691,34 @@ final class SAB {
         return $h;
     }
 
+    /** Entfernt ASINs aus allen Listen (Produkte, Handdaten, Slots, Tests, Gruppen, Tausch, Alternativen, Kandidaten, Markierungen); Rückgabe: Zahl der entfernten ASINs. */
+    private static function verwaiste_entfernen(array $asins): int {
+        if (!$asins) { return 0; }
+        $set = array_flip($asins);
+        $schluessel = ['sab_produkte', 'sab_manuell', 'sab_amz_alt', 'sab_such_kand'];   // erste Spalte = ASIN: ganze Zeile weg
+        foreach ($schluessel as $o) {
+            $neu = [];
+            foreach (preg_split('/\R/', (string) get_option($o, '')) as $z) { $k = self::asin(trim(explode('|', $z)[0])); if ($k !== '' && isset($set[$k])) { continue; } $neu[] = $z; }
+            update_option($o, implode("\n", $neu), false);
+        }
+        $neu = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_tausch', '')) as $z) { if (preg_match('/\b(' . implode('|', array_map('preg_quote', $asins)) . ')\b/i', $z)) { continue; } $neu[] = $z; }
+        update_option('sab_tausch', implode("\n", $neu), false);
+        foreach (['sab_slots' => ',', 'sab_tests' => '|', 'sab_gruppen' => ','] as $o => $tr) {   // Liste hinter dem Namen: ASIN herausnehmen, leere Zeilen weg
+            $neu = [];
+            foreach (preg_split('/\R/', (string) get_option($o, '')) as $z) {
+                if (strpos($z, ':') === false) { $neu[] = $z; continue; }
+                [$name, $liste] = explode(':', $z, 2);
+                $teile = array_values(array_filter(array_map('trim', explode($tr, $liste)), fn($t) => $t !== '' && !isset($set[self::asin($t)])));
+                if ($teile) { $neu[] = trim($name) . ': ' . implode($tr === '|' ? ' | ' : ', ', $teile); }
+            }
+            update_option($o, implode("\n", $neu), false);
+        }
+        foreach (['sab_marken', 'sab_trotz', 'sab_bonus'] as $o) { update_option($o, array_diff_key((array) get_option($o, []), $set), false); }
+        delete_transient('sab_alle_asins');
+        return count($asins);
+    }
+
     /** Sprung zur Stelle: ?sab_zeige=ASIN öffnet den Artikel und markiert die Stelle (nur für angemeldete Redakteure). */
     public static function zeige_skript(): void {
         $a = isset($_GET['sab_zeige']) ? preg_replace('/[^A-Za-z0-9]/', '', (string) wp_unslash($_GET['sab_zeige'])) : '';   // ASIN oder Kurzlink-Kennung (Groß- und Kleinschreibung zählt)
@@ -2935,7 +2963,7 @@ final class SAB {
                 continue;
             }
             $sc = self::score($x)[0];
-            $zl[] = ['asin' => $asin, 'prio' => self::tausch_dringlichkeit($x, $sc) * $ns, 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
+            $zl[] = ['asin' => $asin, 'prio' => $ns > 0 ? self::tausch_dringlichkeit($x, $sc) * $ns : ($sc >= 60 ? $sc - 50 : -1), 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
         }
         usort($zl, fn($a, $b) => [$b['prio'], $b['dr'], $a['sc']] <=> [$a['prio'], $a['dr'], $b['sc']]);   // wichtigste zuerst, dann dringlichste, dann schwächster Score
         $gesamt = count($zl);
@@ -2950,7 +2978,7 @@ final class SAB {
         $pager .= ' pro Seite: ';
         foreach ([10, 25, 50, 100, 'alle'] as $o) { $pager .= '<a href="' . esc_url(add_query_arg(['sab_s' => 1, 'sab_pp' => $o])) . '"' . (($o === 'alle' ? ($pp === max(1, $gesamt) && ($_GET['sab_pp'] ?? '') === 'alle') : $pp === $o) ? ' style="font-weight:700"' : '') . '>' . $o . '</a> '; }
         $pager .= '</p>';
-        $nb = $unbenutzt ? '<details style="margin:10px 0"><summary>' . count($unbenutzt) . ' Produkt(e), die Amazon nicht kennt und die auf keiner Seite stehen (nicht in der Tabelle)</summary><p><code>' . esc_html(implode(', ', $unbenutzt)) . '</code></p></details>' : '';
+        $nb = $unbenutzt ? '<details style="margin:10px 0"><summary>' . count($unbenutzt) . ' Produkt(e), die Amazon nicht kennt und die auf keiner Seite stehen (nicht in der Tabelle)</summary><p><code>' . esc_html(implode(', ', $unbenutzt)) . '</code></p><input type="hidden" name="sab_orphan_liste" value="' . esc_attr(implode(',', $unbenutzt)) . '"><p><button class="button" name="sab_orphans" value="1" onclick="return confirm(\'' . count($unbenutzt) . ' verwaiste Produkte aus allen Listen entfernen? Das lässt sich nicht rückgängig machen.\')">Verwaiste Produkte entfernen (' . count($unbenutzt) . ')</button></p></details>' : '';
         $h = str_replace('<!--SABPAGER-->', $pager, $h);
         return $h . '</tbody></table>' . $pager . $liste_feld . $nb . self::bild_gross_html() . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Wartung“.</span></p>';
     }
@@ -4434,6 +4462,11 @@ JS;
                 update_option('sab_gruppen', sanitize_textarea_field(wp_unslash($_POST['sab_gruppen'] ?? '')), false);
                 delete_transient('sab_alle_asins');
                 $meldung = 'Gruppen gespeichert.';
+            } elseif ($form === 'marken' && !empty($_POST['sab_orphans'])) {
+                $kand = array_values(array_filter(array_map([__CLASS__, 'asin'], explode(',', (string) ($_POST['sab_orphan_liste'] ?? '')))));
+                $fund = self::fundstellen($kand);
+                $weg = array_values(array_filter($kand, fn($a) => empty($fund[$a])));   // nur, was wirklich in keinem Artikel steht
+                $meldung = self::verwaiste_entfernen($weg) . ' verwaiste Produkte entfernt.';
             } elseif ($form === 'marken' && !empty($_POST['sab_markieren'])) {
                 $gezeigt = array_filter(array_map([__CLASS__, 'asin'], explode(',', (string) ($_POST['sab_zeile_liste'] ?? ''))));   // nur die angezeigte Seite überschreiben, Markierungen der anderen Seiten bleiben
                 $behalte = fn($opt) => array_diff_key((array) get_option($opt, []), array_flip($gezeigt));
