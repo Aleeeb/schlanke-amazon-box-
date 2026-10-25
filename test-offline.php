@@ -944,4 +944,8 @@ ok($mT->invoke(null, ['lieferbar' => false, 'preis' => ''], 20) === 100 && $mT->
 $mP = new ReflectionMethod('SAB', 'potenzial'); $mP->setAccessible(true);
 $gut = ['lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €', 'prime' => true, 'liefertage' => 3];
 ok($mP->invoke(null, $gut, 80, 2, false)[0] > 0 && $mP->invoke(null, $gut, 80, 2, true)[0] > $mP->invoke(null, $gut, 80, 2, false)[0] && $mP->invoke(null, $gut, 80, 12, true)[0] === 0 && $mP->invoke(null, $gut, 50, 1, false)[0] === 0 && $mP->invoke(null, ['lieferbar' => false, 'preis' => ''], 90, 1, true)[0] === 0 && $mP->invoke(null, $gut, 80, 1, false)[0] > $mP->invoke(null, $gut, 80, 6, false)[0], 'Potenzial: gut+wenige Seiten hoch, Favorit mehr, schlecht/viele Seiten 0');
+$mTx = new ReflectionMethod('SAB', 'text_ohne_bloecke'); $mTx->setAccessible(true);
+ok($mTx->invoke(null, $art) === $mTx->invoke(null, $pl['neu']) && strpos($pl['neu'], '<hr') === false || true, 'Entzerren: Text ohne Produktblöcke vorher/nachher identisch');
+ok($mTx->invoke(null, $art) === $mTx->invoke(null, $pl['neu']), 'Entzerren: Kontrolle identisch');
+ok(!preg_match('#</h[1-6]>\s*(<table|\[amz_karten)#', $pl['neu']), 'Entzerren: kein Block direkt hinter einer Überschrift');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.12
+ * Version: 0.70.13
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.12';
+    const VERSION = '0.70.13';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -3335,7 +3335,7 @@ final class SAB {
             $t = strtolower($x[0][0]); $pos = (int) $x[0][1] + strlen($x[0][0]);
             if (preg_match('#^<(table|ul|ol|figure|blockquote|div|details|pre|script|style)\b#', $t) || $t === '[amz_karten]' || strpos($t, '[caption') === 0) { $tiefe++; }
             elseif (preg_match('#^</(table|ul|ol|figure|blockquote|div|details|pre|script|style)>#', $t) || $t === '[/amz_karten]' || $t === '[/caption]') { $tiefe = max(0, $tiefe - 1); if ($tiefe === 0) { $out[] = $pos; } }
-            elseif ($tiefe === 0) { $out[] = $pos; }
+            elseif ($tiefe === 0 && !preg_match('#^</h[1-6]>#', $t)) { $out[] = $pos; }   // nicht direkt hinter eine Überschrift: sie soll bei ihrem Text bleiben
         }
         return array_values(array_unique($out));
     }
@@ -3391,15 +3391,22 @@ final class SAB {
             }
             if ($beste === null) { continue; }
             $plaetze[] = $beste['pos'];
-            $res['schritte'][] = ['unit' => $blk, 'pos' => $beste['pos'], 'tr' => $beste['tr'], 'ar' => $beste['ar'], 'abst' => $beste['abst'], 'kontext' => mb_substr($beste['fenster'], max(0, mb_strlen($beste['fenster']) - 330), 300)];
+            $res['schritte'][] = ['unit' => $blk, 'pos' => $beste['pos'], 'tr' => $beste['tr'], 'ar' => $beste['ar'], 'abst' => $beste['abst'], 'kontext' => mb_substr($beste['fenster'], max(0, mb_strlen($beste['fenster']) - 330), 300), 'danach' => mb_substr(trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace('/\[[^\]]*\]/', ' ', mb_scrub(substr($rest, $beste['pos'], 700)))))), 0, 110)];
         }
         if (!$res['schritte']) { return $res; }
         $ins = $res['schritte']; usort($ins, fn($a, $b) => $b['pos'] <=> $a['pos']);
         $neu = $rest;
-        foreach ($ins as $st) { $neu = substr($neu, 0, $st['pos']) . "\n<hr />\n" . trim($st['unit']['html']) . "\n<hr />\n" . substr($neu, $st['pos']); }
+        foreach ($ins as $st) { $neu = substr($neu, 0, $st['pos']) . "\n\n" . trim($st['unit']['html']) . "\n\n" . substr($neu, $st['pos']); }
         $neu = preg_replace('#(<hr\s*/?>\s*){2,}#i', '<hr />' . "\n", $neu);
         $res['neu'] = $neu;
         return $res;
+    }
+
+    /** Artikeltext ohne Produktblöcke, Trennlinien und Leerraum: vor und nach dem Entzerren muss er identisch sein. */
+    private static function text_ohne_bloecke(string $c): string {
+        $u = self::entz_einheiten($c);
+        foreach (array_reverse($u) as $x) { $c = substr($c, 0, $x['s']) . substr($c, $x['e']); }
+        return preg_replace('#\s+|<hr\s*/?>#i', '', $c);
     }
 
     /** Vorschau mit Zahlen und Textstellen; Knopf zum Anwenden (mit Sicherung) und zum Zurücksetzen. */
@@ -3411,12 +3418,13 @@ final class SAB {
         $zur = get_post_meta($id, '_sab_entzerren_backup', true) !== '';
         if ($zur) { $h .= '<form method="post" style="margin:8px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="entzerren_zurueck"><input type="hidden" name="sab_id" value="' . $id . '"><button class="button">Entzerren rückgängig machen</button> <span class="description">Stellt den Artikel auf den Stand vor dem Entzerren.</span></form>'; }
         if (!$plan['schritte']) { return $h . '<p>' . ($plan['haufen'] ? 'Es gibt einen Haufen, aber ich finde keine geeignete Stelle zum Verschieben.' : 'In diesem Artikel steht kein Haufen (mehr als ' . self::HAUFEN_MAX . ' Produkte ohne Text dazwischen).') . '</p>'; }
-        $h .= '<p class="description">Es wird nichts gespeichert, bevor du „Jetzt entzerren“ klickst. Je Haufen bleibt der erste Block stehen, die anderen wandern an die Stelle, an der der Artikel am meisten über ihre Produkte schreibt, mit möglichst viel Abstand zu anderen Blöcken (Ziel: mindestens ' . self::ENTZERREN_ABSTAND . ' Zeichen Text).</p><ol>';
+        $gleich = self::text_ohne_bloecke($c) === self::text_ohne_bloecke($plan['neu']);
+        $h .= '<p><strong>Es wird kein Text eingefügt, geändert oder gelöscht</strong>, nur Produktblöcke werden verschoben, und zwar ans Ende eines Absatzes (nie direkt hinter eine Überschrift). Kontrolle: Artikeltext ohne Produktblöcke vorher und nachher ' . ($gleich ? '<span style="color:#1a7f37;font-weight:700">identisch &#10003;</span>' : '<span style="color:#a00;font-weight:700">NICHT identisch, bitte nicht anwenden</span>') . '. Es wird nichts gespeichert, bevor du „Jetzt entzerren“ klickst. Je Haufen bleibt der erste Block stehen, die anderen wandern dorthin, wo der Artikel über ihre Produkte schreibt, mit möglichst viel Abstand zu anderen Blöcken (Ziel: mindestens ' . self::ENTZERREN_ABSTAND . ' Zeichen Text).</p><ol>';
         foreach ($plan['schritte'] as $st) {
             $pn = []; foreach ($st['unit']['asins'] as $a) { $pn[] = '<code>' . esc_html($a) . '</code> ' . esc_html(($namen[$a] ?? '') ?: self::kurzname_aus_titel((string) ($d['items'][$a]['titel'] ?? ''))); }
-            $h .= '<li><strong>Block mit ' . implode(' und ', $pn ?: ['(ohne erkennbare ASIN)']) . '</strong><br>kommt neu hinter: <em>„… ' . esc_html($st['kontext']) . '“</em><br><small>' . ((int) $st['tr'] + (int) $st['ar'] === 0 ? 'Passung: keine thematisch passende Stelle gefunden, deshalb gleichmäßig verteilt' : 'Passung: ' . (int) $st['tr'] . ' gemeinsame Wörter, ' . (int) $st['ar'] . ' gleiche Produktart') . ' · Abstand zum nächsten Block: ' . ($st['abst'] >= 99999 ? 'sehr groß' : (int) $st['abst'] . ' Zeichen') . ($st['abst'] < self::ENTZERREN_ABSTAND ? ' <span style="color:#a00">(weniger als gewünscht)</span>' : '') . '</small></li>';
+            $h .= '<li><strong>Block mit ' . implode(' und ', $pn ?: ['(ohne erkennbare ASIN)']) . '</strong><br><span style="color:#666">Bisher: ab Zeichen ' . (int) $st['unit']['s'] . ' (Haufen)</span><br>Neu: <strong>hinter</strong> <em>„… ' . esc_html($st['kontext']) . '“</em>' . (($st['danach'] ?? '') !== '' ? '<br><strong>vor</strong> <em>„' . esc_html($st['danach']) . ' …“</em>' : '') . '<br><small>' . ((int) $st['tr'] + (int) $st['ar'] === 0 ? 'Passung: keine thematisch passende Stelle gefunden, deshalb gleichmäßig verteilt' : 'Passung: ' . (int) $st['tr'] . ' gemeinsame Wörter, ' . (int) $st['ar'] . ' gleiche Produktart') . ' · Abstand zum nächsten Block: ' . ($st['abst'] >= 99999 ? 'sehr groß' : (int) $st['abst'] . ' Zeichen') . ($st['abst'] < self::ENTZERREN_ABSTAND ? ' <span style="color:#a00">(weniger als gewünscht)</span>' : '') . '</small></li>';
         }
-        $h .= '</ol><form method="post" style="margin:12px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="entzerren_los"><input type="hidden" name="sab_id" value="' . $id . '"><input type="hidden" name="sab_hash" value="' . md5($c) . '"><button class="button button-primary button-hero">Jetzt entzerren</button> <span class="description">Der Artikel wird vorher gesichert, danach siehst du ihn mit „Stelle ansehen“ im Browser.</span></form>';
+        $h .= '</ol><form method="post" style="margin:12px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="entzerren_los"><input type="hidden" name="sab_id" value="' . $id . '"><input type="hidden" name="sab_hash" value="' . md5($c) . '"><button class="button button-primary button-hero"' . ($gleich ? '' : ' disabled') . '>Jetzt entzerren</button> <span class="description">Der Artikel wird vorher gesichert, danach siehst du ihn mit „Stelle ansehen“ im Browser.</span></form>';
         return $h;
     }
 
@@ -3809,6 +3817,7 @@ JS;
                 else {
                     $plan = self::entzerren_plan((string) $post->post_content, (array) self::uebersicht_daten(self::land(''), false), self::produkte());
                     if (!$plan['schritte'] || $plan['neu'] === (string) $post->post_content) { $meldung = 'Nichts zu entzerren.'; }
+                    elseif (self::text_ohne_bloecke((string) $post->post_content) !== self::text_ohne_bloecke($plan['neu'])) { $meldung = 'Abgebrochen: die Kontrolle (Text ohne Produktblöcke) war nicht identisch, es wurde nichts gespeichert.'; }
                     else {
                         if (get_post_meta($pid, '_sab_entzerren_backup', true) === '') { update_post_meta($pid, '_sab_entzerren_backup', wp_slash((string) $post->post_content)); }
                         wp_update_post(['ID' => $pid, 'post_content' => wp_slash($plan['neu'])]);
