@@ -1033,4 +1033,12 @@ ok(strpos($aus, '[amz_bild asin="B0AAAAAAA1" land="de" breite="360" tag="cpflanz
 ok(strpos($aus, '[amz_produkt asin="B0BBBBBBB1" land="de"]') !== false && strpos($aus, '[amz_link asin="B0CCCCCCC1" land="de" tag="cpflanzhilfe-21"]Angebot bei Amazon[/amz_link]') !== false, 'Umbau: box => amz_produkt, link mit title => amz_link');
 ok(strpos($aus, 'bild="2"') !== false && strpos($aus, '[amz_link asin="B0EEEEEEE1" land="de"]Zum Zaun[/amz_link]') !== false && strpos($aus, '[amz_produkt asin="B0FFFFFFF1"') !== false && strpos($aus, '[amazon') === false && strpos($aus, '[aawp') === false, 'Umbau: image=2, umschlossenes link, kein Rest');
 unset($GLOBALS['opt']['sab_tags_extra']);
+
+// ---- 0.75.4: IDs im Inhalt ----
+$wpdb_ids = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 1, 'post_title' => 'A', 'post_content' => '[amazon link="B0AAAAAAA1" tracking_id="cpflanzhilfe-21" /] <a href="https://www.amazon.de/dp/B0AAAAAAA1?tag=schneckenhilfe-21">x</a> [amz_link asin="B0AAAAAAA1" tag="abc-21"]t[/amz_link] <a href="https://www.ebay.de/sch/i.html?_nkw=x&amp;campid=5338780569">e</a> campid=5338619899']]; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } function get_col($q) { return []; } };
+$mIds = new ReflectionMethod('SAB', 'ids_scan'); $mIds->setAccessible(true);
+$ids = $mIds->invoke(null);
+ok(isset($ids['amazon']['cpflanzhilfe-21'], $ids['amazon']['schneckenhilfe-21'], $ids['amazon']['abc-21'], $ids['ebay']['5338780569'], $ids['ebay']['5338619899']), 'IDs im Inhalt: Amazon-tag, tracking_id, eBay-campid gefunden');
+$GLOBALS['wpdb'] = $wpdb_ids;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

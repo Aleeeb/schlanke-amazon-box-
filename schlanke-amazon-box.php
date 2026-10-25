@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.3
+ * Version: 0.75.4
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.3';
+    const VERSION = '0.75.4';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1636,6 +1636,49 @@ final class SAB {
            . 'function mk(e){var o=e.getAttribute("data-sab-ord");if(!o||seen[o]){return}seen[o]=1;var box=e.closest(".sab-karte,.sab-produkt,td")||e.parentNode;if(getComputedStyle(box).position==="static"){box.style.position="relative"}'
            . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b)}'
            . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}})();</script>';
+    }
+
+
+    /** Durchsucht alle Artikel nach Partner-IDs (Amazon: tag=, tracking_id; eBay: campid) und zählt Stellen und Artikel. @return array{amazon:array,ebay:array} */
+    private static function ids_scan(): array {
+        global $wpdb; $out = ['amazon' => [], 'ebay' => []];
+        if (!isset($wpdb)) { return $out; }
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND (post_content LIKE '%tag=%' OR post_content LIKE '%tracking_id%' OR post_content LIKE '%campid%')", ARRAY_A);
+        foreach ((array) $rows as $r) {
+            $c = html_entity_decode((string) $r['post_content']);
+            $f = [];
+            if (preg_match_all('/\btracking_id=["\']?([A-Za-z0-9][A-Za-z0-9\-]{2,39})/', $c, $m)) { foreach ($m[1] as $i) { $f['amazon'][$i][] = (int) $r['ID']; } }
+            if (preg_match_all('/\btag=["\']([A-Za-z0-9][A-Za-z0-9\-]{2,39}-\d{2})["\']/', $c, $m)) { foreach ($m[1] as $i) { $f['amazon'][$i][] = (int) $r['ID']; } }
+            if (preg_match_all('/[?&;]tag=([A-Za-z0-9][A-Za-z0-9\-]{2,39}-\d{2})\b/', $c, $m)) { foreach ($m[1] as $i) { $f['amazon'][$i][] = (int) $r['ID']; } }
+            if (preg_match_all('/\bcampid=["\']?(\d{8,12})/', $c, $m)) { foreach ($m[1] as $i) { $f['ebay'][$i][] = (int) $r['ID']; } }
+            foreach ($f as $art => $ids) { foreach ($ids as $i => $pids) { $o = &$out[$art][$i]; $o = $o ?? ['stellen' => 0, 'artikel' => []]; $o['stellen'] += count($pids); foreach ($pids as $pid) { $o['artikel'][$pid] = (string) $r['post_title']; } unset($o); } }
+        }
+        foreach ($out as &$l) { uasort($l, fn($a, $b) => $b['stellen'] <=> $a['stellen']); }
+        return $out;
+    }
+
+    /** Liste der im Inhalt gefundenen IDs; markiert, welche schon in den Einstellungen stehen, und übernimmt die übrigen auf Knopfdruck. */
+    private static function ids_html(): string {
+        $sc = self::ids_scan();
+        $am_bekannt = array_values(self::tags());
+        foreach (preg_split('/\R/', (string) get_option('sab_tags_extra', '')) as $z) { $z = trim(preg_split('/[\s|=,]+/', trim($z))[0] ?? ''); if ($z !== '') { $am_bekannt[] = $z; } }
+        $eb_bekannt = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_ebay_ids', '')) as $z) { $z = trim(preg_split('/[\s|=,]+/', trim($z))[0] ?? ''); if ($z !== '') { $eb_bekannt[] = $z; } }
+        $h = '<h2>Im Inhalt gefundene Partner-IDs</h2><p class="description">Das Plugin hat alle Artikel und Seiten nach Partner-IDs durchsucht. Eingetragene IDs sind grün markiert. „Übernehmen“ trägt die übrigen unten bei „Weitere Partner-IDs“ beziehungsweise „eBay-Kampagnen-IDs“ ein; die Standard-ID bleibt unverändert.</p>';
+        $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="einstellungen"><input type="hidden" name="sab_form" value="ids_uebernehmen">';
+        $neu = 0;
+        foreach (['amazon' => 'Amazon (tag, tracking_id)', 'ebay' => 'eBay (campid)'] as $art => $titel) {
+            $h .= '<h3>' . esc_html($titel) . '</h3>';
+            if (!$sc[$art]) { $h .= '<p>Keine gefunden.</p>'; continue; }
+            $h .= '<table class="widefat striped" style="max-width:760px"><thead><tr><th>ID</th><th>Stellen</th><th>Artikel</th><th>Stand</th></tr></thead><tbody>';
+            foreach ($sc[$art] as $id => $d) {
+                $bek = in_array((string) $id, $art === 'amazon' ? $am_bekannt : $eb_bekannt, true); if (!$bek) { $neu++; }
+                $h .= '<tr><td><code>' . esc_html((string) $id) . '</code></td><td>' . (int) $d['stellen'] . '</td><td>' . count($d['artikel']) . '</td><td>' . ($bek ? '<span style="color:#1a7f37;font-weight:700">eingetragen</span>' : '<span style="color:#b36b00;font-weight:700">noch nicht eingetragen</span>') . '</td></tr>';
+            }
+            $h .= '</tbody></table>';
+        }
+        $h .= '<p><button class="button"' . ($neu ? '' : ' disabled') . '>Fehlende IDs übernehmen' . ($neu ? ' (' . $neu . ')' : '') . '</button></p></form>';
+        return $h;
     }
 
     /** Sprung zur Stelle: ?sab_zeige=ASIN öffnet den Artikel und markiert die Stelle (nur für angemeldete Redakteure). */
@@ -4300,6 +4343,15 @@ JS;
                     update_option('sab_tausch', implode("\n", $zeilen), false); delete_transient('sab_alle_asins');
                     $meldung = 'Rückgängig: ' . $alt . ' erscheint wieder.';
                 }
+            } elseif ($form === 'ids_uebernehmen') {
+                $sc = self::ids_scan(); $am = []; $eb = [];
+                $a0 = array_values(self::tags()); foreach (preg_split('/\R/', (string) get_option('sab_tags_extra', '')) as $z) { $z = trim(preg_split('/[\s|=,]+/', trim($z))[0] ?? ''); if ($z !== '') { $a0[] = $z; } }
+                $e0 = []; foreach (preg_split('/\R/', (string) get_option('sab_ebay_ids', '')) as $z) { $z = trim(preg_split('/[\s|=,]+/', trim($z))[0] ?? ''); if ($z !== '') { $e0[] = $z; } }
+                foreach ($sc['amazon'] as $id => $d) { if (!in_array((string) $id, $a0, true)) { $am[] = $id . ' (' . $d['stellen'] . ' Stellen)'; } }
+                foreach ($sc['ebay'] as $id => $d) { if (!in_array((string) $id, $e0, true)) { $eb[] = $id . ' (' . $d['stellen'] . ' Stellen)'; } }
+                if ($am) { update_option('sab_tags_extra', trim((string) get_option('sab_tags_extra', '') . "\n" . implode("\n", $am)), false); }
+                if ($eb) { update_option('sab_ebay_ids', trim((string) get_option('sab_ebay_ids', '') . "\n" . implode("\n", $eb)), false); }
+                $meldung = count($am) + count($eb) . ' IDs übernommen.';
             } elseif ($form === 'umbau_viele') {
                 $ids = array_slice(array_unique(array_map('intval', (array) ($_POST['sab_ids'] ?? []))), 0, self::UMBAU_PROSEITE);
                 self::$umbau_abw = []; self::$umbau_info = []; $ok = 0; $links = 0; $uebersprungen = [];
@@ -4476,6 +4528,7 @@ JS;
                 echo '</tbody></table><p class="description">Gezählt werden Klicks, nicht Seitenaufrufe. Die Artikel verteilen sich gleichmäßig auf die Varianten, vergleiche daher erst bei genügend Klicks.</p>';
             }
         } elseif ($tab === 'einstellungen') {
+            echo self::ids_html();
             echo '<form method="post">'; wp_nonce_field('sab_speichern');
             echo '<input type="hidden" name="sab_tab" value="einstellungen"><input type="hidden" name="sab_form" value="einstellungen">';
             $fest = defined('SAB_CLIENT_ID') && defined('SAB_CLIENT_SECRET');
