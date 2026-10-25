@@ -915,4 +915,14 @@ $ur = SAB::uebersicht_holen('es');
 $GLOBALS['bad'] = ''; $GLOBALS['wpdb'] = $wpdb_u;
 ok($ur['fehler'] === '' && isset($ur['items']['B0GUT00001']) && isset($ur['items']['B0GUT00002']) && !isset($ur['items']['B0SCHLECHT']) && in_array('B0SCHLECHT', (array) get_option('sab_ungueltige_asins', []), true), 'Abruf: ein ungültiger Eintrag lässt die anderen nicht scheitern und wird vermerkt');
 
+// ---- 0.61.0: passende Kandidaten, 5 % vor 3 %, Unpassendes aussortiert ----
+$mK = new ReflectionMethod('SAB', 'austausch_kandidaten');
+$GLOBALS['opt']['sab_produkte'] = "B0TOTZAUN1 | Valla metálica anticaracoles\nB0ELEK3PRO | Valla eléctrica anticaracoles 3\nB0ELEK5PRO | Valla eléctrica anticaracoles 5\nB0KATZE001 | Pinchos anti gatos"; unset($GLOBALS['opt']['sab_marken'], $GLOBALS['opt']['sab_claude_empf']);
+$GLOBALS['opt']['sab_amz_alt'] = "B0TOTZAUN1 | B0KATZE001, B0ELEK3PRO";
+$it = fn($titel, $pv) => ['titel' => $titel, 'preis' => '20 €', 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => 500, 'kategorie' => 'Jardín', 'provision' => $pv];
+$dd3 = ['items' => ['B0ELEK3PRO' => $it('Valla eléctrica anticaracoles', 3.0), 'B0ELEK5PRO' => $it('Valla eléctrica anticaracoles con batería', 5.0), 'B0KATZE001' => $it('Pinchos anti gatos 30x400 cm', 3.0)]];
+$kk = $mK->invoke(null, 'B0TOTZAUN1', 'Valla metálica anticaracoles', $dd3, [], []);
+$asins3 = array_column($kk['liste'], 'asin');
+ok(($asins3[0] ?? '') === 'B0ELEK5PRO' && in_array('B0ELEK3PRO', $asins3, true) && !in_array('B0KATZE001', $asins3, true) && count($kk['aussortiert']) >= 1, 'Kandidaten: 5 % vor 3 %, unpassendes Katzen-Produkt aussortiert');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
