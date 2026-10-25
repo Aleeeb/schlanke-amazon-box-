@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.1
+ * Version: 0.75.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.1';
+    const VERSION = '0.75.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -79,6 +79,7 @@ final class SAB {
         add_shortcode('amz_karte',   [__CLASS__, 'sc_karte']);
         add_shortcode('amz_hinweis', [__CLASS__, 'sc_hinweis']);
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
+        add_shortcode('amazon',      [__CLASS__, 'sc_aawp']);   // Alias wie bei AAWP (AAWP gewinnt, solange es aktiv ist)
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
         add_action('wp_ajax_sab_pruef_start',   [__CLASS__, 'ajax_pruef_start']);
         add_action('wp_ajax_sab_pruef_schritt', [__CLASS__, 'ajax_pruef_schritt']);
@@ -121,8 +122,11 @@ final class SAB {
         if (defined('SAB_TAGS')) { return SAB_TAGS; }
         $out = [];
         foreach (preg_split('/\R/', (string) get_option('sab_tags', '')) as $z) {
-            $t = array_map('trim', explode('=', $z, 2));
-            if (($t[0] ?? '') !== '' && ($t[1] ?? '') !== '') { $out[strtolower($t[0])] = $t[1]; }
+            $z = trim($z, " \t\"'");
+            if ($z === '') { continue; }
+            $t = array_map(fn($v) => trim($v, " \t\"'"), preg_split('/\s*[=:]\s*/', $z, 2));
+            if (count($t) === 2 && $t[0] !== '' && $t[1] !== '') { $out[strtolower($t[0])] = $t[1]; }
+            elseif (count($t) === 1 && preg_match('/^[A-Za-z0-9][A-Za-z0-9\-]{2,39}$/', $t[0])) { $out[self::standardland()] = $out[self::standardland()] ?? $t[0]; }   // nur die ID ohne „de=“: gilt für das Standardland
         }
         return $out;
     }
@@ -154,6 +158,17 @@ final class SAB {
         return isset(self::LAENDER[$land]) ? $land : 'de';
     }
 
+    private static $token_fehler = '';
+
+    /** Genaue Meldung, warum für ein Land nichts abgerufen werden kann (statt „Zugangsdaten oder Partner-ID fehlen“ für alles). */
+    private static function zugang_fehler(string $land, bool $token_ok): string {
+        [$id, $secret] = self::zugang();
+        if (!$id || !$secret) { return 'Zugangsdaten fehlen: ' . (!$id ? 'Credential ID leer' : '') . (!$id && !$secret ? ', ' : '') . (!$secret ? 'Credential Secret leer' : '') . ' (Einstellungen).'; }
+        if (!self::tag($land)) { $b = array_keys(self::tags()); return 'Für das Land „' . $land . '“ ist keine Partner-ID eingetragen' . ($b ? ' (eingetragen sind: ' . implode(', ', $b) . ')' : '') . '. Bitte in den Einstellungen eine Zeile <' . $land . '=deine-id-21> anlegen.'; }
+        if (!$token_ok) { return 'Amazon hat die Zugangsdaten abgelehnt' . (self::$token_fehler !== '' ? ' (' . self::$token_fehler . ')' : '') . '. Bitte Credential ID/Secret prüfen (Creators-API, keine PA-API-Schlüssel).'; }
+        return '';
+    }
+
     private static function tag(string $land): string {
         return self::tags()[$land] ?? '';
     }
@@ -176,9 +191,10 @@ final class SAB {
                 'scope'         => 'creatorsapi::default',
             ]),
         ]);
-        if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 200) { return ''; }
+        if (is_wp_error($r)) { self::$token_fehler = 'Verbindung: ' . $r->get_error_message(); return ''; }
+        if (wp_remote_retrieve_response_code($r) !== 200) { self::$token_fehler = 'HTTP ' . wp_remote_retrieve_response_code($r) . ' ' . mb_substr(preg_replace('/\s+/', ' ', wp_strip_all_tags((string) wp_remote_retrieve_body($r))), 0, 160); return ''; }
         $j = json_decode(wp_remote_retrieve_body($r), true);
-        if (empty($j['access_token'])) { return ''; }
+        if (empty($j['access_token'])) { self::$token_fehler = 'keine Antwort mit Zugriffsschlüssel'; return ''; }
         set_transient($key, $j['access_token'], max(60, (int) ($j['expires_in'] ?? 3600) - 120));
         return $j['access_token'];
     }
@@ -1188,7 +1204,7 @@ final class SAB {
     }
 
     public static function sc_produkt($a, $inhalt = ''): string {
-        $a = shortcode_atts(['slot' => '', 'asin' => '', 'land' => '', 'breite' => '', 'text' => ''], $a);
+        $a = shortcode_atts(['slot' => '', 'asin' => '', 'land' => '', 'breite' => '', 'text' => '', 'tag' => ''], $a);
         $slots = self::slots(); $tests = self::tests();
         $sn = $a['slot'];
         if ($a['asin'] !== '' && strlen(self::asin($a['asin'])) === 10) { $sn = 'asin-' . self::asin($a['asin']); $slots[$sn] = [self::asin($a['asin'])]; }  // [amz_produkt asin="..."] ohne Slot
@@ -1207,6 +1223,7 @@ final class SAB {
         $w = self::waehlen($liste, $land);
         if (!$w) { return (string) $inhalt; }
         $asin = $w['asin']; $p = $w['p'];
+        $p['link'] = self::lnk((string) $p['link'], (string) $a['tag']);
         if ($var && $asin !== $erste) { $var = ''; } // Variante ausgefallen: nicht als Variante zählen
         $name = (self::produkte()[$asin] ?? '') ?: $p['titel'];
         // Ein Produkt = ein Link: Bild, Name und Text stecken in EINEM <a>
@@ -1306,13 +1323,35 @@ final class SAB {
         }
     }
 
+
+    private static $tag_ueber = '';
+
+    /** Zusätzliche Partner-IDs (Feld „Weitere Partner-IDs“), die ein Platzhalter per tag="…" / tracking_id="…" verwenden darf. */
+    private static function tag_erlaubt(string $t): string {
+        $t = trim($t);
+        if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9\-]{2,39}$/', $t)) { return ''; }
+        $ok = array_values(self::tags());
+        foreach (preg_split('/\R/', (string) get_option('sab_tags_extra', '')) as $z) { $z = trim(preg_split('/[\s|=,]+/', trim($z))[0] ?? ''); if ($z !== '') { $ok[] = $z; } }
+        return in_array($t, $ok, true) ? $t : '';
+    }
+
+    /** Amazon-Link mit anderer Partner-ID als der Standard (nur erlaubte IDs). */
+    private static function lnk(string $link, string $t = ''): string {
+        $t = self::tag_erlaubt($t !== '' ? $t : self::$tag_ueber);
+        if ($t === '' || $link === '') { return $link; }
+        if (preg_match('/([?&])tag=[^&#]*/', $link)) { return preg_replace('/([?&])tag=[^&#]*/', '${1}tag=' . $t, $link, 1); }
+        return $link . (strpos($link, '?') === false ? '?' : '&') . 'tag=' . rawurlencode($t);
+    }
+
     public static function sc_bild($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'breite' => '', 'alt' => '', 'class' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'breite' => '', 'alt' => '', 'class' => '', 'tag' => '', 'bild' => ''], $a);
         $land = self::land($a['land']);
         $asin = self::getauscht(self::asin($a['asin']));
         $p = self::produkt($asin, $land);
         if (!self::brauchbar($p)) { return (string) $inhalt; }  // Rückfall: bisheriger HTML-Code
+        $p['link'] = self::lnk((string) $p['link'], (string) $a['tag']);
         [$bi, $bv] = self::bildvariante($asin, $p);
+        if (ctype_digit((string) $a['bild']) && (int) $a['bild'] >= 2 && !empty($p['bilder'][(int) $a['bild'] - 1])) { $bi = (int) $a['bild'] - 1; $bv = ''; }   // image="2" / "3" aus AAWP: zweites/drittes Bild
         $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $a['class']));
         return self::bild_html($p, $asin, $land, $a['alt'] ?: $p['titel'], (int) $a['breite'], $bv !== '' ? 'bild-' . $asin : '', $cls, $bi, $bv)
             ?: ($bi ? self::bild_html($p, $asin, $land, $a['alt'] ?: $p['titel'], (int) $a['breite'], '', $cls) : '')
@@ -1329,24 +1368,25 @@ final class SAB {
      * Tippfehler wie ein überzähliges Zeichen am Ende der ASIN werden abgeschnitten.
      */
     public static function sc_aawp($a, $inhalt = ''): string {
-        $a = shortcode_atts(['fields' => '', 'box' => '', 'link' => '', 'value' => 'thumb', 'image_size' => '', 'image_width' => '', 'image_height' => '', 'class' => '', 'land' => '', 'title' => ''], (array) $a);
+        $a = shortcode_atts(['fields' => '', 'box' => '', 'link' => '', 'value' => 'thumb', 'image_size' => '', 'image_width' => '', 'image_height' => '', 'class' => '', 'land' => '', 'title' => '', 'tracking_id' => '', 'image' => ''], (array) $a);
+        $tg = self::tag_erlaubt((string) $a['tracking_id']);
         $quelle = $a['box'] !== '' ? 'box' : ($a['link'] !== '' ? 'link' : 'fields');
         $out = '';
         foreach (explode(',', (string) $a[$quelle]) as $roh) {
             $asin = substr(self::asin($roh), 0, 10);
             if (strlen($asin) !== 10) { continue; }
             if ($quelle === 'box') {
-                $out .= self::sc_produkt(['asin' => $asin, 'land' => $a['land']], '');
+                $out .= self::sc_produkt(['asin' => $asin, 'land' => $a['land'], 'tag' => $tg], '');
             } elseif ($quelle === 'link') {
-                $out .= self::sc_link(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class']], (string) ($inhalt ?: $a['title']));
+                $out .= self::sc_link(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class'], 'tag' => $tg], (string) ($inhalt ?: $a['title']));
             } else {
                 $v = strtolower(trim((string) $a['value']));
                 if (in_array($v, ['thumb', 'image', 'thumbnail'], true)) {
-                    $out .= self::sc_bild(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class'], 'breite' => (string) min(self::AAWP_BILD_MAX, (int) $a['image_width'])], '');
+                    $out .= self::sc_bild(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class'], 'tag' => $tg, 'bild' => (string) $a['image'], 'breite' => (string) min(self::AAWP_BILD_MAX, (int) $a['image_width'])], '');
                 } elseif ($v === 'title') {
-                    $out .= self::sc_link(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class']], '');
+                    $out .= self::sc_link(['asin' => $asin, 'land' => $a['land'], 'class' => $a['class'], 'tag' => $tg], '');
                 } elseif ($v === 'button') {
-                    $out .= self::sc_link(['asin' => $asin, 'land' => $a['land'], 'class' => 'sab-text'], self::BUTTON_TEXT[self::land($a['land'])] ?? self::BUTTON_TEXT['de']);
+                    $out .= self::sc_link(['asin' => $asin, 'land' => $a['land'], 'class' => 'sab-text', 'tag' => $tg], self::BUTTON_TEXT[self::land($a['land'])] ?? self::BUTTON_TEXT['de']);
                 }
             }
         }
@@ -1396,15 +1436,15 @@ final class SAB {
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
     public static function sc_karte($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
         if (strlen($asin) !== 10) { return ''; }
         self::$genutzt = true; self::$karten = true;
         $p = self::produkt($asin, $land);
         // dein Titel aus dem Artikel bleibt stehen; nach einem Austausch kommt der Kurzname des neuen Produkts
         $titel = ($asin === $orig && trim((string) $a['titel']) !== '') ? esc_html(trim((string) $a['titel'])) : self::sc_titel(['asin' => $asin, 'land' => $land, 'kurz' => 70], '');
-        $bild = self::brauchbar($p) ? self::sc_bild(['asin' => $asin, 'land' => $land], '') : '';
-        $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn'], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
+        $bild = self::brauchbar($p) ? self::sc_bild(['asin' => $asin, 'land' => $land, 'tag' => $a['tag']], '') : '';
+        $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn', 'tag' => $a['tag']], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
         $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
         if ($ebay !== '') { $ebay = str_replace('<a ', '<a class="sab-karte-ebay" ', $ebay); }
         return '<div class="sab-karte">' . $bild . ($titel !== '' ? '<div class="sab-karte-titel">' . $titel . '</div>' : '') . $btn . $ebay . '</div>';
@@ -1469,7 +1509,7 @@ final class SAB {
 
     // ---------- Produkt an einer Stelle im Artikel tauschen (nur für angemeldete Redakteure, im Frontend) ----------
 
-    const ORD_TAGS = ['amz_produkt', 'amz_bild', 'amz_link', 'amz_karte', 'aawp'];
+    const ORD_TAGS = ['amz_produkt', 'amz_bild', 'amz_link', 'amz_karte', 'aawp', 'amazon'];
     private static $ord = 0;
     private static $ord_stack = [];
 
@@ -1611,7 +1651,7 @@ final class SAB {
     }
 
     public static function sc_link($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'class' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'class' => '', 'tag' => ''], $a);
         $orig = self::asin($a['asin']);
         $asin = self::getauscht($orig);
         $p = self::produkt($asin, self::land($a['land']));
@@ -1623,6 +1663,7 @@ final class SAB {
             if (!$asin || !$tag) { return esc_html($inhalt); }
             $link = 'https://' . self::LAENDER[$land][0] . '/dp/' . $asin . '?tag=' . rawurlencode($tag);
         }
+        $link = self::lnk($link, (string) $a['tag']);
         $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $a['class']));
         return '<a' . ($cls ? ' class="' . esc_attr($cls) . '"' : '') . ' href="' . esc_url($link) . '"' . self::a_attr($asin) . '>' . esc_html($inhalt ?: ($p['titel'] ?? '')) . '</a>';
     }
@@ -1750,12 +1791,12 @@ final class SAB {
         global $wpdb;
         if (isset($wpdb)) {
             $host = preg_quote(preg_replace('#^www\.#', '', self::LAENDER[self::land('')][0]), '#');   // nur Links ins Land dieser Webseite, sonst sähen Produkte anderer Länder „unbekannt“ aus
-            $rows = $wpdb->get_col("SELECT post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%amazon.%')");
+            $rows = $wpdb->get_col("SELECT post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%amazon.%')");
             foreach ((array) $rows as $c) {
                 if (preg_match_all('#https?://(?:www\.)?' . $host . '/(?:[^"\'\s<>]*/)?(?:dp|gp/product)/([A-Za-z0-9]{10})#', $c, $m)) { $alle = array_merge($alle, array_map('strtoupper', $m[1])); }   // feste Links
                 // alle Plugin-Shortcodes mit asin="..." (bild, link, produkt) und die AAWP-Zeilen (fields/box/link, mehrere ASINs mit Komma)
                 if (preg_match_all('/\[amz_(?:bild|link|produkt)[^\]]*asin="([A-Za-z0-9]{10})"/', $c, $m)) { $alle = array_merge($alle, array_map([__CLASS__, 'asin'], $m[1])); }
-                if (preg_match_all('/\[aawp\b[^\]]*\b(?:fields|box|link)="([^"]+)"/', $c, $m)) {
+                if (preg_match_all('/\[(?:aawp|amazon)\b[^\]]*\b(?:fields|box|link)=["\']([^"\']+)["\']/', $c, $m)) {
                     foreach ($m[1] as $liste) { foreach (explode(',', $liste) as $a) { $a = substr(self::asin($a), 0, 10); if (strlen($a) === 10) { $alle[] = $a; } } }
                 }
             }
@@ -1805,7 +1846,7 @@ final class SAB {
         $key = "sab_uebersicht_{$land}";
         delete_transient($key);
         $token = self::token($land); $tag = self::tag($land);
-        if (!$token || !$tag) { return ['fehler' => 'Zugangsdaten oder Partner-ID fehlen.', 'items' => []]; }
+        if (!$token || !$tag) { return ['fehler' => self::zugang_fehler($land, (bool) $token) ?: 'Zugangsdaten oder Partner-ID fehlen.', 'items' => []]; }
         $mp = self::LAENDER[$land][0]; $items = []; $fehler = '';
         $ressourcen = ['images.primary.large', 'images.variants.large', 'itemInfo.title',
                         'offersV2.listings.availability', 'offersV2.listings.price', 'offersV2.listings.isBuyBoxWinner',
@@ -2062,10 +2103,10 @@ final class SAB {
         global $wpdb;
         $out = [];
         if (!isset($wpdb) || !$asins) { return $out; }
-        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%amzn.to%')", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%amzn.to%')", ARRAY_A);
         foreach ((array) $rows as $r) {
             $c = (string) $r['post_content'];
-            $ohne = preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]|\[(?:amz_[a-z]+|aawp)\b[^\]]*\]#is', '', $c);   // ohne Plugin-Platzhalter: was übrig bleibt, sind feste Links
+            $ohne = preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]|\[(?:amz_[a-z]+|aawp|amazon)\b[^\]]*\]#is', '', $c);   // ohne Plugin-Platzhalter: was übrig bleibt, sind feste Links
             foreach ($asins as $a) {
                 $n = substr_count($c, $a);
                 if ($n > 0) { $out[$a][(int) $r['ID']] = ['titel' => (string) $r['post_title'], 'n' => $n, 'fest' => substr_count($ohne, $a)]; }
@@ -2133,7 +2174,7 @@ final class SAB {
      */
     public static function haufen_funde(string $c): array {
         $re = '#(?:asin|fields|box|link|data-sab-asin)\s*=\s*["\']?([A-Z0-9]{10})\b|/(?:dp|gp/product|product)/([A-Z0-9]{10})\b#i';
-        $karte = '#\[(?:amz_bild|amz_produkt|amz_karte|amz_karten)\b|\[aawp\b[^\]]*(?:thumb|image|box|grid|table)#i';
+        $karte = '#\[(?:amz_bild|amz_produkt|amz_karte|amz_karten)\b|\[(?:aawp|amazon)\b[^\]]*(?:thumb|image|box|grid|table)#i';
         $units = []; $tabellen = [];
         if (preg_match_all('#<table\b.*?</table>#is', $c, $tm, PREG_OFFSET_CAPTURE)) {
             foreach ($tm[0] as [$t, $off]) {
@@ -2150,7 +2191,7 @@ final class SAB {
         if (preg_match_all('#\[amz_karten\].*?\[/amz_karten\]#is', $c, $km, PREG_OFFSET_CAPTURE)) {
             foreach ($km[0] as [$t, $off]) { $n = preg_match_all('#\[amz_karte\b#i', $t); $kbl[] = [$off, $off + strlen($t)]; $units[] = [$off, $off + strlen($t), max(1, $n)]; }
         }
-        if (preg_match_all('#\[(amz_bild|amz_produkt|amz_karte|aawp)\b[^\]]*\]#i', $c, $sm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        if (preg_match_all('#\[(amz_bild|amz_produkt|amz_karte|aawp|amazon)\b[^\]]*\]#i', $c, $sm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
             foreach ($sm as $x) {
                 $p = (int) $x[0][1]; $in = false;
                 foreach ($tabellen as [$ts, $te]) { if ($p >= $ts && $p <= $te) { $in = true; break; } }
@@ -2262,7 +2303,7 @@ final class SAB {
         $h = '<h3>Doppelte Produkte</h3><p class="description">Dasselbe Produkt darf nie nebeneinander stehen und nicht zu nah nacheinander (weniger als ' . self::NAH . ' Zeichen Text dazwischen) erscheinen. Geprüft werden alle Artikel samt Austausch-Regeln.</p>';
         if (!isset($wpdb)) { return $h; }
         $regeln = self::tausch_regeln(); $namen = self::produkte(); $zeilen = []; $n = 0; $hfz = []; $hfn = 0; $nm0 = $namen;
-        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%')", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %')", ARRAY_A);
         foreach ((array) $rows as $r) {
             $c = (string) $r['post_content'];
             for ($i = 0; $i < 3 && $regeln; $i++) { $c = strtr($c, $regeln); }
@@ -2459,7 +2500,7 @@ final class SAB {
     private static function asin_rohantwort(string $eingabe): string {
         $liste = array_slice(array_filter(array_map([__CLASS__, 'asin'], preg_split('/[\s,;]+/', $eingabe))), 0, 10); $asin = implode(', ', $liste);
         $land = self::land(''); $mp = self::LAENDER[$land][0] ?? ''; $token = self::token($land); $tag = self::tag($land);
-        if (!$token || !$tag) { return 'Zugangsdaten oder Partner-ID fehlen.'; }
+        if (!$token || !$tag) { return self::zugang_fehler($land, (bool) $token) ?: 'Zugangsdaten oder Partner-ID fehlen.'; }
         $r = self::api_post([
             'timeout' => 15,
             'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
@@ -3005,7 +3046,7 @@ final class SAB {
         if (preg_match_all('#href=(["\'])(.*?)\1#is', $cell, $hs)) {
             foreach ($hs[2] as $h) { $u = self::umbau_url($h); if ($u) { $out[$u[1] . '|' . $u[0]] = [$u[1], $u[0]]; } }
         }
-        if (preg_match_all('#\[(?:aawp|amz_(?:bild|produkt|link))\b[^\]]*?(?:fields|asin|box)=(?:"|&\#34;|&quot;)?([A-Za-z0-9]{10})\b[^\]]*\]#i', $cell, $ms)) {
+        if (preg_match_all('#\[(?:aawp|amazon|amz_(?:bild|produkt|link))\b[^\]]*?(?:fields|asin|box)=(?:"|\'|&\#34;|&quot;)?([A-Za-z0-9]{10})\b[^\]]*\]#i', $cell, $ms)) {
             foreach ($ms[1] as $a) { $a = strtoupper($a); $l = self::land(''); $out[$a . '|' . $l] = [$a, $l]; }
         }
         return $out;
@@ -3088,7 +3129,7 @@ final class SAB {
                               . (!empty($q['customid']) ? ' customid="' . preg_replace('/[^A-Za-z0-9_-]/', '', (string) $q['customid']) . '"' : '')
                               . (!empty($q['_nkw']) ? ' suche="' . str_replace(['"', '[', ']'], '', trim((string) $q['_nkw'])) . '"' : '')
                               . (trim(strip_tags($e[4])) !== '' ? ' ebay_text="' . str_replace(['"', '[', ']'], '', trim(strip_tags($e[4]))) . '"' : '');
-                    } elseif ($titel === '' && stripos($in, '<a') === false && stripos($in, '<img') === false && stripos($in, '[aawp') === false) {
+                    } elseif ($titel === '' && stripos($in, '<a') === false && stripos($in, '<img') === false && stripos($in, '[aawp') === false && stripos($in, '[amazon') === false) {
                         $x = trim(html_entity_decode(strip_tags($in)));
                         if ($x !== '' && mb_strlen($x) <= 140) { $titel = $x; }
                     }
@@ -3504,16 +3545,16 @@ final class SAB {
     private static function entz_einheiten(string $c): array {
         $e = [];
         if (preg_match_all('#<table\b.*?</table>#is', $c, $tm, PREG_OFFSET_CAPTURE)) {
-            foreach ($tm[0] as [$t, $off]) { if (preg_match('#\[(?:amz_(?:bild|produkt|karte|karten|link|titel)|aawp)\b|amazon\.|amzn\.#i', $t)) { $e[] = ['s' => $off, 'e' => $off + strlen($t), 'html' => $t]; } }
+            foreach ($tm[0] as [$t, $off]) { if (preg_match('#\[(?:amz_(?:bild|produkt|karte|karten|link|titel)|aawp|amazon)\b|amazon\.|amzn\.#i', $t)) { $e[] = ['s' => $off, 'e' => $off + strlen($t), 'html' => $t]; } }
         }
         if (preg_match_all('#\[amz_karten\].*?\[/amz_karten\]#is', $c, $km, PREG_OFFSET_CAPTURE)) {
             foreach ($km[0] as [$t, $off]) { $e[] = ['s' => $off, 'e' => $off + strlen($t), 'html' => $t]; }
         }
-        if (preg_match_all('#\[(amz_bild|amz_produkt|amz_karte|aawp)\b[^\]]*\]#i', $c, $sm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {   // einzelne Platzhalter außerhalb von Tabellen und Kartenblöcken zählen wie in der Wartungsliste mit
+        if (preg_match_all('#\[(amz_bild|amz_produkt|amz_karte|aawp|amazon)\b[^\]]*\]#i', $c, $sm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {   // einzelne Platzhalter außerhalb von Tabellen und Kartenblöcken zählen wie in der Wartungsliste mit
             foreach ($sm as $x) {
                 $p = (int) $x[0][1]; $in = false;
                 foreach ($e as $u0) { if ($p >= $u0['s'] && $p < $u0['e']) { $in = true; break; } }
-                if ($in || !preg_match('#\[(?:amz_bild|amz_produkt|amz_karte)\b|\[aawp\b[^\]]*(?:thumb|image|box|grid|table)#i', $x[0][0])) { continue; }
+                if ($in || !preg_match('#\[(?:amz_bild|amz_produkt|amz_karte)\b|\[(?:aawp|amazon)\b[^\]]*(?:thumb|image|box|grid|table)#i', $x[0][0])) { continue; }
                 $s0 = $p; $e0 = $p + strlen($x[0][0]);
                 $z = stripos($c, '[/' . $x[1][0] . ']', $e0);
                 if ($z !== false && $z - $e0 < 3000) { $e0 = $z + strlen($x[1][0]) + 3; }
@@ -4054,7 +4095,7 @@ JS;
         if (is_array($c) && empty($_POST['sab_bloecke_neu'])) { return $c; }
         global $wpdb; $posts = [];
         if (isset($wpdb)) {
-            foreach ((array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%amazon.%' OR post_content LIKE '%sm-world%')") as $r) { $posts[] = ['id' => (int) $r->ID, 'title' => (string) $r->post_title, 'content' => (string) $r->post_content]; }
+            foreach ((array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%amazon.%' OR post_content LIKE '%sm-world%')") as $r) { $posts[] = ['id' => (int) $r->ID, 'title' => (string) $r->post_title, 'content' => (string) $r->post_content]; }
         }
         $d = self::bloecke_aus_inhalten($posts); $d['ts'] = time();
         set_transient('sab_bloecke_daten', $d, 15 * MINUTE_IN_SECONDS);
