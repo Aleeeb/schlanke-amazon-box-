@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.71.5
+ * Version: 0.71.6
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.71.5';
+    const VERSION = '0.71.6';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -2205,7 +2205,13 @@ final class SAB {
      */
     /** Produkte, die Tiere töten oder verletzen (Schneckenkorn, Gift, Fallen) oder Kieselgur/Eierschalen: werden nie empfohlen und tauchen im Austausch nicht auf. */
     private static function toetend(string $t): bool {
-        return (bool) preg_match('/molusqui|antilimac|limacida|cebo\b|veneno|metaldeh|fosfato f[eé]rrico|schneckenkorn|schneckengift|slug\s*(?:pellets?|killer|x\b)|ferramol|matababos|mata\s*(?:babosas|caracoles|limacos)|trampa[^.]{0,40}(?:babosa|caracol|limaco)|insecticida|pesticida|plaguicida|herbicida|raticida|rodenticida|diatom|kieselgur|c[aá]scara de huevo|eierschal/iu', $t);
+        return (bool) preg_match('/molusqui|antilimac|limacida|cebo\b|veneno|metaldeh|fosfato f[eé]rrico|schneckenkorn|schneckengift|slug\s*(?:pellets?|killer|x\b)|ferramol|matababos|mata\s*(?:babosas|caracoles|limacos)|trampa[^.]{0,40}(?:babosa|caracol|limaco)|insecticida|pesticida|plaguicida|herbicida|raticida|rodenticida|diatom|kieselgur/iu', $t);
+    }
+
+    /** Welcher Begriff im Namen/Titel hat die Tierschutz-Prüfung ausgelöst? (leer = keiner) */
+    private static function toetend_wort(string $a, array $d): string {
+        $t = (string) (self::produkte()[$a] ?? '') . ' ' . (string) ($d['items'][$a]['titel'] ?? '');
+        return preg_match('/molusqui|antilimac|limacida|cebo\b|veneno|metaldeh|fosfato f[eé]rrico|schneckenkorn|schneckengift|slug\s*(?:pellets?|killer|x\b)|ferramol|matababos|mata\s*(?:babosas|caracoles|limacos)|trampa[^.]{0,40}(?:babosa|caracol|limaco)|insecticida|pesticida|plaguicida|herbicida|raticida|rodenticida|diatom|kieselgur/iu', $t, $m) ? $m[0] : '';
     }
 
     private static function toetend_asin(string $a, array $d): bool {
@@ -3510,7 +3516,7 @@ final class SAB {
             $f = $fund[$alt] ?? []; $seiten = count($f); $n = (int) array_sum(array_column($f, 'n'));
             if ($seiten === 0) { continue; }   // steht in keinem Artikel: kein Handlungsbedarf
             $toet = self::toetend_asin((string) $alt, (array) $d);   // steht schon in Artikeln, obwohl es Tiere töten kann: ganz nach oben, Ersatz suchen
-            $zeilen[] = ['alt' => $alt, 'grund' => $toet ? 'Tierschutz: kann Tiere töten oder verletzen, bitte ersetzen' : $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => $toet ? 1000 * max(1, $seiten) : ($dring[$alt] ?? 100) * max(1, $seiten), 'dr' => $toet ? 1000 : ($dring[$alt] ?? 100), 'f' => $f];
+            $zeilen[] = ['alt' => $alt, 'grund' => $toet ? 'Tierschutz-Prüfung: Begriff „' . self::toetend_wort((string) $alt, (array) $d) . '“ im Titel, bitte prüfen' : $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => $toet ? 1000 * max(1, $seiten) : ($dring[$alt] ?? 100) * max(1, $seiten), 'dr' => $toet ? 1000 : ($dring[$alt] ?? 100), 'f' => $f];
         }
         usort($zeilen, fn($a, $b) => $b['prio'] <=> $a['prio']);
         $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = 10;
