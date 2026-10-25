@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.70.3
+ * Plugin Name: 1a Amazon Box 0.70.4
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.3
+ * Version: 0.70.4
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.3';
+    const VERSION = '0.70.4';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -937,11 +937,17 @@ final class SAB {
         ob_start();
         echo self::pruef_html();
         $ers = array_keys(array_filter((array) get_option('sab_marken', []), fn($t) => $t === 'ers'));
+        if ($ers) {   // schon getauscht (Regel oder Festschreibung) oder in keinem Artikel mehr: nicht mehr aufführen
+            $erledigt = array_merge(array_keys(self::tausch_regeln()), array_column((array) get_option('sab_tausch_log', []), 'alt'));
+            $ers = array_values(array_filter($ers, fn($a) => !in_array($a, $erledigt, true)));
+            $fs = $ers ? self::fundstellen($ers) : [];
+            $ers = array_values(array_filter($ers, fn($a) => !empty($fs[$a])));
+        }
         if ($ers) {
             $namen = self::produkte();
             echo '<h2>Bitte austauschen (von dir markiert)</h2><ul>';
-            foreach ($ers as $a) { echo '<li><code>' . esc_html($a) . '</code> ' . esc_html($namen[$a] ?? '') . '</li>'; }
-            echo '</ul><p class="description">Nimm den Reiter „Austausch“, dann gilt der Ersatz überall.</p>';
+            foreach ($ers as $a) { echo '<li><code>' . esc_html($a) . '</code> ' . esc_html($namen[$a] ?? '') . ' <small>(auf ' . count($fs[$a]) . ' Seiten)</small></li>'; }
+            echo '</ul><p class="description">Nimm den Reiter „Austausch“, dann gilt der Ersatz überall. Getauschte Produkte und solche, die in keinem Artikel mehr stehen, verschwinden aus dieser Liste.</p>';
         }
         $lw = array_filter((array) get_option('sab_linkwarnung', []), fn($x) => ($x['n'] ?? 0) >= self::LINK_WARNUNG);
         if ($lw) {
