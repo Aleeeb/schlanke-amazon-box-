@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.66.1
+ * Plugin Name: 1a Amazon Box 0.66.2
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.66.1
+ * Version: 0.66.2
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.66.1';
+    const VERSION = '0.66.2';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -691,9 +691,11 @@ final class SAB {
     private static function tabellenhilfe(): string {
         return '<style>table.sab-sort2 thead th{position:sticky;top:32px;z-index:3;background:#f6f7f7;cursor:pointer;box-shadow:0 1px 0 #c3c4c7}table.sab-sort2 thead th.sab-auf:after{content:" \\25B2"}table.sab-sort2 thead th.sab-ab:after{content:" \\25BC"}</style>'
              . '<script>(function(){function v(c){if(!c)return "";var d=c.getAttribute("data-v");if(d!==null)return d===""?"":parseFloat(d);var i=c.querySelector("input[type=checkbox]");if(i)return i.checked?1:0;var t=c.textContent.trim().toLowerCase();var n=parseFloat(t.replace(/\\./g,"").replace(",",".").replace(/[^0-9.\\-]/g,""));return isNaN(n)||!/^[^a-z]*[0-9]/.test(t)?t:n}'
-             . 'document.querySelectorAll("table.sab-sort2").forEach(function(T){var H=T.tHead&&T.tHead.rows[0];if(!H)return;[].forEach.call(H.cells,function(th,i){th.addEventListener("click",function(){var b=T.tBodies[0],r=[].slice.call(b.rows),d=th.classList.contains("sab-auf")?-1:1;'
+             . 'document.querySelectorAll("table.sab-sort2").forEach(function(T){var H=T.tHead&&T.tHead.rows[0];if(!H)return;T.sabK=[];[].forEach.call(H.cells,function(th,i){th.addEventListener("click",function(){var b=T.tBodies[0],r=[].slice.call(b.rows),d;'
+             . 'var num=r.some(function(e){var x=v(e.cells[i]);return typeof x==="number"});var alt=T.sabK.filter(function(k){return k.i===i})[0];d=alt?-alt.d:(num?-1:1);'
              . '[].forEach.call(H.cells,function(x){x.classList.remove("sab-auf","sab-ab")});th.classList.add(d===1?"sab-auf":"sab-ab");'
-             . 'r.sort(function(x,y){var a=v(x.cells[i]),c=v(y.cells[i]);if(a===""&&c!=="")return 1;if(c===""&&a!=="")return -1;return(a<c?-1:a>c?1:0)*d});r.forEach(function(e){b.appendChild(e)})})})})})();</script>';
+             . 'T.sabK=[{i:i,d:d}].concat(T.sabK.filter(function(k){return k.i!==i}));'   // frühere Sortierungen bleiben als Zweit- und Drittordnung erhalten
+             . 'r.sort(function(x,y){for(var q=0;q<T.sabK.length;q++){var k=T.sabK[q],a=v(x.cells[k.i]),c=v(y.cells[k.i]);if(a===""&&c!=="")return 1;if(c===""&&a!=="")return -1;if(a<c)return -k.d;if(a>c)return k.d}return 0});r.forEach(function(e){b.appendChild(e)})})})})})();</script>';
     }
 
     private static function sparzeile(array $x): string {
