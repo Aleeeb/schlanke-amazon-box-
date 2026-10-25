@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.70.4
+ * Plugin Name: 1a Amazon Box 0.70.6
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.4
+ * Version: 0.70.6
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.4';
+    const VERSION = '0.70.6';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -2265,9 +2265,20 @@ final class SAB {
             if (self::unklar($x)) { $uk[] = $asin; } elseif (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') { $nv[] = $asin; }
         }
         $favs = array_keys(array_filter((array) get_option('sab_marken', []), fn($t) => $t === 'fav'));
-        $fund = self::fundstellen(array_merge($weg, $nv, $uk, $wa, $favs));
+        // Priorität 1 zusätzlich: Prime-Status trotz Messung unklar (meist nicht mehr oder gerade nicht verfügbar); Priorität 2: Status klar, aber sehr schlechter Score
+        $p1x = []; $p2x = []; $grund2 = []; $vorher = array_merge($weg, $nv, $uk, $wa);
+        foreach ((array) ($d['items'] ?? []) as $a_ => $x_) {
+            $a_ = (string) $a_; if (in_array($a_, $vorher, true) || isset($trotz[$a_])) { continue; }
+            if (array_key_exists('manuell_stand', $x_) && ($x_['prime'] ?? null) === null) { $p1x[] = $a_; continue; }
+            $gr_ = [];
+            if (self::score($x_)[0] < 35) { $gr_[] = 'sehr schlechter Score (' . self::score($x_)[0] . ')'; }
+            if (isset($x_['liefertage']) && $x_['liefertage'] !== null && (float) $x_['liefertage'] > 14) { $gr_[] = 'Lieferzeit ' . round((float) $x_['liefertage']) . ' Tage'; }
+            if (isset($x_['sterne']) && $x_['sterne'] !== null && (float) $x_['sterne'] < 3.5) { $gr_[] = 'nur ' . str_replace('.', ',', (string) $x_['sterne']) . ' Sterne'; }
+            if ($gr_) { $p2x[] = $a_; $grund2[$a_] = implode(', ', $gr_); }
+        }
+        $fund = self::fundstellen(array_merge($weg, $nv, $uk, $wa, $favs, $p1x, $p2x));
         $empf = [];
-        foreach (array_merge($weg, $wa, $nv, $uk) as $a) { $e = self::empfehlung($a, (array) ($d['items'] ?? []), $trotz); if ($e) { $empf[$a] = $e; } }
+        foreach (array_merge($weg, $wa, $nv, $uk, $p1x, $p2x) as $a) { $e = self::empfehlung($a, (array) ($d['items'] ?? []), $trotz); if ($e) { $empf[$a] = $e; } }
         $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
         $tabelle = function (array $asins, string $leer, bool $tausch = false) use ($fund, $namen, $dp, $d, $empf): string {
             if (!$asins) { return '<p>' . esc_html($leer) . '</p>'; }
@@ -2289,7 +2300,10 @@ final class SAB {
         foreach ($weg as $a) { $faelle[$a] = 'Amazon kennt das Produkt nicht mehr'; }
         foreach ($wa as $a) { $faelle[$a] = 'Kein Preis und kein brauchbarer Rang'; }
         foreach ($nv as $a) { $faelle[$a] = 'Nicht lieferbar'; }
-        uksort($faelle, fn($a, $b) => array_sum(array_column($fund[$b] ?? [], 'n')) <=> array_sum(array_column($fund[$a] ?? [], 'n')));
+        foreach ($p1x as $a) { $faelle[$a] = 'Priorität 1: Prime-Status unklar, vermutlich nicht verfügbar'; }
+        foreach ($p2x as $a) { $faelle[$a] = 'Priorität 2: ' . ($grund2[$a] ?? 'schwach'); }
+        $gew = function ($a) use ($fund, $d, $p2x) { $n = array_sum(array_column($fund[$a] ?? [], 'n')); return in_array($a, $p2x, true) ? (100 - self::score((array) $d['items'][$a])[0]) * $n : 1000000 + $n; };
+        uksort($faelle, fn($a, $b) => $gew($b) <=> $gew($a));
         $h .= self::doppel_html((array) $d) . '<hr style="margin:2em 0">' . self::weg_html($weg, (array) $d, $fund, $trotz, $dp) . '<hr style="margin:2em 0">' . self::assistent_html(array_diff_key($faelle, array_flip($weg)), (array) $d, $empf, $fund, $dp) . '<hr style="margin:2em 0"><h3>Alle Problemprodukte als Liste</h3>';
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_neu">'
 ;
