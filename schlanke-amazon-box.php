@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.63.3
+ * Plugin Name: 1a Amazon Box 0.64.0
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.63.3
+ * Version: 0.64.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.63.3';
+    const VERSION = '0.64.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -505,7 +505,7 @@ final class SAB {
     private static function sparkline(array $reihe): string {
         if (!$reihe) { return ''; }
         $h = '<span class="sab-spark" title="Score pro Tag, letzte ' . count($reihe) . ' Tage">';
-        foreach (array_slice($reihe, -30) as $v) { $h .= '<i style="height:' . max(2, (int) round($v * 0.16)) . 'px;background:' . self::score_farbe((int) $v) . '"></i>'; }
+        foreach (array_slice($reihe, -30) as $v) { $h .= '<i style="height:' . max(2, (int) round(max(0, min(100, $v)) * 0.16)) . 'px;background:' . self::score_farbe((int) $v) . '"></i>'; }
         return $h . '</span>';
     }
 
@@ -672,12 +672,12 @@ final class SAB {
             $pt = $summe > 0 ? 100 * $w[$k] * $f[$k][0] / $summe : 0;
             $roh += $pt; $det[] = [self::SCORE_NAMEN[$k], $w[$k], $f[$k][0], round($pt, 1), $f[$k][1]];
         }
-        $score = (int) round($roh);
+        $score = (int) round(50 + ($roh - 45) * 2.2);   // gespreizt um die Mitte: statt 30 bis 60 etwa 15 bis 85, Ausreißer dürfen leicht unter 0 oder über 100 liegen
         if ($r === null) { $score = min($score, 60); }   // ohne Rang höchstens 60
         $hinweis = '';
         if ($r === null) { $hinweis = $f['rang'][1]; } elseif ($fremd) { $hinweis = 'Kategoriegröße von „' . $kat . '“ fehlt (Reiter Score)'; }
         if (self::unklar($x) && empty($x['trotz']) && $r !== null && $r <= 20000) { $hinweis = 'Schnittstelle prüfen: guter Rang, aber kein Angebot'; }
-        return [max(0, min(100, $score)), $hinweis, $det];
+        return [max(-10, min(110, $score)), $hinweis, $det];
     }
 
     private static function scorezelle(array $x): string {
@@ -927,7 +927,7 @@ final class SAB {
             $namen = self::produkte();
             echo '<h2>Bitte austauschen (von dir markiert)</h2><ul>';
             foreach ($ers as $a) { echo '<li><code>' . esc_html($a) . '</code> ' . esc_html($namen[$a] ?? '') . '</li>'; }
-            echo '</ul><p class="description">Trage unter „Produkte und Ersatzlisten“ eine Austausch-Regel ein, dann gilt der Ersatz überall.</p>';
+            echo '</ul><p class="description">Nimm den Reiter „Austausch“, dann gilt der Ersatz überall.</p>';
         }
         $lw = array_filter((array) get_option('sab_linkwarnung', []), fn($x) => ($x['n'] ?? 0) >= self::LINK_WARNUNG);
         if ($lw) {
@@ -2509,7 +2509,7 @@ final class SAB {
                   . (($x['preis'] === '' || $x['verkaeufer'] === '') ? '<p style="color:#a00">' . esc_html($x['diag'] ?? '') . '</p><details><summary>Rohdaten</summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>' : '')
                   . '</div></details>';
             return '<tr><td class="sab-name"><div style="display:flex;gap:8px;align-items:center">' . $bild . '<div><strong>' . esc_html(($namen[$asin] ?? '') ?: mb_substr((string) ($x['titel'] ?? ''), 0, 60)) . '</strong><br><small><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a></small></div></div></td>'
-               . '<td data-v="' . $sc . '"><span class="sab-bal" style="width:' . max(4, (int) round($sc * 0.6)) . 'px;background:' . $farbe . '"></span><strong style="color:' . $farbe . '">' . $sc . '</strong>' . (isset($x['k_anteil']) ? '<br><small title="Tage mit Score ab ' . self::K_SCHWELLE . ' in den letzten ' . (int) $x['k_tage'] . ' Tagen">' . round(100 * $x['k_anteil']) . ' % gut</small>' : '') . (!empty($x['k_reihe']) ? '<br>' . self::sparkline($x['k_reihe']) : '') . '</td>'
+               . '<td data-v="' . $sc . '" title="Zahl und Balken: Score heute (etwa 0 bis 100). Die kleinen Striche darunter: Score an den einzelnen Tagen, ein Strich pro Tag seit der ersten Prüfung."><span class="sab-bal" style="width:' . max(4, (int) round(max(0, min(100, $sc)) * 0.6)) . 'px;background:' . $farbe . '"></span><strong style="color:' . $farbe . '">' . $sc . '</strong>' . (isset($x['k_anteil']) ? '<br><small title="Tage mit Score ab ' . self::K_SCHWELLE . ' in den letzten ' . (int) $x['k_tage'] . ' Tagen">' . round(100 * $x['k_anteil']) . ' % gut</small>' : '') . (!empty($x['k_reihe']) ? '<br>' . self::sparkline($x['k_reihe']) : '') . '</td>'
                . '<td>' . $chips . '</td><td class="sab-zahl" data-v="' . esc_attr((string) (self::preiszahl((string) ($x['preis'] ?? '')) ?? '')) . '">' . $preis . '</td>'
                . self::provisionszelle($x)
                . '<td class="sab-zahl" data-v="' . (isset($x['rang']) ? (int) $x['rang'] : '') . '">' . $rang . '</td><td class="sab-zahl" data-v="' . $ns . '">' . $seiten . '</td><td class="sab-zahl" data-v="' . $prio . '">' . ($prio > 0 ? '<strong style="color:' . ($prio >= 1500 ? '#a00' : ($prio >= 500 ? '#b36b00' : '#555')) . '">' . $prio . '</strong>' : '–') . '</td><td class="sab-zahl" data-v="' . $nk . '">' . $klick . '</td>'
@@ -3357,6 +3357,7 @@ final class SAB {
         $h .= '<h3 style="margin-top:2em">Amazons Alternativen (Austauschliste)</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="amz_alt">'
             . '<p class="description">Eine Zeile pro Produkt: <code>ALTE-ASIN | ASIN1, ASIN2, ASIN3 | Datum</code>. Das sind die „alternativen Produkte“, die Amazon auf der Seite eines nicht mehr verfügbaren Produkts zeigt. Die Mac-Sitzung liest sie beim Rundgang und trägt sie hier ein. Nur passende werden oben vorgeschlagen.</p>'
             . '<textarea name="sab_amz_alt" rows="6" class="large-text code">' . esc_textarea((string) get_option('sab_amz_alt', '')) . '</textarea><p><button class="button">Speichern</button> <span class="description">' . count($alts) . ' Produkte mit Alternativen.</span></p></form>';
+        $h .= '<p class="description" style="margin-top:2em">Für Fortgeschrittene: <a href="' . esc_url(admin_url('admin.php?page=sab-produkte')) . '">Kurznamen, Ersatzlisten und Austausch-Regeln von Hand bearbeiten</a>.</p>';
         $h .= '<h3 style="margin-top:2em">Treffer der Amazon-Suche</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="such_kand">'
             . '<p class="description">Wo Amazon keine Alternativen zeigt: Die Mac-Sitzung sucht bei Amazon nach dem Titel des Produkts und trägt hier die besten passenden Treffer ein (gleiches Format: <code>ALTE-ASIN | ASIN1, ASIN2, ASIN3 | Datum</code>). Sie erscheinen oben als „Amazon-Suche“.</p>'
             . '<textarea name="sab_such_kand" rows="5" class="large-text code">' . esc_textarea((string) get_option('sab_such_kand', '')) . '</textarea><p><button class="button">Speichern</button> <span class="description">' . count(self::such_kandidaten()) . ' Produkte mit Suchtreffern.</span></p></form>';
@@ -3568,7 +3569,8 @@ JS;
     public static function menue(): void {
         add_menu_page('1a Amazon Box', '1a Amazon Box', 'manage_options', 'sab', [__CLASS__, 'seite'], 'dashicons-cart', 58);
         foreach (self::TABS as $k => $name) {
-            add_submenu_page('sab', $name . ' - 1a Amazon Box', $name, 'manage_options', $k === 'uebersicht' ? 'sab' : 'sab-' . $k, [__CLASS__, 'seite']);
+            // „Produkte und Ersatzlisten“ (Kurznamen, Austauschregeln) wird kaum noch gebraucht: nicht im Menü, nur über den Link unten im Austausch-Reiter
+            add_submenu_page($k === 'produkte' ? null : 'sab', $name . ' - 1a Amazon Box', $name, 'manage_options', $k === 'uebersicht' ? 'sab' : 'sab-' . $k, [__CLASS__, 'seite']);
         }
     }
 
@@ -3770,6 +3772,7 @@ JS;
         if ($meldung) { echo '<div class="notice notice-success"><p>' . esc_html($meldung) . '</p></div>'; }
         echo '<h2 class="nav-tab-wrapper">';
         foreach ($tabs as $k => $name) {
+            if ($k === 'produkte' && $tab !== 'produkte') { continue; }
             echo '<a class="nav-tab' . ($k === $tab ? ' nav-tab-active' : '') . '" href="' . esc_url('admin.php?page=' . ($k === 'uebersicht' ? 'sab' : 'sab-' . $k)) . '">' . esc_html($name) . '</a>';
         }
         echo '</h2>';
@@ -3898,7 +3901,7 @@ JS;
                . '<li><code>[amz_bild asin="…" land="es"]</code> und <code>[amz_link asin="…"]Text[/amz_link]</code>: einzelnes Bild bzw. Textlink.</li>'
                . '<li><code>land="auto"</code>: Land nach Browsersprache. Mit Seiten-Cache bekommen alle das Land des ersten Abrufs.</li>'
                . '<li><code>[amz_hinweis]</code>: Pflichthinweis, oder automatisch im Fuß (Einstellungen).</li>'
-               . '<li><strong>Produkt tauschen, wenn es nicht mehr lieferbar ist:</strong> Reiter „Produkte und Ersatzlisten“, Zeile bei Austausch-Regeln eintragen. Gilt sofort überall.</li>'
+               . '<li><strong>Produkt tauschen, wenn es nicht mehr lieferbar ist:</strong> Reiter „Austausch“ (die Regel wird dort automatisch angelegt). Gilt sofort überall.</li>'
                . '<li><strong>Favorit / Ersetzen:</strong> Kästchen in der Übersicht. Favoriten werden in Ersatzlisten bevorzugt, „Ersetzen“ rutscht ans Ende und steht unter „Ausfälle und Wartung“.</li>'
                . '<li><strong>Umbau:</strong> Reiter „Umbau“ wandelt feste Amazon-Links in Artikeln in Plugin-Platzhalter um (mit Sicherung und Rückgängig).</li>'
                . '<li><strong>A/B-Test:</strong> Reiter „A/B-Tests“. Jeder Artikel bekommt fest eine Variante, Klicks werden je Variante gezählt.</li>'

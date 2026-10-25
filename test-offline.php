@@ -365,7 +365,7 @@ ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub',
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
 ok(strpos($h, 'nav-tab-active') !== false && preg_match('/nav-tab-active" href="[^"]*sab-hilfe/', $h) === 1, 'Seite: Reiter folgt dem Untermenü');
-ok(strpos($h, 'admin.php?page=sab-produkte') !== false, 'Seite: Reiterlinks über admin.php');
+ok(strpos($h, 'admin.php?page=sab-score') !== false, 'Seite: Reiterlinks über admin.php');
 // ---- 0.21.1: Übersicht aus allen Artikeln ----
 $GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; public function get_col($q) { return [
   'Text [aawp fields="B0AAAAAAA1" value="thumb"] und [aawp box="B0BBBBBBB2,B0CCCCCCC3x"]',
@@ -418,7 +418,7 @@ $mSc = new ReflectionMethod('SAB', 'score'); $mSc->setAccessible(true);
 [$p1, $h1] = $mSc->invoke(null, ['rang' => 80, 'kaufen' => true, 'status' => 'IN_STOCK', 'lieferbar' => true, 'preis' => '9 €', 'spar' => ['streich' => '12 €'], 'deal' => 'X', 'preisrel' => 0.5]);
 ok($p1 >= 93 && $h1 === '', 'Score: bestes Produkt nahe 100');
 [$p2, $h2] = $mSc->invoke(null, ['rang' => 4334, 'kaufen' => true, 'status' => 'OUT_OF_STOCK', 'lieferbar' => true, 'preis' => '', 'verkaeufer' => '']);
-ok($p2 >= 38 && $p2 <= 42 && strpos($h2, 'Schnittstelle prüfen') !== false, 'Score: guter Rang ohne Angebot = Hinweis');
+ok($p2 >= 40 && $p2 <= 48 && strpos($h2, 'Schnittstelle prüfen') !== false, 'Score: guter Rang ohne Angebot = Hinweis');
 [$p3, $h3] = $mSc->invoke(null, ['kaufen' => false, 'status' => 'OUT_OF_STOCK', 'lieferbar' => false]);
 ok($p3 <= 10 && $h3 === 'ohne Verkaufsrang', 'Score: nichts ist (fast) 0');
 
@@ -589,7 +589,7 @@ ok($md['B0TABLE001']['sterne'] === 4.1 && $md['B0TABLE001']['anzahl'] === 588 &&
 ok($md['B0TABLE002']['prime'] === false && $md['B0TABLE002']['liefertage'] === 1.5, 'Handdaten: kein Prime, Dezimal-Lieferzeit');
 $GLOBALS['opt']['sab_score_w'] = ['rang' => 0, 'buybox' => 0, 'angebot' => 0, 'preis' => 0, 'streich' => 0, 'deal' => 0, 'bewertung' => 10, 'konstanz' => 0, 'prime' => 0, 'liefer' => 0];
 [$gut] = $mSc->invoke(null, ['rang' => 100, 'sterne' => 4.8, 'anzahl' => 1000]); [$schlecht] = $mSc->invoke(null, ['rang' => 100, 'sterne' => 3.0, 'anzahl' => 1000]); [$leer] = $mSc->invoke(null, ['rang' => 100]);
-ok($gut > 85 && $schlecht < 10 && $leer === 50, 'Score: nur Bewertung gewichtet');
+ok($gut > 85 && $schlecht < 10 && $leer === 61, 'Score: nur Bewertung gewichtet');
 unset($GLOBALS['opt']['sab_score_w'], $GLOBALS['opt']['sab_manuell']);
 ob_start(); $_GET['tab'] = 'score'; SAB::seite(); $hh = ob_get_clean();
 ok(strpos($hh, 'Von Hand gepflegte Daten') !== false && strpos($hh, 'Verkaufsrang') !== false, 'Reiter Score rendert Gewichte und Handdaten');
