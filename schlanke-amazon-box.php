@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.20
+ * Version: 0.75.21
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.20';
+    const VERSION = '0.75.21';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -903,23 +903,30 @@ final class SAB {
     /** Rote Warnung über fehlenden Produktbildern (Priorität vor allem anderen). Behobene Fälle verschwinden von selbst. */
     private static function bildfehler_html(): string {
         $l = (array) get_option('sab_bildfehler', []); if (!$l) { return ''; }
-        $land = self::land(''); $zeilen = []; $rest = [];
+        $land = self::land(''); $rest = []; $nach = [];
         foreach ($l as $k => $e) {
             $p = get_transient("sab_{$land}_" . $e['asin']);
             if (self::hat_bild($p)) { continue; }   // Bild ist inzwischen da
-            $rest[$k] = $e;
-            if (count($zeilen) < 40) { $zeilen[] = '<li><code>' . esc_html($e['asin']) . '</code> (' . esc_html($e['art']) . ') in <a href="' . esc_url(get_edit_post_link((int) $e['post'])) . '">' . esc_html(get_the_title((int) $e['post']) ?: ('Beitrag ' . $e['post'])) . '</a></li>'; }
+            if ((int) $e['post'] <= 0 || get_post_status((int) $e['post']) !== 'publish') { continue; }   // Vorschau außerhalb eines Artikels oder Artikel nicht mehr veröffentlicht: keine Warnung
+            $rest[$k] = $e; $nach[$e['asin']][] = (int) $e['post'];
         }
         if (count($rest) !== count($l)) { update_option('sab_bildfehler', $rest, false); }
         if (!$rest) { return ''; }
-        return '<div class="notice notice-error" style="border-left-width:8px"><p><strong>Produktbilder fehlen (' . count($rest) . '):</strong> An diesen Stellen bekommen Besucher kein Bild. Das hat Vorrang vor allem anderen: Produkt ersetzen oder Bild bei Amazon prüfen.</p><ul style="margin-left:18px;list-style:disc">' . implode('', $zeilen) . '</ul></div>';
+        uasort($nach, fn($x, $y) => count($y) <=> count($x));   // die auf den meisten Seiten stehen zuerst
+        $zeilen = [];
+        foreach (array_slice($nach, 0, 40, true) as $asin => $posts) {
+            $links = [];
+            foreach (array_slice($posts, 0, 4) as $pid) { $links[] = '<a href="' . esc_url(get_edit_post_link($pid)) . '">' . esc_html(get_the_title($pid) ?: ('Beitrag ' . $pid)) . '</a>'; }
+            $zeilen[] = '<li><code>' . esc_html($asin) . '</code> auf ' . count($posts) . ' Seite(n): ' . implode(', ', $links) . (count($posts) > 4 ? ' …' : '') . '</li>';
+        }
+        return '<div class="notice notice-error" style="border-left-width:8px"><p><strong>Produktbilder fehlen (' . count($nach) . ' Produkte):</strong> An diesen Stellen bekommen Besucher kein Bild. Das hat Vorrang vor allem anderen: Produkt ersetzen oder Bild bei Amazon prüfen.</p><ul style="margin-left:18px;list-style:disc">' . implode('', $zeilen) . '</ul></div>';
     }
 
     /** Merkt sich ein fehlendes Produktbild (ASIN, Artikel) für die Warnliste; Besucher sehen nichts, angemeldete Redakteure einen roten Hinweis. */
     private static function bild_fehlt(string $asin, string $art = 'Bild'): string {
         $pid = function_exists('get_the_ID') ? (int) get_the_ID() : 0;
         $l = (array) get_option('sab_bildfehler', []); $k = $asin . '|' . $pid;
-        if (!isset($l[$k]) && count($l) < 300) { $l[$k] = ['asin' => $asin, 'post' => $pid, 'ts' => time(), 'art' => $art]; update_option('sab_bildfehler', $l, false); }
+        if ($pid > 0 && !isset($l[$k]) && count($l) < 300) { $l[$k] = ['asin' => $asin, 'post' => $pid, 'ts' => time(), 'art' => $art]; update_option('sab_bildfehler', $l, false); }
         if (function_exists('current_user_can') && current_user_can('edit_posts')) {
             return '<span style="display:inline-block;padding:6px 10px;background:#fcf0f1;border:2px solid #d63638;color:#8a1f1f;font:600 13px sans-serif">Produktbild fehlt: ' . esc_html($asin) . ' (nur für Redakteure sichtbar)</span>';
         }
