@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.2
+ * Version: 0.75.3
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.2';
+    const VERSION = '0.75.3';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1462,7 +1462,8 @@ final class SAB {
         if ($suche === '') { return esc_html((string) $inhalt); }
         $host = preg_match('/^(?:www\.)?ebay\.[a-z.]+$/i', $a['host']) ? $a['host'] : 'www.ebay.es';
         $q = ['_nkw' => $suche, 'mkcid' => 1, 'mkevt' => 1, 'toolid' => 10001];
-        if ($a['campid'] !== '') { $q['campid'] = preg_replace('/\D/', '', $a['campid']); }
+        $camp = $a['campid'] !== '' ? $a['campid'] : (preg_split('/[\s|=,]+/', trim((string) get_option('sab_ebay_ids', '')))[0] ?? '');
+        if (preg_replace('/\D/', '', (string) $camp) !== '') { $q['campid'] = preg_replace('/\D/', '', (string) $camp); }
         if ($a['customid'] !== '') { $q['customid'] = preg_replace('/[^A-Za-z0-9_-]/', '', $a['customid']); }
         return '<a href="' . esc_url('https://' . $host . '/sch/i.html?' . http_build_query($q)) . '" target="_blank" rel="nofollow sponsored noopener">' . esc_html((string) ($inhalt !== '' ? $inhalt : 'eBay')) . '</a>';
     }
@@ -3208,17 +3209,33 @@ final class SAB {
         }, $c);
         self::$karten_n = 0;
         $c = self::tabellen_zu_karten($c, $nur);
-        // übrige [aawp fields="ASIN" value="thumb"]-Bilder (Einzelprodukt-Boxen) => [amz_bild]
-        $c = preg_replace_callback('#\[aawp\b([^\]]*)\]#i', function ($m) use ($nur) {
-            $x = html_entity_decode($m[1]);
+        // AAWP- und [amazon]-Platzhalter => Plugin-Platzhalter: fields+thumb => [amz_bild], box => [amz_produkt], link => [amz_link]; tracking_id bleibt als tag, image="2|3" als bild
+        $c = preg_replace_callback('#\[(aawp|amazon)\b([^\]]*)\](?:((?:(?!\[(?:aawp|amazon)\b).)*?)\[/\1\])?#is', function ($m) use ($nur) {
+            $x = html_entity_decode($m[2]);
+            $land = self::land('');
+            if (!self::tag($land)) { return $m[0]; }
+            $tg = preg_match('#\btracking_id=["\']([A-Za-z0-9\-]{3,40})["\']#i', $x, $tm) ? self::tag_erlaubt($tm[1]) : '';
+            $tagattr = $tg !== '' ? ' tag="' . $tg . '"' : '';
+            if (preg_match('#\bbox=["\']?([A-Za-z0-9]{10})["\'\s/]#i', $x . ' ', $b)) {
+                $asin = strtoupper($b[1]);
+                if ($nur !== '' && $asin !== $nur) { return $m[0]; }
+                self::$karten_n++;
+                return '[amz_produkt asin="' . $asin . '" land="' . $land . '"' . $tagattr . ']';
+            }
+            if (preg_match('#\blink=["\']?([A-Za-z0-9]{10})["\'\s/]#i', $x . ' ', $l)) {
+                $asin = strtoupper($l[1]);
+                if ($nur !== '' && $asin !== $nur) { return $m[0]; }
+                $text = isset($m[3]) && trim(strip_tags($m[3])) !== '' ? trim(strip_tags($m[3])) : (preg_match('#\btitle=(["\'])(.*?)\1#is', $x, $tt) ? trim($tt[2]) : '');
+                self::$karten_n++;
+                return '[amz_link asin="' . $asin . '" land="' . $land . '"' . $tagattr . ']' . str_replace(['[', ']'], '', $text) . '[/amz_link]';
+            }
             if (!preg_match('#\bfields=["\']?([A-Za-z0-9]{10})["\'\s]#i', $x . ' ', $f) || !preg_match('#\bvalue=["\']?(thumb|image|thumbnail)\b#i', $x)) { return $m[0]; }
             $asin = strtoupper($f[1]);
             if ($nur !== '' && $asin !== $nur) { return $m[0]; }
-            $land = self::land('');
-            if (!self::tag($land)) { return $m[0]; }
             $w = preg_match('#\bimage_width=["\']?(\d{2,4})#i', $x, $bw) ? ' breite="' . min(self::AAWP_BILD_MAX, (int) $bw[1]) . '"' : '';
+            $bi = preg_match('#\bimage=["\']?([23])\b#', $x, $bm) ? ' bild="' . $bm[1] . '"' : '';
             self::$karten_n++;
-            return '[amz_bild asin="' . $asin . '" land="' . $land . '"' . $w . '][/amz_bild]';
+            return '[amz_bild asin="' . $asin . '" land="' . $land . '"' . $w . $bi . $tagattr . '][/amz_bild]';
         }, $c);
         $c = self::kurzlink_spaltenhilfe($c);
         $c = self::kurzlink_nachbarhilfe($c);
@@ -4193,6 +4210,8 @@ JS;
                 $geheim = sanitize_text_field(wp_unslash($_POST['sab_client_secret'] ?? ''));
                 if ($geheim !== '') { update_option('sab_client_secret', $geheim, false); } // leer = unverändert
                 update_option('sab_tags', sanitize_textarea_field(wp_unslash($_POST['sab_tags'] ?? '')), false);
+                update_option('sab_tags_extra', sanitize_textarea_field(wp_unslash($_POST['sab_tags_extra'] ?? '')), false);
+                update_option('sab_ebay_ids', sanitize_textarea_field(wp_unslash($_POST['sab_ebay_ids'] ?? '')), false);
                 update_option('sab_default_land', sanitize_key(wp_unslash($_POST['sab_default_land'] ?? 'de')), false);
                 update_option('sab_hinweis_auto', !empty($_POST['sab_hinweis_auto']) ? '1' : '0', false);
                 update_option('sab_karten_css', !empty($_POST['sab_karten_css']) ? '1' : '0', false);
@@ -4468,6 +4487,10 @@ JS;
                . (get_option('sab_client_secret') ? 'gespeichert, leer lassen = unverändert' : '') . '"></td></tr>'
                . '<tr><th>Partner-IDs</th><td><textarea name="sab_tags" rows="3" class="regular-text code">' . esc_textarea((string) get_option('sab_tags', ''))
                . '</textarea><p class="description">Pro Zeile: <code>land=partner-id</code>, zum Beispiel <code>es=ayuba09-21</code></p></td></tr>'
+               . '<tr><th>Weitere Partner-IDs</th><td><textarea name="sab_tags_extra" rows="3" class="regular-text code">' . esc_textarea((string) get_option('sab_tags_extra', ''))
+               . '</textarea><p class="description">Eine ID pro Zeile, zum Beispiel <code>cpflanzhilfe-21</code> (optional mit Notiz dahinter). Nur diese IDs darf ein Platzhalter mit <code>tag="…"</code> oder <code>tracking_id="…"</code> statt der Standard-ID benutzen. Der Umbau übernimmt sie so.</p></td></tr>'
+               . '<tr><th>eBay-Kampagnen-IDs</th><td><textarea name="sab_ebay_ids" rows="3" class="regular-text code">' . esc_textarea((string) get_option('sab_ebay_ids', ''))
+               . '</textarea><p class="description">Eine Kampagnen-ID (campid) pro Zeile, die erste ist der Standard. Beispiel: <code>5338619899 Standard</code>. Sie gilt, wenn bei einem eBay-Link keine eigene <code>campid</code> steht.</p></td></tr>'
                . '<tr><th>Pflichthinweis</th><td><label><input type="checkbox" name="sab_hinweis_auto" value="1"' . (get_option('sab_hinweis_auto') === '1' ? ' checked' : '')
                . '> automatisch im Fuß jeder Seite mit Partnerlinks</label><br><input type="text" name="sab_hinweis_text" class="large-text" placeholder="leer = Standardsatz je Land" value="'
                . esc_attr((string) get_option('sab_hinweis_text', '')) . '"></td></tr>'
