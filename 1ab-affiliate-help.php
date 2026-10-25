@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.14
+ * Version: 0.75.15
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.14';
+    const VERSION = '0.75.15';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1695,7 +1695,7 @@ final class SAB {
     private static function verwaiste_entfernen(array $asins): int {
         if (!$asins) { return 0; }
         $set = array_flip($asins);
-        $schluessel = ['sab_produkte', 'sab_manuell', 'sab_amz_alt', 'sab_such_kand'];   // erste Spalte = ASIN: ganze Zeile weg
+        $schluessel = ['sab_produkte', 'sab_manuell', 'sab_amz_alt', 'sab_such_kand', 'sab_auch_gekauft'];   // erste Spalte = ASIN: ganze Zeile weg
         foreach ($schluessel as $o) {
             $neu = [];
             foreach (preg_split('/\R/', (string) get_option($o, '')) as $z) { $k = self::asin(trim(explode('|', $z)[0])); if ($k !== '' && isset($set[$k])) { continue; } $neu[] = $z; }
@@ -1869,6 +1869,7 @@ final class SAB {
         foreach (self::gruppen() as $liste) { $alle = array_merge($alle, $liste); }
         foreach (self::amz_alternativen() as $l) { $alle = array_merge($alle, $l['liste']); }   // Amazons Alternativen mit abfragen (Score)
         foreach (self::such_kandidaten() as $l) { $alle = array_merge($alle, $l['liste']); }
+        foreach (self::auch_gekauft() as $l) { $alle = array_merge($alle, $l['liste']); }   // Mitgekauftes mit abfragen (Score)
         foreach (self::claude_empfehlungen() as $l) { $alle[] = $l[0]; }
         global $wpdb;
         if (isset($wpdb)) {
@@ -3566,6 +3567,26 @@ final class SAB {
     }
 
     /** Treffer der Amazon-Suche nach dem Produkttitel (liest die Mac-Sitzung): Zeilen „ALTE-ASIN | ASIN1, ASIN2, ASIN3 | Datum“. */
+    /** „Kunden kauften auch“: Zeilen <code>ASIN | ASIN1, ASIN2, … | Datum</code> (von der Mac-Sitzung von der Amazon-Produktseite gelesen). */
+    private static function auch_gekauft(): array {
+        $out = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_auch_gekauft', '')) as $z) {
+            $t = array_map('trim', explode('|', $z));
+            $a = self::asin($t[0] ?? ''); if (strlen($a) !== 10) { continue; }
+            $l = array_values(array_unique(array_filter(array_map([__CLASS__, 'asin'], explode(',', (string) ($t[1] ?? ''))), fn($x) => strlen($x) === 10 && $x !== $a)));
+            if ($l) { $out[$a] = ['liste' => $l, 'datum' => (string) ($t[2] ?? '')]; }
+        }
+        return $out;
+    }
+
+    /** Wie oft jede ASIN in den „Kunden kauften auch“-Listen vorkommt, höchste zuerst. @return array<string,int> */
+    private static function auch_haeufigkeit(): array {
+        $z = [];
+        foreach (self::auch_gekauft() as $l) { foreach ($l['liste'] as $a) { $z[$a] = ($z[$a] ?? 0) + 1; } }
+        arsort($z);
+        return $z;
+    }
+
     private static function such_kandidaten(): array {
         $out = [];
         foreach (preg_split('/\R/', (string) get_option('sab_such_kand', '')) as $z) {
@@ -3616,6 +3637,7 @@ final class SAB {
         $q = [];
         foreach ((self::amz_alternativen()[$alt]['liste'] ?? []) as $i => $a) { $q[$a] = 'Amazon-Alternative ' . ($i + 1); }
         foreach ((self::such_kandidaten()[$alt]['liste'] ?? []) as $i => $a) { $q[$a] = $q[$a] ?? 'Amazon-Suche ' . ($i + 1); }
+        foreach ((self::auch_gekauft()[$alt]['liste'] ?? []) as $a) { $q[$a] = $q[$a] ?? 'Kunden kauften auch'; }
         $ce = self::claude_empfehlungen()[$alt] ?? null; if ($ce) { $q[$ce[0]] = 'Empfehlung'; }
         foreach ($marken as $a => $t) { if ($t === 'fav' && !isset($q[$a])) { $q[$a] = 'Favorit'; } }
         foreach (array_keys($namen) as $a) { if (!isset($q[$a])) { $q[$a] = 'Katalog'; } }
@@ -3623,7 +3645,7 @@ final class SAB {
         $text = $name;   // der Textzusammenhang bringt nur etwas, wenn der Name fast nichts sagt: sonst ziehen Wörter wie „Schnecken“ aus dem Artikel unpassende Produkte heran
         if (count(self::woerter($name)) < 2) { $text .= ' ' . self::stellen_kontext($alt, $fund[$alt] ?? []); }
         $a1 = self::arten($text); $w1 = self::woerter($text);
-        $out = []; $aus = [];
+        $out = []; $aus = []; $rest = [];
         foreach ($q as $a => $quelle) {
             $a = (string) $a; if ($a === $alt || ($marken[$a] ?? '') === 'ers' || !isset($items[$a])) { if (($quelle === 'Empfehlung' || strpos($quelle, 'Amazon-Suche') === 0) && $a !== $alt && !isset($items[$a])) { $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => null, 'x' => [], 'ok' => false, 'passt' => 0, 'rang' => -1, 'ausgeschlossen' => false]; } continue; }
             $x = $items[$a]; $x['trotz'] = isset($trotz[$a]);
@@ -3634,8 +3656,8 @@ final class SAB {
             $ing = in_array($a, $gruppe, true);
             $passt = $ing ? 3 : ($ar >= 1 ? 2 : ($tr >= 3 ? 1 : 0));   // nur zwei gemeinsame Wörter („caracoles“, „protección“) reichen nicht
             $sc = self::score($x)[0]; $pv = self::provision_satz($x);
-            if ($passt === 0 && strpos($quelle, 'Amazon-Suche') === 0) { $passt = 2; }   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
-            if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; continue; }
+            if ($passt === 0 && ($quelle === 'Kunden kauften auch' || strpos($quelle, 'Amazon-Suche') === 0)) { $passt = 2; }   // von Amazon als zugehörig gezeigt beziehungsweise von Hand geprüft   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
+            if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; if ($ok && $quelle === 'Katalog') { $rest[] = ['asin' => $a, 'quelle' => 'Bestes im Portfolio (Passung unklar)', 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => 0, 'pv' => $pv, 'rang' => $sc, 'ausgeschlossen' => false]; } continue; }
             $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
@@ -3644,6 +3666,10 @@ final class SAB {
         foreach ($out as $c) { if (strpos((string) $c['quelle'], 'Amazon-Suche') === 0) { $c['neu'] = true; $neu[] = $c; } else { $bestand[] = $c; } }
         $bs = array_slice($bestand, 0, $max);
         $liste = array_merge($bs, array_slice($neu, 0, max(2, min(4, 6 - count($bs)))));
+        if (count($liste) < 4 && $rest) {   // nichts Passendes gefunden: wenigstens die stärksten lieferbaren Produkte des Bestands zeigen
+            usort($rest, fn($p, $q2) => $q2['score'] <=> $p['score']);
+            $liste = array_merge($liste, array_slice($rest, 0, 4 - count($liste)));
+        }
         usort($liste, fn($p, $q2) => [(int) $q2['ok'], (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links der höchste Score
         return ['liste' => $liste, 'aussortiert' => $aus];   // hat der Bestand wenig Passendes, füllen Treffer der Amazon-Suche auf (bis zu vier)
     }
@@ -3935,6 +3961,20 @@ final class SAB {
         $h .= '<h3 style="margin-top:2em">Treffer der Amazon-Suche</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="such_kand">'
             . '<p class="description">Wo Amazon keine Alternativen zeigt: Die Mac-Sitzung sucht bei Amazon nach dem Titel des Produkts und trägt hier die besten passenden Treffer ein (gleiches Format: <code>ALTE-ASIN | ASIN1, ASIN2, ASIN3 | Datum</code>). Sie erscheinen oben als „Amazon-Suche“.</p>'
             . '<textarea name="sab_such_kand" rows="5" class="large-text code">' . esc_textarea((string) get_option('sab_such_kand', '')) . '</textarea><p><button class="button">Speichern</button> <span class="description">' . count(self::such_kandidaten()) . ' Produkte mit Suchtreffern.</span></p></form>';
+        $ag = self::auch_gekauft(); $hf = self::auch_haeufigkeit();
+        $h .= '<h3 style="margin-top:2em">Kunden kauften auch</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="auch_gekauft">'
+            . '<p class="description">Auf jeder Amazon-Produktseite steht „Kunden, die dies gekauft haben, kauften auch“. Die Mac-Sitzung trägt diese Produkte hier ein (Format: <code>ASIN | ASIN1, ASIN2, ASIN3 | Datum</code>, die ersten etwa zehn). Das Plugin zählt, wie oft ein Produkt vorkommt, ermittelt den Score und schlägt häufig Mitgekauftes beim Austausch vor.</p>'
+            . '<textarea name="sab_auch_gekauft" rows="5" class="large-text code">' . esc_textarea((string) get_option('sab_auch_gekauft', '')) . '</textarea><p><button class="button">Speichern</button> <span class="description">' . count($ag) . ' Produkte mit Mitgekauftem.</span></p></form>';
+        if ($hf) {
+            $h .= '<h4>Am häufigsten mitgekauft</h4><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="auch_uebernehmen"><table class="widefat striped" style="max-width:860px"><thead><tr><th>Produkt</th><th>Vorkommen</th><th>Score</th><th>Stand</th></tr></thead><tbody>';
+            foreach (array_slice($hf, 0, 20, true) as $a => $n) {
+                $x = $d['items'][$a] ?? null; $im = isset($namen[$a]);
+                $sc = $x ? self::score($x)[0] : null;
+                $t = ($namen[$a] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
+                $h .= '<tr><td><code>' . esc_html($a) . '</code> ' . esc_html($t) . ($n >= 3 && !$im ? ' <strong style="color:#b36b00">Häufung</strong>' : '') . '</td><td>' . (int) $n . '×</td><td>' . ($sc === null ? '–' : (int) $sc) . '</td><td>' . ($im ? 'im Portfolio' : '<label><input type="checkbox" name="sab_auch_neu[]" value="' . esc_attr($a) . '"> aufnehmen</label>') . '</td></tr>';
+            }
+            $h .= '</tbody></table><p><button class="button">Angekreuzte in die Produktliste aufnehmen</button></p></form>';
+        }
         // Automatik
         $auto = get_option('sab_auto_tausch') === '1'; $log = (array) get_option('sab_auto_log', []);
         $h .= '<h3 style="margin-top:2em">Automatik</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_auto">'
@@ -4438,6 +4478,14 @@ JS;
             } elseif ($form === 'such_kand') {
                 update_option('sab_such_kand', sanitize_textarea_field(wp_unslash($_POST['sab_such_kand'] ?? '')), false); delete_transient('sab_alle_asins'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }   // neue ASINs sofort im Hintergrund abfragen
                 $meldung = 'Suchtreffer gespeichert.';
+            } elseif ($form === 'auch_gekauft') {
+                update_option('sab_auch_gekauft', sanitize_textarea_field(wp_unslash($_POST['sab_auch_gekauft'] ?? '')), false); delete_transient('sab_alle_asins'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
+                $meldung = 'Mitgekauftes gespeichert.';
+            } elseif ($form === 'auch_uebernehmen') {
+                $dd = self::uebersicht_daten(self::land(''), false); $nn = 0; $prod = self::produkte(); $txt = rtrim((string) get_option('sab_produkte', ''));
+                foreach ((array) ($_POST['sab_auch_neu'] ?? []) as $a) { $a = self::asin((string) $a); if (strlen($a) !== 10 || isset($prod[$a])) { continue; } $txt .= "\n" . $a . ' | ' . self::kurzname_aus_titel((string) ($dd['items'][$a]['titel'] ?? '')); $nn++; }
+                update_option('sab_produkte', ltrim($txt), false); delete_transient('sab_alle_asins');
+                $meldung = $nn . ' Produkte in die Produktliste aufgenommen (Kurznamen bitte prüfen).';
             } elseif ($form === 'austausch_auto') {
                 update_option('sab_auto_tausch', !empty($_POST['sab_auto_tausch']) ? '1' : '0', false);
                 update_option('sab_auto_schwelle', max(0, min(100, (int) ($_POST['sab_auto_schwelle'] ?? 55))), false);

@@ -1056,4 +1056,10 @@ $mAm = new ReflectionMethod('SAB', 'aenderungen_markieren'); $mAm->setAccessible
 [$vm, $nm] = $mAm->invoke(null, 'Text [aawp box="B0AAAAAAA1"] und <a href="https://www.amazon.de/dp/B0BBBBBBB2">x</a> [amz_link asin="B0CCCCCCC3"]a[/amz_link]', 'Text [amz_produkt asin="B0AAAAAAA1" land="de"] und [amz_link asin="B0BBBBBBB2"]x[/amz_link] [amz_link asin="B0CCCCCCC3"]a[/amz_link]');
 ok(substr_count($vm, 'class="sab-chg ') === 2 && substr_count($nm, 'class="sab-chg ') === 2 && strpos($nm, 'B0CCCCCCC3') !== false && strpos($vm, 'Produkt B0AAAAAAA1') !== false, 'Änderungen rot markiert: nur Geändertes, Unverändertes nicht');
 
+// ---- 0.75.15: Kunden kauften auch ----
+$GLOBALS['opt']['sab_auch_gekauft'] = "B0AAAAAAA1 | B0XXXXXXX1, B0XXXXXXX2 | 2026-10-25\nB0AAAAAAA2 | B0XXXXXXX1, B0AAAAAAA2";
+$mAh = new ReflectionMethod('SAB', 'auch_haeufigkeit'); $mAh->setAccessible(true);
+$ah = $mAh->invoke(null);
+ok(($ah['B0XXXXXXX1'] ?? 0) === 2 && ($ah['B0XXXXXXX2'] ?? 0) === 1 && !isset($ah['B0AAAAAAA2']), 'Kunden kauften auch: Häufigkeit gezählt, eigene ASIN ignoriert');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
