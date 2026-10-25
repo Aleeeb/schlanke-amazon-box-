@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.0
+ * Version: 0.75.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.0';
+    const VERSION = '0.75.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2821,6 +2821,7 @@ final class SAB {
         $namen = self::produkte(); $ja = fn($v) => $v === null ? '?' : ($v ? '<strong style="color:#1a7f37">ja</strong>' : '<strong style="color:#a00">nein</strong>');
         $h = '<h2>Übersicht aller Produkte (' . esc_html($land) . ')</h2>'
            . '<p class="description">Stand höchstens 1 Stunde alt. Bilder kommen hier direkt von Amazon (nur im Admin-Bereich, nicht für Besucher). Die Lieferzeit liefert die API nicht; sie ist nur auf der Amazon-Seite mit spanischer Lieferadresse sichtbar.</p>'
+           . '<p class="description"><strong>Reihenfolge:</strong> nach Priorität. Priorität = Dringlichkeit (0 bis 100: nicht lieferbar oder Status unklar = 100, sonst schwacher Score, sehr lange Lieferzeit oder wenig Sterne) mal Zahl der Seiten, auf denen das Produkt steht. Oben steht also, was auf vielen Seiten dringend geprüft werden muss. Spaltenkopf anklicken, um anders zu sortieren.</p>'
            . '<p><button class="button" name="sab_neu" value="1">Übersicht neu laden</button></p>';
         $h .= self::stand_hinweis($d);
         if ($d['fehler']) { $h .= '<div class="notice notice-warning inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
@@ -2828,13 +2829,22 @@ final class SAB {
         $kz = self::klickzahlen(); $fund = self::fundstellen(self::alle_asins()); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
         $h .= self::uebersicht_css();
         $h .= self::uebersicht_kopf(true);
+        $zl = []; $unbenutzt = [];
         foreach (self::alle_asins() as $asin) {
-            $x = $d['items'][$asin] ?? null;
+            $x = $d['items'][$asin] ?? null; $ns = count($fund[$asin] ?? []);
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
-            if (!$x) { $h .= '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'; continue; }
-            $h .= self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true);
+            if (!$x) {
+                if ($ns === 0) { $unbenutzt[] = $asin; continue; }   // Amazon kennt es nicht und es steht auf keiner Seite: kein Handlungsbedarf, nicht ganz oben anzeigen
+                $zl[] = ['prio' => 100 * $ns, 'dr' => 100, 'sc' => -1, 'h' => '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'];
+                continue;
+            }
+            $sc = self::score($x)[0];
+            $zl[] = ['prio' => self::tausch_dringlichkeit($x, $sc) * $ns, 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
         }
-        return $h . '</tbody></table>' . self::bild_gross_html() . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Wartung“.</span></p>';
+        usort($zl, fn($a, $b) => [$b['prio'], $b['dr'], $a['sc']] <=> [$a['prio'], $a['dr'], $b['sc']]);   // wichtigste zuerst, dann dringlichste, dann schwächster Score
+        foreach ($zl as $z) { $h .= $z['h']; }
+        $nb = $unbenutzt ? '<details style="margin:10px 0"><summary>' . count($unbenutzt) . ' Produkt(e), die Amazon nicht kennt und die auf keiner Seite stehen (nicht in der Tabelle)</summary><p><code>' . esc_html(implode(', ', $unbenutzt)) . '</code></p></details>' : '';
+        return $h . '</tbody></table>' . $nb . self::bild_gross_html() . self::tabellenhilfe() . '<p><button class="button button-primary" name="sab_markieren" value="1">Markierungen speichern</button> <span class="description">Favorit: wird in Ersatzlisten bevorzugt. Ersetzen: rutscht ans Ende und steht unter „Ausfälle und Wartung“.</span></p>';
     }
 
     // ---------- Umbau-Werkzeug: feste Amazon-Links in Artikeln => Plugin-Platzhalter ----------
