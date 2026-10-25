@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.63.0
+ * Plugin Name: 1a Amazon Box 0.63.1
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.63.0
+ * Version: 0.63.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.63.0';
+    const VERSION = '0.63.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -3320,7 +3320,16 @@ final class SAB {
             $best = $k['liste'][0] ?? null;
             $voraus = $best && $best['ok'] && $best['score'] !== null && $best['score'] >= $schwelle && $best['passt'] >= 1;
             $wo = '<strong>' . (int) $z['n'] . '×</strong> auf <strong>' . (int) $z['seiten'] . '</strong> Seite' . ($z['seiten'] === 1 ? '' : 'n');
-            if ($z['f']) { $erste = array_key_first($z['f']); $wo .= ' · <a href="' . esc_url(add_query_arg('sab_zeige', $alt, (string) get_permalink((int) $erste))) . '" target="_blank" rel="noopener">Stelle ansehen</a> · <a href="' . esc_url(admin_url('post.php?post=' . (int) $erste . '&action=edit&sab_zeige=' . $alt)) . '" target="_blank" rel="noopener">Bearbeiten</a>'; }
+            if ($z['f']) {
+                $an = ''; $ed = ''; $nr = 0;
+                foreach ($z['f'] as $pid => $f) {
+                    if (++$nr > 15) { break; }
+                    $tt = ' title="' . esc_attr((string) ($f['titel'] ?: ('Beitrag ' . $pid)) . ' (' . (int) $f['n'] . '×)') . '"';
+                    $an .= ' <a href="' . esc_url(add_query_arg('sab_zeige', $alt, (string) get_permalink((int) $pid))) . '" target="_blank" rel="noopener"' . $tt . '>' . $nr . '</a>';
+                    $ed .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $alt)) . '" target="_blank" rel="noopener"' . $tt . '>' . $nr . '</a>';
+                }
+                $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 15 ? ' …' : '');
+            }
             $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
                 . '<div><strong>Zu tauschen:</strong> <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><small style="color:#a00">' . esc_html($z['grund']) . '</small> · ' . $wo . '</div></div>'
                 . '<div style="display:flex;flex-wrap:wrap;gap:10px">';
