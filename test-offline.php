@@ -957,6 +957,8 @@ ok(!preg_match('#</h[1-6]>\s*(<table|\[amz_karten)#', $pl['neu']), 'Entzerren: k
 $mA = new ReflectionMethod('SAB', 'austausch_html'); $mA->setAccessible(true);
 $GLOBALS['opt']['sab_auto_log'] = [['ts' => time(), 'alt' => 'B0ALT00001', 'neu' => 'B0NEU00001', 'score' => 70]];
 $ah = (string) $mA->invoke(null);
+file_put_contents('/tmp/ps.html', $ah);
+ok(strpos($ah, 'sab-ps-in') !== false && strpos($ah, 'window.SAB_PS=') !== false && strpos($ah, 'name="sab_eigen_name[') !== false, 'Austausch-Reiter: Bestandssuche beim Eintippen und Kurzname-Feld vorhanden');
 ok(strpos($ah, 'Zu tauschen') !== false && strpos($ah, 'Automatisch getauscht') !== false && strpos($ah, 'Rückgängig') !== false, 'Austausch-Reiter rendert mit Prioritätsliste und Protokoll');
 unset($GLOBALS['opt']['sab_auto_log']);
 $mAk = new ReflectionMethod('SAB', 'alt_kennzahlen'); $mAk->setAccessible(true);
