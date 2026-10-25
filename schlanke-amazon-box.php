@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.60.0
+ * Plugin Name: 1a Amazon Box 0.60.2
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.60.0
+ * Version: 0.60.2
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.60.0';
+    const VERSION = '0.60.2';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -1567,24 +1567,38 @@ final class SAB {
         $token = self::token($land); $tag = self::tag($land);
         if (!$token || !$tag) { return ['fehler' => 'Zugangsdaten oder Partner-ID fehlen.', 'items' => []]; }
         $mp = self::LAENDER[$land][0]; $items = []; $fehler = '';
-        foreach (array_chunk(self::alle_asins(), 10) as $paket) {
-            $r = self::api_post([
-                'timeout' => 15,
-                'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
-                'body'    => wp_json_encode([
-                    'itemIds' => $paket, 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag,
-                    'resources' => ['images.primary.large', 'images.variants.large', 'itemInfo.title',
+        $ressourcen = ['images.primary.large', 'images.variants.large', 'itemInfo.title',
                         'offersV2.listings.availability', 'offersV2.listings.price', 'offersV2.listings.isBuyBoxWinner',
                         'offersV2.listings.merchantInfo', 'offersV2.listings.dealDetails', 'offersV2.listings.type',
-                        'browseNodeInfo.browseNodes', 'browseNodeInfo.websiteSalesRank'],
-                ]),
+                        'browseNodeInfo.browseNodes', 'browseNodeInfo.websiteSalesRank'];
+        $abfrage = function (array $paket) use ($token, $mp, $tag, $ressourcen) {
+            return self::api_post([
+                'timeout' => 15,
+                'headers' => ['Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'x-marketplace' => $mp],
+                'body'    => wp_json_encode(['itemIds' => $paket, 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag, 'resources' => $ressourcen]),
             ]);
+        };
+        $ok_pakete = 0; $ungueltig = [];
+        foreach (array_chunk(self::alle_asins(), 10) as $paket) {
+            $r = $abfrage($paket);
+            $antworten = [];
             if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 200) {
-                $fehler = 'Amazon-Abfrage fehlgeschlagen (Code ' . (is_wp_error($r) ? 'Netz' : wp_remote_retrieve_response_code($r))
-                        . '): ' . (is_wp_error($r) ? '' : mb_substr((string) wp_remote_retrieve_body($r), 0, 900));
-                continue;
-            }
-            $j = json_decode(wp_remote_retrieve_body($r), true);
+                // ein ungültiger Eintrag lässt das ganze Paket scheitern: einzeln nachfragen, damit der Rest nicht verloren geht
+                if (count($paket) > 1 && !is_wp_error($r) && in_array(wp_remote_retrieve_response_code($r), [400, 404, 422], true)) {
+                    foreach ($paket as $einzeln) {
+                        $r1 = $abfrage([$einzeln]);
+                        if (is_wp_error($r1) || wp_remote_retrieve_response_code($r1) !== 200) { $ungueltig[] = $einzeln; continue; }
+                        $antworten[] = json_decode(wp_remote_retrieve_body($r1), true);
+                    }
+                    if (!$antworten) { continue; }
+                } else {
+                    $fehler = 'Amazon-Abfrage fehlgeschlagen (Code ' . (is_wp_error($r) ? 'Netz' : wp_remote_retrieve_response_code($r))
+                            . '): ' . (is_wp_error($r) ? '' : mb_substr((string) wp_remote_retrieve_body($r), 0, 900));
+                    continue;
+                }
+            } else { $antworten[] = json_decode(wp_remote_retrieve_body($r), true); }
+            $ok_pakete++;
+            foreach ($antworten as $j) {
             foreach ((array) ($j['itemsResult']['items'] ?? []) as $it) {
                 $l = self::bestes_angebot($it);
                 $bilder = [];
@@ -1606,7 +1620,11 @@ final class SAB {
                     'roh'      => mb_substr((string) wp_json_encode($it['offersV2'] ?? null), 0, 1800),
                 ];
             }
+            }
         }
+        if ($ungueltig && !$fehler) { $fehler = ''; }   // einzelne ungültige ASINs sind kein Grund, den ganzen Stand zu verwerfen
+        update_option('sab_ungueltige_asins', array_values(array_unique($ungueltig)), false);
+        if ($fehler !== '' && $ok_pakete > 0) { update_option('sab_uebersicht_teilfehler', $fehler, false); $fehler = ''; } else { delete_option('sab_uebersicht_teilfehler'); }
         // Bewertungen liefert diese Schnittstelle nicht (Antwort immer ohne Werte): keine Abfrage mehr, das spart Abfragen (Limit 1 pro Sekunde)
         $bew = ['fehler' => '', 'werte' => []];
         $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
@@ -3179,12 +3197,16 @@ final class SAB {
         foreach (array_reverse($bewegen) as $i) { $raus[$i] = $u[$i]; $rest = substr($rest, 0, $u[$i]['s']) . substr($rest, $u[$i]['e']); }
         $rest = preg_replace('#(<hr\s*/?>\s*){2,}#i', '<hr />' . "\n", $rest);
         $stellen = self::entz_stellen($rest); $plaetze = [];   // bereits vergebene Stellen
+        // Wörter, die fast überall im Artikel vorkommen (z. B. „Pflanzen“, „Schnecken“), sagen nichts über die passende Stelle
+        $flach = preg_replace('/\s+/', ' ', strip_tags(preg_replace('/\[[^\]]*\]/', ' ', mb_scrub($rest)))); $stuecke = str_split($flach, 1500); $haeufigkeit = [];
+        foreach ($stuecke as $st1) { foreach (self::woerter($st1) as $w) { $haeufigkeit[$w] = ($haeufigkeit[$w] ?? 0) + 1; } }
+        $haeufig = array_keys(array_filter($haeufigkeit, fn($n) => $n >= max(3, 0.4 * count($stuecke))));
         $feste = self::entz_einheiten($rest);
         ksort($raus);
         foreach ($raus as $i => $blk) {
             $text = ''; foreach ($blk['asins'] as $a) { $text .= ' ' . ($namen[$a] ?? '') . ' ' . (string) ($d['items'][$a]['titel'] ?? ''); }
             preg_match_all('/titel="([^"]*)"/u', $blk['html'], $tt); $text .= ' ' . implode(' ', $tt[1]) . ' ' . trim(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', $blk['html'])));
-            $w1 = self::woerter($text); $a1 = self::arten($text);
+            $w1 = array_values(array_diff(self::woerter($text), $haeufig)); $a1 = self::arten($text);
             $beste = null;
             foreach ($stellen as $pos) {
                 $txt = function (int $von, int $len) use ($rest): string { return trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace('/\[[^\]]*\]/', ' ', mb_scrub(substr($rest, max(0, $von), max(0, $len))))))); };
@@ -3193,7 +3215,7 @@ final class SAB {
                 $abst = PHP_INT_MAX;
                 foreach (array_merge($feste, array_map(fn($p) => ['s' => $p, 'e' => $p], $plaetze)) as $f) { $abst = min($abst, $pos <= $f['s'] ? $f['s'] - $pos : ($pos >= $f['e'] ? $pos - $f['e'] : 0)); }
                 if ($abst === 0) { continue; }
-                $wert = 10 * $tr + 25 * $ar + ($abst >= self::ENTZERREN_ABSTAND ? 0 : -1000 + (int) ($abst / 10));
+                $wert = 10 * $tr + 25 * $ar + ($abst >= self::ENTZERREN_ABSTAND ? min($abst, 20000) / 1000 : -1000 + (int) ($abst / 10));
                 if ($beste === null || $wert > $beste['wert']) { $beste = ['pos' => $pos, 'wert' => $wert, 'tr' => $tr, 'ar' => $ar, 'abst' => $abst === PHP_INT_MAX ? 99999 : $abst, 'fenster' => $fenster]; }
             }
             if ($beste === null) { continue; }
@@ -3221,7 +3243,7 @@ final class SAB {
         $h .= '<p class="description">Es wird nichts gespeichert, bevor du „Jetzt entzerren“ klickst. Je Haufen bleibt der erste Block stehen, die anderen wandern an die Stelle, an der der Artikel am meisten über ihre Produkte schreibt, mit möglichst viel Abstand zu anderen Blöcken (Ziel: mindestens ' . self::ENTZERREN_ABSTAND . ' Zeichen Text).</p><ol>';
         foreach ($plan['schritte'] as $st) {
             $pn = []; foreach ($st['unit']['asins'] as $a) { $pn[] = '<code>' . esc_html($a) . '</code> ' . esc_html(($namen[$a] ?? '') ?: self::kurzname_aus_titel((string) ($d['items'][$a]['titel'] ?? ''))); }
-            $h .= '<li><strong>Block mit ' . implode(' und ', $pn ?: ['(ohne erkennbare ASIN)']) . '</strong><br>kommt neu hinter: <em>„… ' . esc_html($st['kontext']) . '“</em><br><small>Passung: ' . (int) $st['tr'] . ' gemeinsame Wörter, ' . (int) $st['ar'] . ' gleiche Produktart · Abstand zum nächsten Block: ' . ($st['abst'] >= 99999 ? 'sehr groß' : (int) $st['abst'] . ' Zeichen') . ($st['abst'] < self::ENTZERREN_ABSTAND ? ' <span style="color:#a00">(weniger als gewünscht)</span>' : '') . '</small></li>';
+            $h .= '<li><strong>Block mit ' . implode(' und ', $pn ?: ['(ohne erkennbare ASIN)']) . '</strong><br>kommt neu hinter: <em>„… ' . esc_html($st['kontext']) . '“</em><br><small>' . ((int) $st['tr'] + (int) $st['ar'] === 0 ? 'Passung: keine thematisch passende Stelle gefunden, deshalb gleichmäßig verteilt' : 'Passung: ' . (int) $st['tr'] . ' gemeinsame Wörter, ' . (int) $st['ar'] . ' gleiche Produktart') . ' · Abstand zum nächsten Block: ' . ($st['abst'] >= 99999 ? 'sehr groß' : (int) $st['abst'] . ' Zeichen') . ($st['abst'] < self::ENTZERREN_ABSTAND ? ' <span style="color:#a00">(weniger als gewünscht)</span>' : '') . '</small></li>';
         }
         $h .= '</ol><form method="post" style="margin:12px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="entzerren_los"><input type="hidden" name="sab_id" value="' . $id . '"><input type="hidden" name="sab_hash" value="' . md5($c) . '"><button class="button button-primary button-hero">Jetzt entzerren</button> <span class="description">Der Artikel wird vorher gesichert, danach siehst du ihn mit „Stelle ansehen“ im Browser.</span></form>';
         return $h;

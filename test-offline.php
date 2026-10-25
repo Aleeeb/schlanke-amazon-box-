@@ -7,6 +7,7 @@ function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
 function add_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return 'schlanke-amazon-box/schlanke-amazon-box.php'; } function wp_next_scheduled($x) { return true; }
 function get_option($k, $d = false) { return $GLOBALS['opt'][$k] ?? $d; }
 function update_option($k, $v, $a = null) { $GLOBALS['opt'][$k] = $v; return true; }
+function delete_option($k) { unset($GLOBALS['opt'][$k]); return true; }
 function get_transient($k) { return $GLOBALS['tr'][$k] ?? false; }
 function set_transient($k, $v, $t) { $GLOBALS['tr'][$k] = $v; }
 function delete_transient($k) { unset($GLOBALS['tr'][$k]); }
@@ -17,6 +18,7 @@ function is_wp_error($x) { return false; }
 function wp_remote_post($u, $a) {
     if (strpos($u, 'auth') !== false) return ['code' => 200, 'body' => json_encode(['access_token' => 't', 'expires_in' => 3600])];
     $ids = json_decode($a['body'], true)['itemIds']; $items = [];
+    foreach ($ids as $id) { if (($GLOBALS['bad'] ?? '') === $id) { return ['code' => 400, 'body' => 'ungueltig']; } }
     foreach ($ids as $id) { $items[] = $GLOBALS['http'][$id] ?? null; }
     return ['code' => 200, 'body' => json_encode(['itemsResult' => ['items' => array_values(array_filter($items))]])];
 }
@@ -903,5 +905,14 @@ ok($pl['haufen'] === 1 && count($pl['schritte']) === 2, 'Entzerren: Haufen mit d
 $neu = $pl['neu']; $pK = strpos($neu, 'B0ENTZ0005'); $pG = strpos($neu, 'B0ENTZ0003'); $pZ = strpos($neu, 'B0ENTZ0001'); $pKup = strpos($neu, 'Kupferband gegen Schnecken'); $pGl = strpos($neu, 'Gartenglocke schützt');
 ok($pZ < $pG && $pZ < $pK && $pK > $pKup - 200 && $pG > $pGl - 100, 'Entzerren: Kupfer-Block hinter dem Kupfer-Absatz, Glocken-Block hinter dem Glocken-Absatz');
 ok(substr_count($neu, 'B0ENTZ') === substr_count($art, 'B0ENTZ') && substr_count($neu, '<table') === 3, 'Entzerren: kein Produkt geht verloren');
+
+// ---- 0.60.2: ein ungültiger Eintrag verwirft nicht mehr den ganzen Abruf ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_amz_alt'], $GLOBALS['opt']['sab_claude_empf']);
+$GLOBALS['opt']['sab_produkte'] = "B0GUT00001 | Gut 1\nB0SCHLECHT | Schlecht\nB0GUT00002 | Gut 2"; unset($GLOBALS['tr']['sab_alle_asins']);
+foreach (['B0GUT00001', 'B0GUT00002'] as $g) { $GLOBALS['http'][$g] = ['asin' => $g, 'detailPageURL' => 'https://www.amazon.es/dp/' . $g, 'itemInfo' => ['title' => ['displayValue' => 'Titel ' . $g]], 'offersV2' => ['listings' => [['availability' => ['type' => 'IN_STOCK'], 'isBuyBoxWinner' => true, 'price' => ['money' => ['amount' => 5.0, 'displayAmount' => '5 €']]]]]]; }
+$GLOBALS['bad'] = 'B0SCHLECHT'; $wpdb_u = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null;
+$ur = SAB::uebersicht_holen('es');
+$GLOBALS['bad'] = ''; $GLOBALS['wpdb'] = $wpdb_u;
+ok($ur['fehler'] === '' && isset($ur['items']['B0GUT00001']) && isset($ur['items']['B0GUT00002']) && !isset($ur['items']['B0SCHLECHT']) && in_array('B0SCHLECHT', (array) get_option('sab_ungueltige_asins', []), true), 'Abruf: ein ungültiger Eintrag lässt die anderen nicht scheitern und wird vermerkt');
 
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
