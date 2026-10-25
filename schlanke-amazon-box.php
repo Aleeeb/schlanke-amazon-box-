@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.11
+ * Version: 0.70.12
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.11';
+    const VERSION = '0.70.12';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -1216,7 +1216,7 @@ final class SAB {
             $code = is_wp_error($r) ? $r->get_error_message() : wp_remote_retrieve_response_code($r);
             $m = (!is_wp_error($r) && $code === 200) ? json_decode((string) wp_remote_retrieve_body($r), true) : [];
             update_option('sab_update_status', ['ts' => time(), 'code' => (string) $code, 'version' => is_array($m) ? (string) ($m['version'] ?? '') : ''], false);
-            set_transient('sab_update_json', is_array($m) ? $m : [], $m ? 6 * HOUR_IN_SECONDS : 15 * MINUTE_IN_SECONDS);  // bei Fehlern bald erneut versuchen
+            set_transient('sab_update_json', is_array($m) ? $m : [], $m ? 30 * MINUTE_IN_SECONDS : 15 * MINUTE_IN_SECONDS);  // bei Fehlern bald erneut versuchen
         }
         $v = (string) ($m['version'] ?? ''); $zip = (string) ($m['zip'] ?? '');
         if ($v === '' || strpos($zip, self::UPDATE_REPO) !== 0) { return $t; }
