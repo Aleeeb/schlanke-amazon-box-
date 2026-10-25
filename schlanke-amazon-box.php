@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.23
+ * Version: 0.75.24
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.23';
+    const VERSION = '0.75.24';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4732,8 +4732,7 @@ JS;
             $vid = (int) ($_GET['vorschau'] ?? ($_POST['sab_vorschau'] ?? 0));
             if ($vid) { echo self::umbau_vorschau($vid); }
             if ($liste) {
-                echo '<table class="widefat striped" style="margin-top:1em"><thead><tr><th>Artikel</th><th>feste Links</th><th>Kurzlinks</th><th>Stand</th><th>Aktion</th></tr></thead><tbody>';
-                foreach (array_slice($liste, 0, 200) as $a) {
+                $zeile = function (array $a): void {
                     $vu = add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'));
                     echo '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . (int) $a['fest'] . '</td><td>' . (int) $a['kurz'] . '</td>'
                        . '<td>' . ($a['fertig'] ? '<strong style="color:#1a7f37">umgebaut</strong>' : 'offen') . '</td><td><a class="button" href="' . esc_url($vu) . '">Vorschau</a> ';
@@ -4741,8 +4740,17 @@ JS;
                     echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_id" value="' . (int) $a['id'] . '">'
                        . ($a['fertig'] ? '<input type="hidden" name="sab_form" value="umbau_zurueck_einzeln"><button class="button">Rückgängig</button>' : '<input type="hidden" name="sab_form" value="umbau_einzeln"><button class="button button-primary">Umbauen</button>')
                        . '</form></td></tr>';
+                };
+                $kopf = '<table class="widefat striped" style="margin-top:1em"><thead><tr><th>Artikel</th><th>feste Links</th><th>Kurzlinks</th><th>Stand</th><th>Aktion</th></tr></thead><tbody>';
+                $offene = array_values(array_filter($liste, fn($x) => !$x['fertig'])); $fertige = array_values(array_filter($liste, fn($x) => $x['fertig']));
+                echo '<h3>Noch offen (' . count($offene) . ')</h3>' . $kopf;
+                foreach (array_slice($offene, 0, 200) as $a) { $zeile($a); }
+                echo '</tbody></table>';
+                if ($fertige) {
+                    echo '<details style="margin-top:1em"><summary><strong>Schon umgebaut (' . count($fertige) . ')</strong></summary>' . $kopf;
+                    foreach (array_slice($fertige, 0, 200) as $a) { $zeile($a); }
+                    echo '</tbody></table></details>';
                 }
-                echo '</tbody></table>' . (count($liste) > 200 ? '<p class="description">Es werden die ersten 200 Artikel gezeigt. „Alle auf einmal“ unten erfasst alle.</p>' : '');
             }
             $namen = self::produkte(); $an = self::umbau_analyse();
             echo '<details style="margin-top:1.5em"><summary><strong>Alle auf einmal umbauen oder zurücksetzen</strong></summary>';
