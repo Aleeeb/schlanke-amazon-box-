@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.70.8
+ * Version: 0.70.9
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.70.8';
+    const VERSION = '0.70.9';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -1392,8 +1392,14 @@ final class SAB {
     public static function zeige_editor_skript(): void {
         $a = isset($_GET['sab_zeige']) ? preg_replace('/[^A-Za-z0-9]/', '', (string) wp_unslash($_GET['sab_zeige'])) : '';
         if (strlen($a) < 5 || strlen($a) > 12 || !current_user_can('edit_posts')) { return; }
-        echo '<script>(function(){var a=' . wp_json_encode($a) . ';function los(){'
-           . 'var ta=document.getElementById("content");if(!ta){return}'
+        echo '<script>(function(){var a=' . wp_json_encode($a) . ';'
+           . 'function ban(t){var b=document.createElement("div");b.style.cssText="position:fixed;left:180px;right:0;top:32px;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px sans-serif;text-align:center";b.textContent=t;b.onclick=function(){b.remove()};document.body.appendChild(b)}'
+           . 'function gb(n){n=n||0;var wd=window.wp&&wp.data;var be=wd&&wd.select("core/block-editor");var bl=be?be.getBlocks():[];if(!bl.length){if(n<25){setTimeout(function(){gb(n+1)},400)}else{ban("Der Editor ist nicht geladen; bitte mit Strg+F nach "+a+" suchen.")}return}'
+           . 'function fi(l){for(var i=0;i<l.length;i++){var b=l[i],t=JSON.stringify(b.attributes||{})+String(b.originalContent||"");if(t.indexOf(a)>=0){return b}var r=fi(b.innerBlocks||[]);if(r){return r}}return null}'
+           . 'var f=fi(bl);if(!f){ban("Im Text habe ich "+a+" nicht gefunden (vielleicht über einen Platzhalter oder eine Austausch-Regel).");return}'
+           . 'wd.dispatch("core/block-editor").selectBlock(f.clientId);setTimeout(function(){var e=document.getElementById("block-"+f.clientId);if(!e){var fr=document.querySelector("iframe[name=editor-canvas]");e=fr&&fr.contentDocument&&fr.contentDocument.getElementById("block-"+f.clientId)}if(e){e.scrollIntoView({block:"center"})}},300);ban(a+" steht im markierten Block ("+f.name+"). Zum Schließen klicken.")}'
+           . 'function los(){'
+           . 'var ta=document.getElementById("content");if(!ta){gb();return}'
            . 'if(window.switchEditors&&document.getElementById("wp-content-wrap")&&document.getElementById("wp-content-wrap").className.indexOf("tmce-active")>=0){try{switchEditors.go("content","html")}catch(e){}}'
            . 'setTimeout(function(){var t=document.getElementById("content");var v=t.value,i=v.indexOf(a);'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:180px;right:0;top:32px;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px sans-serif;text-align:center";'
@@ -1408,9 +1414,11 @@ final class SAB {
     public static function zeige_skript(): void {
         $a = isset($_GET['sab_zeige']) ? preg_replace('/[^A-Za-z0-9]/', '', (string) wp_unslash($_GET['sab_zeige'])) : '';   // ASIN oder Kurzlink-Kennung (Groß- und Kleinschreibung zählt)
         if (strlen($a) < 5 || strlen($a) > 12 || !function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts')) { return; }
-        echo '<script>(function(){var a=' . wp_json_encode($a) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
+        $eid = function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0;
+        $ed = $eid && current_user_can('edit_post', $eid) ? admin_url('post.php?post=' . $eid . '&action=edit&sab_zeige=' . rawurlencode($a)) : '';
+        echo '<script>(function(){var ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:10px 16px;font:600 15px sans-serif;text-align:center";'
-           . 'b.textContent=s.length?"Hier steht "+a+" ("+s.length+" Stelle"+(s.length>1?"n":"")+", rot markiert)":"Im sichtbaren Text habe ich "+a+" nicht gefunden (vielleicht in einem Bild oder Code-Block).";document.body.appendChild(b);'
+           . 'b.textContent=s.length?"Hier steht "+a+" ("+s.length+" Stelle"+(s.length>1?"n":"")+", rot markiert)":"Im sichtbaren Text steht "+a+" nicht"+(ed?"; ich öffne den Editor an der Stelle ...":" (vielleicht in einem Bild oder Code-Block).");document.body.appendChild(b);if(!s.length&&ed){setTimeout(function(){location.href=ed},1200)}'
            . 'for(var i=0;i<s.length;i++){s[i].style.outline="4px solid #d63638";s[i].style.background="#fde8e8";}'
            . 'if(s.length){setTimeout(function(){s[0].scrollIntoView({block:"center"})},300)}})();</script>';
     }
@@ -3275,7 +3283,9 @@ final class SAB {
         $bestand = []; $neu = [];
         foreach ($out as $c) { if (strpos((string) $c['quelle'], 'Amazon-Suche') === 0) { $c['neu'] = true; $neu[] = $c; } else { $bestand[] = $c; } }
         $bs = array_slice($bestand, 0, $max);
-        return ['liste' => array_merge($bs, array_slice($neu, 0, max(2, min(4, 6 - count($bs))))), 'aussortiert' => $aus];   // hat der Bestand wenig Passendes, füllen Treffer der Amazon-Suche auf (bis zu vier)
+        $liste = array_merge($bs, array_slice($neu, 0, max(2, min(4, 6 - count($bs)))));
+        usort($liste, fn($p, $q2) => [(int) $q2['ok'], (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links der höchste Score
+        return ['liste' => $liste, 'aussortiert' => $aus];   // hat der Bestand wenig Passendes, füllen Treffer der Amazon-Suche auf (bis zu vier)
     }
 
     // ---------- Haufen entzerren: Produktblöcke dorthin schieben, wo der Artikel über sie schreibt ----------
