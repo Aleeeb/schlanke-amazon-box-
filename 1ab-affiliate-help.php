@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.12
+ * Version: 0.75.13
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.12';
+    const VERSION = '0.75.13';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2026,11 +2026,11 @@ final class SAB {
            . '<textarea name="sab_provision" rows="5" class="large-text code">' . esc_textarea((string) get_option('sab_provision', '')) . '</textarea><p><button class="button button-primary">Provisionen speichern</button></p></form>';
         $d0 = self::uebersicht_daten($land, false); $fehlt = self::handdaten_fehlen($d0); $nm0 = self::produkte();
         if ($fehlt) {
-            $h .= '<h3 style="margin-top:2em">Handdaten fehlen (' . count($fehlt) . ')</h3><p class="description">Für diese Produkte fehlen Sterne, Prime oder Lieferzeit oder sie sind älter als 30 Tage. Der montägliche Rundgang sammelt sie für Madrid und Barcelona.</p><ul style="columns:2;max-width:860px">';
+            $h .= '<h3 style="margin-top:2em">Handdaten fehlen (' . count($fehlt) . ')</h3><p class="description">Für diese Produkte fehlen Sterne, Prime oder Lieferzeit oder sie sind älter als 30 Tage. Der montägliche Rundgang sammelt sie für ' . (self::land('') === 'de' ? 'Berlin (10115) und München (80331)' : 'Madrid und Barcelona') . '.</p><ul style="columns:2;max-width:860px">';
             foreach ($fehlt as $a => $t) { $h .= '<li><code>' . esc_html($a) . '</code> ' . esc_html(($nm0[$a] ?? '') ?: mb_substr((string) ($d0['items'][$a]['titel'] ?? ''), 0, 40)) . ' <small>(' . esc_html($t) . ')</small></li>'; }
             $h .= '</ul>';
         }
-        $h .= '<h3 style="margin-top:2em">Von Hand gepflegte Daten</h3><p class="description">Die Amazon-Schnittstelle liefert keine Sterne, kein Prime und keine Lieferzeit. Trag sie hier ein, eine Zeile pro Produkt: <code>ASIN | Sterne | Anzahl Bewertungen | Prime (ja/nein) | Lieferzeit in Tagen je Hauptstadt | Datum | Provision in %</code>, zum Beispiel <code>B001AUKTYG | 4,1 | 588 | ja | Madrid 2, Barcelona 3, Sevilla 2 | 2026-10-24 | 3</code>. Die Provision steht in der SiteStripe auf der Amazon-Seite (Tarif); sie gilt für dieses Produkt und geht der Kategorietabelle vor. Leere Felder sind erlaubt. Die Angaben erscheinen als Chips in der Übersicht und fließen in den Score ein (Gewicht oben).</p>'
+        $h .= '<h3 style="margin-top:2em">Von Hand gepflegte Daten</h3><p class="description">Die Amazon-Schnittstelle liefert keine Sterne, kein Prime und keine Lieferzeit. Trag sie hier ein, eine Zeile pro Produkt: <code>ASIN | Sterne | Anzahl Bewertungen | Prime (ja/nein) | Lieferzeit in Tagen je Hauptstadt | Datum | Provision in %</code>, zum Beispiel <code>B001AUKTYG | 4,1 | 588 | ja | ' . (self::land('') === 'de' ? 'Berlin 2, München 3, Hamburg 2' : 'Madrid 2, Barcelona 3, Sevilla 2') . ' | 2026-10-24 | 3</code>. Die Provision steht in der SiteStripe auf der Amazon-Seite (Tarif); sie gilt für dieses Produkt und geht der Kategorietabelle vor. Leere Felder sind erlaubt. Die Angaben erscheinen als Chips in der Übersicht und fließen in den Score ein (Gewicht oben).</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="manuell">'
            . '<textarea name="sab_manuell" rows="10" class="large-text code">' . esc_textarea((string) get_option('sab_manuell', '')) . '</textarea><p><button class="button button-primary">Handdaten speichern</button></p></form>';
         $d = self::uebersicht_daten($land, false);
