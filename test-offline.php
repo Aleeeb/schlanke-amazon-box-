@@ -999,4 +999,19 @@ $vt = '<p>' . $lor(2800) . '</p>' . $tz('B0TAB40001', 'B0TAB40002', 'B0TAB40003'
 $pt = SAB::entzerren_plan($vt, ['items' => []], []);
 ok(count($pt['schritte']) === 1 && substr_count($pt['neu'], '<table') === 2 && substr_count($pt['neu'], 'B0TAB4000') === substr_count($vt, 'B0TAB4000'), 'Entzerren: Tabelle mit vier Spalten wird in zwei Zweiertabellen geteilt');
 ok(preg_match_all('#<tr><td>\[amz_bild asin="B0TAB4000[0-9]"\]</td><td>\[amz_bild asin="B0TAB4000[0-9]"\]</td></tr>#', $pt['neu']) === 2, 'Entzerren: jede neue Tabelle hat zwei Spalten');
+
+// ---- 0.74.0: Auswertung der Produktblöcke und Endblock-Varianten ----
+$endA = '<hr /><div class="sm-world"><div class="sm-crawl"><svg></svg></div><div class="sm-nc"><div>[amz_bild asin="B0ENDA0001"]</div><div>[amz_bild asin="B0ENDA0002"]</div></div></div><p>Fin</p>';
+$eb = SAB::endblock_von($endA);
+ok($eb !== null && substr($endA, $eb[1], 8) === '<p>Fin</', 'Endblock: verschachtelte div-Klammern ausgewogen erkannt');
+$kz = fn($a) => '[amz_karte asin="' . $a . '" land="es" titel="P"]';
+$ps = [
+  ['id' => 1, 'title' => 'Eins', 'content' => '<p>' . $lor(500) . '</p>[amz_karten]' . $kz('B0AUSW0001') . $kz('B0AUSW0002') . '[/amz_karten]<p>' . $lor(5000) . '</p>' . $endA],
+  ['id' => 2, 'title' => 'Zwei', 'content' => '<p>' . $lor(500) . '</p>[amz_karten]' . $kz('B0AUSW0001') . $kz('B0AUSW0002') . '[/amz_karten]<p>' . $lor(5000) . '</p>[amz_bild asin="B0AUSW0009"]' . $endA],
+  ['id' => 3, 'title' => 'Drei', 'content' => '<p>' . $lor(500) . '</p>[amz_karten]' . $kz('B0AUSW0001') . $kz('B0AUSW0002') . $kz('B0AUSW0003') . $kz('B0AUSW0004') . '[/amz_karten]<p>Ende</p>'],
+];
+$au = SAB::bloecke_aus_inhalten($ps);
+ok(count($au['bloecke'][2]) === 1 && array_values($au['bloecke'][2])[0]['n'] === 2 && count(array_values($au['bloecke'][2])[0]['posts']) === 2, 'Auswertung: gleicher Zweierblock in zwei Artikeln gezählt');
+ok(count($au['bloecke'][4]) === 1 && count($au['bloecke'][1]) === 1, 'Auswertung: Viererblock und Einerblock getrennt gezählt');
+ok($au['mit_end'] === 2 && count($au['end']) === 1 && array_values($au['end'])[0]['n'] === 2, 'Auswertung: Endblock-Variante mit zwei Artikeln');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1A Affiliate Helper
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.73.1
+ * Version: 0.74.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.73.1';
+    const VERSION = '0.74.0';
     const NAME = '1A Affiliate Helper';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3996,10 +3996,109 @@ JS;
         }
     }
 
+    // ---------- Auswertung der Produktblöcke und Endblöcke ----------
+
+    /** Der Endblock („sm-world“) eines Artikels: Anfang und Ende (ausgewogene div-Klammern) oder null. @return int[]|null */
+    public static function endblock_von(string $c): ?array {
+        if (!preg_match('#<div\b[^>]*class="[^"]*\bsm-world\b[^"]*"[^>]*>#i', $c, $m, PREG_OFFSET_CAPTURE)) { return null; }
+        $s = (int) $m[0][1]; $tiefe = 0; $pos = $s;
+        if (!preg_match_all('#<(/?)div\b[^>]*>#i', $c, $dm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE, $s)) { return null; }
+        foreach ($dm as $x) {
+            $tiefe += $x[1][0] === '/' ? -1 : 1; $pos = (int) $x[0][1] + strlen($x[0][0]);
+            if ($tiefe === 0) { return [$s, $pos]; }
+        }
+        return [$s, strlen($c)];
+    }
+
+    /**
+     * Zählt die Produktblöcke (nach Zahl der Produkte: 1, 2, 3, 4 und mehr) und die Endblock-Varianten in den übergebenen Artikeln.
+     * @param array<int,array{id:int,title:string,content:string}> $posts
+     * @return array{artikel:int,mit_end:int,bloecke:array,end:array}
+     */
+    public static function bloecke_aus_inhalten(array $posts): array {
+        $out = ['artikel' => count($posts), 'mit_end' => 0, 'bloecke' => [1 => [], 2 => [], 3 => [], 4 => []], 'end' => []];
+        foreach ($posts as $p) {
+            $c = (string) $p['content']; $id = (int) $p['id'];
+            if ($e = self::endblock_von($c)) {
+                $eh = substr($c, $e[0], $e[1] - $e[0]); $as = self::entz_asins($eh); sort($as); $k = md5(implode(',', $as));
+                $out['mit_end']++;
+                if (!isset($out['end'][$k])) { $out['end'][$k] = ['n' => 0, 'asins' => $as, 'html' => mb_substr($eh, 0, 60000), 'posts' => []]; }
+                $out['end'][$k]['n']++; $out['end'][$k]['posts'][$id] = (string) $p['title'];
+                $c = substr($c, 0, $e[0]) . substr($c, $e[1]);
+            }
+            foreach (self::entz_einheiten($c) as $u) {
+                $as = $u['asins']; sort($as); $n = max(1, count($as)); $g = min(4, $n); $k = implode(',', $as) . '#' . $n;
+                if (!isset($out['bloecke'][$g][$k])) { $out['bloecke'][$g][$k] = ['n' => 0, 'asins' => $as, 'html' => mb_substr((string) $u['html'], 0, 6000), 'posts' => []]; }
+                $out['bloecke'][$g][$k]['n']++; $out['bloecke'][$g][$k]['posts'][$id] = (string) $p['title'];
+            }
+        }
+        foreach ($out['bloecke'] as $g => &$liste) { uasort($liste, fn($a, $b) => $b['n'] <=> $a['n']); } unset($liste);
+        uasort($out['end'], fn($a, $b) => $b['n'] <=> $a['n']);
+        return $out;
+    }
+
+    private static function bloecke_daten(): array {
+        $c = get_transient('sab_bloecke_daten');
+        if (is_array($c) && empty($_POST['sab_bloecke_neu'])) { return $c; }
+        global $wpdb; $posts = [];
+        if (isset($wpdb)) {
+            foreach ((array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%amazon.%' OR post_content LIKE '%sm-world%')") as $r) { $posts[] = ['id' => (int) $r->ID, 'title' => (string) $r->post_title, 'content' => (string) $r->post_content]; }
+        }
+        $d = self::bloecke_aus_inhalten($posts); $d['ts'] = time();
+        set_transient('sab_bloecke_daten', $d, 15 * MINUTE_IN_SECONDS);
+        return $d;
+    }
+
+    private static function bloecke_artikel_links(array $posts, int $max = 12): string {
+        $l = []; $i = 0;
+        foreach ($posts as $id => $t) {
+            if (++$i > $max) { $l[] = '… und ' . (count($posts) - $max) . ' weitere'; break; }
+            $l[] = '<a href="' . esc_url((string) get_permalink((int) $id)) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($t !== '' ? $t : 'Beitrag ' . $id, 0, 45)) . '</a> <small><a href="' . esc_url(admin_url('post.php?post=' . (int) $id . '&action=edit')) . '" target="_blank" rel="noopener">Bearbeiten</a></small>';
+        }
+        return implode(' · ', $l);
+    }
+
+    private static function bloecke_auswertung_html(): string {
+        $d = self::bloecke_daten(); $namen = self::produkte(); $titel = [1 => 'Einerblöcke (ein Produkt)', 2 => 'Zweierblöcke (zwei Produkte nebeneinander)', 3 => 'Dreierblöcke', 4 => 'Viererblöcke und größer (werden beim Entzerren geteilt)'];
+        $h = '<h2>Auswertung: Produktblöcke in den Artikeln</h2><form method="post" style="margin:0 0 8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="vorschau"><button class="button" name="sab_bloecke_neu" value="1">Neu berechnen</button> <span class="description">' . (int) $d['artikel'] . ' Artikel mit Produkten ausgewertet, Stand vor ' . max(0, (int) round((time() - (int) ($d['ts'] ?? time())) / 60)) . ' Min. Es wird nichts geändert.</span></form>';
+        $h .= '<table class="widefat striped" style="max-width:760px"><thead><tr><th>Blockart</th><th>Blöcke gesamt</th><th>verschiedene Kombinationen</th><th>Artikel</th></tr></thead><tbody>';
+        foreach ($d['bloecke'] as $g => $liste) {
+            $ges = array_sum(array_column($liste, 'n')); $art = [];
+            foreach ($liste as $b) { foreach ($b['posts'] as $id => $t) { $art[$id] = 1; } }
+            $h .= '<tr><td>' . esc_html($titel[$g]) . '</td><td><strong>' . (int) $ges . '</strong></td><td>' . count($liste) . '</td><td>' . count($art) . '</td></tr>';
+        }
+        $h .= '<tr><td>Endblock („sm-world“)</td><td><strong>' . (int) $d['mit_end'] . '</strong></td><td>' . count($d['end']) . ' Varianten</td><td>' . (int) $d['mit_end'] . '</td></tr></tbody></table>';
+        foreach ($d['bloecke'] as $g => $liste) {
+            if (!$liste) { continue; }
+            $h .= '<details style="margin:12px 0"' . ($g >= 3 ? ' open' : '') . '><summary><strong>' . esc_html($titel[$g]) . '</strong>: ' . count($liste) . ' Kombinationen (die häufigsten zuerst, höchstens 30)</summary>';
+            $i = 0;
+            foreach ($liste as $b) {
+                if (++$i > 30) { break; }
+                $pn = []; foreach ($b['asins'] as $a) { $pn[] = esc_html(($namen[$a] ?? '') ?: $a); }
+                $h .= '<div style="border:1px solid #dcdcde;border-radius:6px;background:#fff;padding:8px 10px;margin:8px 0;max-width:1100px"><p style="margin:0 0 6px"><strong>' . (int) $b['n'] . '×</strong> in ' . count($b['posts']) . ' Artikel(n) · ' . implode(' + ', $pn ?: ['(ohne erkennbare ASIN)']) . '</p>'
+                    . '<div style="max-height:240px;overflow:auto;border:1px dashed #ccd0d4;padding:6px;margin:0 0 6px">' . do_shortcode(wpautop((string) $b['html'])) . '</div>'
+                    . '<p style="margin:0;font-size:12px">' . self::bloecke_artikel_links($b['posts']) . '</p></div>';
+            }
+            $h .= '</details>';
+        }
+        $h .= '<h3>Endblock-Varianten</h3>';
+        if (!$d['end']) { $h .= '<p>Kein Artikel hat einen Endblock („sm-world“).</p>'; }
+        $i = 0;
+        foreach ($d['end'] as $b) {
+            if (++$i > 12) { break; }
+            $pn = []; foreach ($b['asins'] as $a) { $pn[] = esc_html(($namen[$a] ?? '') ?: $a); }
+            $h .= '<div style="border:1px solid #dcdcde;border-radius:6px;background:#fff;padding:8px 10px;margin:8px 0;max-width:1100px"><p style="margin:0 0 6px"><strong>Variante ' . $i . ':</strong> ' . (int) $b['n'] . ' Artikel · ' . count($b['asins']) . ' Produkte: ' . implode(', ', $pn) . '</p>'
+                . '<details><summary>Endblock so ansehen, wie er vorkommt</summary><div style="max-height:420px;overflow:auto;border:1px dashed #ccd0d4;padding:6px;margin:6px 0">' . do_shortcode((string) $b['html']) . '</div></details>'
+                . '<p style="margin:6px 0 0;font-size:12px">' . self::bloecke_artikel_links($b['posts']) . '</p></div>';
+        }
+        return $h;
+    }
+
     /** Vorschau mit echten Daten: jeder Slot und jedes Produkt als Karte und als Bild, so wie die Besucher es sehen. */
     private static function vorschau_html(): string {
         $h = '<p>So sehen Besucher die Karten (echte Bilder und Texte aus dem Zwischenspeicher). Läuft ein A/B-Test, zeigt die Vorschau die Variante, die dieser Seite zugeteilt wäre.</p>';
         if (get_option('sab_karten_css') !== '0') { $h .= '<style>' . self::KARTEN_CSS . '</style>'; }
+        $h .= self::bloecke_auswertung_html();
         $land = self::land('');
         $slots = array_merge(self::slots(), self::tests());
         if ($slots) {
