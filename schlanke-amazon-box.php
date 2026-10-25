@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.72.0
+ * Version: 0.72.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.72.0';
+    const VERSION = '0.72.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -1282,7 +1282,7 @@ final class SAB {
 
     public static function fuss(): void {
         if (!self::$genutzt) { return; }
-        if (get_option('sab_karten_css') !== '0') { $bm = max(120, min(800, (int) (get_option('sab_bild_max') ?: 240))); echo '<style id="sab-karten">' . self::KARTEN_CSS . 'a.sab-bild img{display:block;margin-left:auto;margin-right:auto;width:auto;height:auto;max-width:min(100%,' . $bm . 'px);max-height:' . $bm . 'px;object-fit:contain}</style>'; }
+        if (get_option('sab_karten_css') !== '0') { $bm = max(120, min(800, (int) (get_option('sab_bild_max') ?: 240))); echo '<style id="sab-karten">' . self::KARTEN_CSS . 'a.sab-bild img{max-width:' . $bm . 'px;max-height:' . $bm . 'px;object-fit:contain}</style>'; }
         if (self::$karten && get_option('sab_karten_css') !== '0') { echo '<style id="sab-karte">' . self::KARTE_CSS . '</style>'; }
         if (get_option('sab_hinweis_auto') === '1' && !self::$hinweis_gezeigt) {
             echo '<p class="sab-hinweis"><small>' . esc_html(self::hinweis_text(self::land(''))) . '</small></p>';
