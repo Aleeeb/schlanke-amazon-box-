@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: 1a Amazon Box 0.63.1
+ * Plugin Name: 1a Amazon Box 0.63.2
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.63.1
+ * Version: 0.63.2
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.63.1';
+    const VERSION = '0.63.2';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -3163,6 +3163,9 @@ final class SAB {
             if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; continue; }
             $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
         }
+        // Gezielt gesuchte Treffer (Amazon-Suche / Amazons Alternativen) haben Vorrang: gibt es davon zwei oder mehr, kommen Favoriten und Katalog nicht dazu
+        $gezielt = array_filter($out, fn($c) => strpos((string) $c['quelle'], 'Amazon-') === 0);
+        if (count($gezielt) >= 2) { $out = array_values($gezielt); }
         usort($out, fn($p, $q2) => [(int) $q2['ok'], (float) $q2['rang']] <=> [(int) $p['ok'], (float) $p['rang']]);
         return ['liste' => array_slice($out, 0, $max), 'aussortiert' => $aus];
     }
@@ -3312,7 +3315,7 @@ final class SAB {
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
             . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Es werden die ersten ' . $ladeLimit . ' gezeigt.</p>';
         $zaehler = 0;
-        $h .= '<p><button class="button" name="sab_such_anfrage" value="1">Mac-Sitzung: bei Amazon nach allen Titeln suchen lassen</button> <span class="description">' . (get_option('sab_such_anfrage', '') !== '' ? 'Angefordert am ' . esc_html((string) get_option('sab_such_anfrage', '')) . '. ' : '') . 'Die Mac-Sitzung sucht dann zu jedem Produkt unten bei Amazon und trägt die vier besten Treffer nach Score ein.</span></p>';
+        $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
             if (++$zaehler > $ladeLimit) { $h .= '<p class="description">… und ' . (count($zeilen) - $ladeLimit) . ' weitere (erst diese erledigen).</p>'; break; }
             $alt = $z['alt']; $xalt = $d['items'][$alt] ?? [];
@@ -3652,7 +3655,7 @@ JS;
                 }
             } elseif ($form === 'austausch_viele' && !empty($_POST['sab_such_anfrage'])) {
                 update_option('sab_such_anfrage', gmdate('Y-m-d H:i'), false);
-                $meldung = 'Angefordert. Bitte der Mac-Sitzung im Thread Bescheid geben, dann sucht sie bei Amazon.';
+                $meldung = 'Angefordert. Die Mac-Sitzung sucht vor der nächsten Austauschrunde bei Amazon und trägt die Treffer hier ein.';
             } elseif ($form === 'austausch_viele') {
                 $m = []; $n = 0;
                 $wahl = (array) ($_POST['sab_a'] ?? []); $eigen = (array) ($_POST['sab_eigen'] ?? []);
