@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.19
+ * Version: 0.75.20
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.19';
+    const VERSION = '0.75.20';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -297,6 +297,7 @@ final class SAB {
             if (!$frisch && !$warten && !defined('SAB_SYNC') && time() - (int) ($c['ts'] ?? 0) > self::TTL - 2 * HOUR_IN_SECONDS) { self::im_hintergrund('sab_holen', [$asin, $land]); }
             return $c;
         }
+        if (!$warten && function_exists('current_user_can') && current_user_can('edit_posts')) { $warten = true; }   // Redakteure warten kurz, damit sie nie eine leere Stelle sehen
         if (!$frisch && !$warten && !defined('SAB_SYNC')) { // nichts im Speicher: Hintergrundabruf anstoßen, die Seite nutzt den Rückfall (schlichter Link)
             self::im_hintergrund('sab_holen', [$asin, $land]);
             return null;
@@ -3616,6 +3617,9 @@ final class SAB {
 
     /** Tausch ALT => NEU in allen Artikeln (mit Sicherung, Kurzlinks der Spalte, Titel, Schutz vor Doppelung). @return string Meldung für den Redakteur */
     private static function tausch_ausfuehren(string $alt, string $neu, string $name): string {
+        $pn = self::produkt($neu, self::land(''), true, true);   // Ersatz sofort bei Amazon holen und Bild speichern, sonst fehlt es nach dem Tausch auf der Seite
+        if (!self::hat_bild($pn)) { return 'NICHT getauscht: Für ' . $neu . ' liefert Amazon kein Bild oder keinen Link (Produkt unbekannt oder Abruf fehlgeschlagen). Bitte ein anderes Ersatzprodukt wählen.'; }
+        self::bild_url($pn, $neu, self::land(''), 0, true);
         $d0 = self::uebersicht_daten(self::land(''), false); $f0 = self::fundstellen([$alt]); $an = [(string) (self::produkte()[$alt] ?? ''), (string) ($d0['items'][$alt]['titel'] ?? '')];
         if (!$an[1] && !empty($f0[$alt])) { $p0 = get_post((int) array_key_first($f0[$alt])); $an[] = $p0 ? self::kontext_titel((string) $p0->post_content, $alt) : ''; }
         if ($name === '') { $name = ($m = (self::produkte()[$neu] ?? '')) !== '' ? $m : self::kurzname_aus_titel((string) ($d0['items'][$neu]['titel'] ?? '')); }
