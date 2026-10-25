@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.25
+ * Version: 0.75.26
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.25';
+    const VERSION = '0.75.26';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4120,22 +4120,29 @@ final class SAB {
         $h = '<div class="notice notice-warning inline"><p><strong>Produkte, die Amazon nicht mehr kennt: Ersatz wählen</strong></p>';
         foreach ($weg as $alt) {
             $name = ($namen[$alt] ?? '') ?: self::kontext_titel($c, $alt);
-            $v = self::fav_vorschlag($alt, (string) $name, (array) $d, $trotz, $fund);
-            $ce = self::claude_empfehlungen()[$alt] ?? null;   // eingetragene Empfehlung, z. B. Amazons erste „alternative Produkte“ von der Produktseite
             $nf = count($fund[$alt] ?? []);
-            $h .= '<form method="post" style="margin:8px 0;padding:8px;background:#fff;border:1px solid #c3c4c7;border-radius:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false)
+            $xalt = (array) ($d['items'][$alt] ?? []);
+            $k = self::austausch_kandidaten($alt, (string) $name, (array) $d, $trotz, $fund, 5);
+            $voraus = ($k['liste'][0] ?? null) && $k['liste'][0]['ok'] && ($k['liste'][0]['score'] ?? -1) >= (int) get_option('sab_auto_schwelle', 55) && ($k['liste'][0]['passt'] ?? 0) >= 1;
+            $h .= '<form method="post" style="margin:10px 0;padding:10px 14px;background:#fff;border:1px solid #c3c4c7;border-radius:8px;max-width:1100px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false)
                . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="tausch_fest"><input type="hidden" name="sab_alt" value="' . esc_attr($alt) . '">' . ($id > 0 ? '<input type="hidden" name="sab_vorschau" value="' . (int) $id . '">' : '<input type="hidden" name="sab_alle_vorschau" value="' . max(1, self::$vorschau_seite) . '">')
-               . '<strong><code>' . esc_html($alt) . '</code> ' . esc_html((string) $name) . '</strong> (steht in ' . $nf . ' Artikel' . ($nf === 1 ? '' : 'n') . ')<br>'
+               . '<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt) . '<div><strong>Zu tauschen:</strong> <code>' . esc_html($alt) . '</code> ' . esc_html((string) $name) . ' <small>(steht in ' . $nf . ' Artikel' . ($nf === 1 ? '' : 'n') . ')</small><br><span style="color:#a00;font-weight:600">Grund: Amazon kennt dieses Produkt nicht (mehr). Es kann nicht umgebaut werden und hat bei Besuchern kein Bild.</span></div></div>'
                . self::fundstellen_links($alt, $fund[$alt] ?? []);
+            $ce = self::claude_empfehlungen()[$alt] ?? null;
             if ($ce) { $h .= '<small><strong>Empfehlung (von Amazons Alternativen):</strong> <code>' . esc_html($ce[0]) . '</code> ' . esc_html($ce[1]) . '</small><br>'; }
-            if (!empty($v['asin'])) {
-                $h .= '<small>Vorschlag: <code>' . esc_html($v['asin']) . '</code> ' . esc_html($v['name']) . ', Score ' . (int) $v['score'] . ' · ' . esc_html(implode(' · ', $v['chips'])) . '</small><br>';
-                foreach ($v['warn'] as $w) { $h .= '<small style="color:#a00">' . esc_html($w) . '</small><br>'; }
-            } else { $h .= '<small>' . esc_html($v['fehlt'] ?? 'Kein Vorschlag.') . '</small><br>'; }
-            $vorn = $ce ? $ce[0] : (string) ($v['asin'] ?? ''); $vorname = $ce ? ((($namen[$ce[0]] ?? '') ?: self::kurzname_aus_titel((string) ($d['items'][$ce[0]]['titel'] ?? '')))) : (string) ($v['name'] ?? '');
-            $h .= '<label>Neue ASIN: <input type="text" name="sab_neu" size="12" maxlength="10" value="' . esc_attr($vorn) . '" placeholder="B0…"></label> '
-               . '<label>Name im Artikel: <input type="text" name="sab_name" class="regular-text" style="max-width:240px" value="' . esc_attr($vorname) . '"></label> '
-               . '<button class="button">Tauschen (in allen ' . $nf . ' Artikeln) und Vorschau neu</button></form>';
+            $h .= '<div style="display:flex;flex-wrap:wrap;gap:10px;margin:8px 0">';
+            foreach ($k['liste'] as $i => $cd) {
+                $x = (array) $cd['x']; $pv = $cd['pv'] ?? null; $nm = ($namen[$cd['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
+                $h .= '<label style="flex:1 1 280px;max-width:330px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_wahl" value="' . esc_attr($cd['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . ' onclick="this.form.sab_neu.value=this.value">'
+                    . self::mini_bild($cd['asin'], $x) . '<span><strong>' . esc_html($nm ?: $cd['asin']) . '</strong><br><small><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $cd['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($cd['asin']) . '</code></a> · ' . esc_html((string) $cd['quelle']) . '<br><strong>Score ' . ($cd['score'] !== null ? (int) $cd['score'] : '?') . '</strong>'
+                    . (!empty($x['preis']) ? ' · ' . esc_html((string) $x['preis']) : '') . ($pv !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision' : '') . (!$cd['ok'] ? ' · <span style="color:#a00">nicht lieferbar</span>' : '') . '</small></span></label>';
+            }
+            if (!$k['liste']) { $h .= '<p style="margin:0"><em>Kein passender Kandidat gefunden.</em> <a class="button button-small" href="' . esc_url(self::such_link($name !== '' ? (string) $name : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
+            $vorn = $voraus ? (string) $k['liste'][0]['asin'] : ($ce ? $ce[0] : '');
+            $vorname = $voraus ? (($namen[$vorn] ?? '') ?: self::kurzname_aus_titel((string) ($k['liste'][0]['x']['titel'] ?? ''))) : ($ce ? (($namen[$ce[0]] ?? '') ?: self::kurzname_aus_titel((string) ($d['items'][$ce[0]]['titel'] ?? ''))) : '');
+            $h .= '</div><label>Neue ASIN: <input type="text" name="sab_neu" size="12" maxlength="10" value="' . esc_attr($vorn) . '" placeholder="B0…"></label> '
+               . '<label>Name im Artikel: <input type="text" name="sab_name" class="regular-text" style="max-width:240px" value="' . esc_attr((string) $vorname) . '"></label> '
+               . '<button class="button button-primary">Tauschen (in allen ' . $nf . ' Artikeln), danach Vorschau neu</button><span class="description"> Eine Karte anklicken füllt die ASIN ein, Name bitte prüfen.</span></form>';
         }
         return $h . '</div>';
     }
