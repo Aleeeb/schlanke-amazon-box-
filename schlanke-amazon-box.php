@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.11
+ * Version: 0.75.12
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.11';
+    const VERSION = '0.75.12';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2959,7 +2959,7 @@ final class SAB {
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
             if (!$x) {
                 if ($ns === 0) { $unbenutzt[] = $asin; continue; }   // Amazon kennt es nicht und es steht auf keiner Seite: kein Handlungsbedarf, nicht ganz oben anzeigen
-                $zl[] = ['asin' => $asin, 'prio' => 100 * $ns, 'dr' => 100, 'sc' => -1, 'h' => '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong></td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'];
+                $zl[] = ['asin' => $asin, 'prio' => 100 * $ns, 'dr' => 100, 'sc' => -1, 'h' => '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong><br><small>Steht noch auf ' . $ns . ' Seite(n), muss dort ersetzt werden (Reiter Austausch).</small>' . self::fundstellen_links($asin, $fund[$asin] ?? []) . '</td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'];
                 continue;
             }
             $sc = self::score($x)[0];
