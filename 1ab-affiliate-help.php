@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.22
+ * Version: 0.75.23
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.22';
+    const VERSION = '0.75.23';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3044,9 +3044,10 @@ final class SAB {
         $key = 'sab_kurz_' . md5($url);
         $c = get_transient($key);
         if ($c !== false) { return (string) $c; }
-        if ($budget <= 0) { self::$kurz_offen++; return ''; }
+        static $start = 0.0; if ($start === 0.0) { $start = microtime(true); }
+        if ($budget <= 0 || microtime(true) - $start > 12) { self::$kurz_offen++; return ''; }   // Zeitgrenze: lieber beim nächsten Klick weitermachen als in einen PHP-Zeitfehler zu laufen
         $budget--;
-        $r = wp_remote_head($url, ['timeout' => 8, 'redirection' => 6]);
+        $r = wp_remote_head($url, ['timeout' => 4, 'redirection' => 6]);
         $ziel = '';
         if (!is_wp_error($r)) {
             $o = $r['http_response'] ?? null;
@@ -3555,6 +3556,7 @@ final class SAB {
             $fertig = get_post_meta((int) $r['ID'], '_sab_umbau_backup', true) !== '';
             if ($fest + $kurz > 0 || $fertig) { $out[] = ['id' => (int) $r['ID'], 'titel' => (string) $r['post_title'], 'fest' => $fest, 'kurz' => $kurz, 'fertig' => $fertig]; }
         }
+        usort($out, fn($a, $b) => [(int) $a['fertig'], $b['fest'] + $b['kurz']] <=> [(int) $b['fertig'], $a['fest'] + $a['kurz']]);   // offene Artikel oben, die mit den meisten Links zuerst
         return $out;
     }
 
@@ -3594,10 +3596,13 @@ final class SAB {
         $liste = array_slice($offen, ($seite - 1) * self::UMBAU_PROSEITE, self::UMBAU_PROSEITE);
         $h = '<h3>Vorschau für alle offenen Artikel (Seite ' . $seite . ' von ' . $seiten . ', ' . $gesamt . ' Artikel offen)</h3><p class="description">Es wird nichts gespeichert. Jeder Artikel wird so geprüft wie beim Umbau. „Bereit“ heißt: kein Problem gefunden. Probleme siehst du unten, dort kannst du auch Ersatz für Produkte wählen, die Amazon nicht mehr kennt.</p>';
         $zeilen = []; $bereit = []; $wegAlle = []; $kurzOffen = 0; $nProb = 0;
+        $t_start = microtime(true); $uebrig = 0;
         foreach ($liste as $a) {
+            if (microtime(true) - $t_start > 20) { $uebrig++; continue; }   // Zeitgrenze: Rest über „Nächste Seite“ beziehungsweise erneut öffnen
             $post = get_post($a['id']); if (!$post) { continue; }
             self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
-            self::umbau_text((string) $post->post_content);
+            try { self::umbau_text((string) $post->post_content); }
+            catch (\Throwable $e) { self::$umbau_abw[] = 'Prüfung abgebrochen: ' . $e->getMessage(); }
             $abw = array_values(array_unique(self::$umbau_abw)); $info = count(array_unique(self::$umbau_info)); $kurzOffen += self::$kurz_offen;
             foreach (self::$umbau_weg as $w => $_) { $wegAlle[$w] = ($wegAlle[$w] ?? 0) + 1; }
             if ($abw) { $nProb++; $status = '<strong style="color:#a00">Problem (' . count($abw) . ')</strong>'; }
@@ -3607,6 +3612,7 @@ final class SAB {
             $zeilen[] = '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>';
         }
         $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td colspan="4">Keine offenen Artikel.</td></tr>') . '</tbody></table>';
+        if ($uebrig) { $h .= '<p><strong>' . $uebrig . ' Artikel dieser Seite wurden wegen der Zeitgrenze noch nicht geprüft.</strong> Bitte die Seite noch einmal öffnen, die Kurzlinks werden dabei Stück für Stück aufgelöst.</p>'; }
         if ($kurzOffen) { $h .= '<p><strong>' . $kurzOffen . ' Kurzlinks wurden noch nicht aufgelöst</strong> (Abrufgrenze pro Aufruf), bitte diese Seite noch einmal öffnen.</p>'; }
         if ($wegAlle) {
             arsort($wegAlle);
