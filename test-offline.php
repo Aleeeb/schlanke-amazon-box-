@@ -1051,4 +1051,9 @@ $mV = new ReflectionMethod('SAB', 'verwaiste_entfernen'); $mV->setAccessible(tru
 $nv = $mV->invoke(null, ['B0ORPHAN01']);
 ok($nv === 1 && strpos($GLOBALS['opt']['sab_produkte'], 'ORPHAN') === false && strpos($GLOBALS['opt']['sab_produkte'], 'KEEPKEEP1') !== false && $GLOBALS['opt']['sab_slots'] === 's1: B0KEEPKEEP1' && $GLOBALS['opt']['sab_tausch'] === '', 'Verwaiste Produkte: aus allen Listen entfernt, Rest bleibt');
 
+// ---- 0.75.14: Änderungen rot markieren ----
+$mAm = new ReflectionMethod('SAB', 'aenderungen_markieren'); $mAm->setAccessible(true);
+[$vm, $nm] = $mAm->invoke(null, 'Text [aawp box="B0AAAAAAA1"] und <a href="https://www.amazon.de/dp/B0BBBBBBB2">x</a> [amz_link asin="B0CCCCCCC3"]a[/amz_link]', 'Text [amz_produkt asin="B0AAAAAAA1" land="de"] und [amz_link asin="B0BBBBBBB2"]x[/amz_link] [amz_link asin="B0CCCCCCC3"]a[/amz_link]');
+ok(substr_count($vm, 'class="sab-chg ') === 2 && substr_count($nm, 'class="sab-chg ') === 2 && strpos($nm, 'B0CCCCCCC3') !== false && strpos($vm, 'Produkt B0AAAAAAA1') !== false, 'Änderungen rot markiert: nur Geändertes, Unverändertes nicht');
+
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.13
+ * Version: 0.75.14
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.13';
+    const VERSION = '0.75.14';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4031,8 +4031,24 @@ final class SAB {
     private static function vorschau_rahmen(string $inhalt): string {
         $t = self::theme_kopf();
         $css = get_option('sab_karten_css') !== '0' ? '<style>' . self::KARTEN_CSS . '</style>' : '';
-        $doc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank">' . $t['kopf'] . $css . '<style>body{margin:0;padding:12px;background:#fff}</style></head><body class="' . esc_attr($t['klasse']) . '"><div class="site-content"><div class="inside-article"><div class="entry-content">' . preg_replace('#<script\b.*?</script>#is', '', $inhalt) . '</div></div></div></body></html>';
+        $doc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank">' . $t['kopf'] . $css . '<style>body{margin:0;padding:12px;background:#fff}.sab-chg{outline:2px solid #d63638;outline-offset:2px;background:rgba(214,54,56,.08);cursor:help}.sab-chg-b{display:inline-block;max-width:100%}.sab-chg-i{display:inline}</style></head><body class="' . esc_attr($t['klasse']) . '"><div class="site-content"><div class="inside-article"><div class="entry-content">' . preg_replace('#<script\b.*?</script>#is', '', $inhalt) . '</div></div></div></body></html>';
         return '<iframe class="sab-umb-rahmen" sandbox="allow-same-origin" loading="lazy" style="width:100%;height:320px;border:1px solid #dcdcde;background:#fff" srcdoc="' . esc_attr($doc) . '" onload="try{this.style.height=Math.min(900,this.contentDocument.documentElement.scrollHeight+10)+\'px\'}catch(e){}"></iframe>';
+    }
+
+    /** Rot markiert, was der Umbau ändert: im Vorher die alten Boxen und Links, im Nachher die neuen Plugin-Karten (nur Vorschau, mit Erklärung beim Darüberfahren). */
+    private static function aenderungen_markieren(string $vorher, string $nachher): array {
+        $mark = function (string $t, string $re, string $titel, string $art, string $gegen): string {
+            return preg_replace_callback($re, function ($m) use ($titel, $art, $gegen) {
+                if (strpos($gegen, $m[0]) !== false) { return $m[0]; }   // kommt auch auf der anderen Seite unverändert vor: keine Änderung
+                $t = $titel;
+                if (preg_match('/asin="([A-Za-z0-9]{10})"/', $m[0], $a) || preg_match('/\b(?:box|link|fields)=["\']?([A-Za-z0-9]{10})/', $m[0], $a) || preg_match('#/(?:dp|gp/product)/([A-Za-z0-9]{10})#', $m[0], $a)) { $t .= ' (Produkt ' . strtoupper($a[1]) . ')'; }
+                return '<span class="sab-chg sab-chg-' . $art . '" title="' . esc_attr($t) . '">' . $m[0] . '</span>';
+            }, $t);
+        };
+        $v = $mark($vorher, '#\[(aawp|amazon)\b[^\]]*\](?:(?:(?!\[(?:aawp|amazon)\b).)*?\[/\1\])?#is', 'Wird ersetzt: alte AAWP-/Amazon-Box, danach Plugin-Karte', 'b', $nachher);
+        $v = $mark($v, '#<a\b[^>]*href=["\'][^"\']*(?:amazon\.|amzn\.)[^"\']*["\'][^>]*>.*?</a>#is', 'Wird ersetzt: fester Amazon-Link, danach Plugin-Link mit Partner-ID', 'i', $nachher);
+        $n = $mark($nachher, '#\[amz_(produkt|bild|link|ebay)\b[^\]]*\](?:(?:(?!\[amz_).)*?\[/amz_\1\])?#is', 'Neu: Plugin-Karte oder -Link (Daten, Bild und Partner-ID kommen aus dem Plugin)', 'b', $vorher);
+        return [$v, $n];
     }
 
     private static function umbau_vorschau(int $id): string {
@@ -4073,10 +4089,11 @@ final class SAB {
             $kurz = fn(string $t, int $len) => '<code style="word-break:break-all;white-space:pre-wrap;font-size:11px;display:block;max-height:420px;overflow:auto">' . esc_html($zeig($t, $len)) . '</code>';
             $titelz = mb_substr(trim(preg_replace('/\s+/', ' ', strip_tags($ab))), 0, 60) ?: 'Abschnitt ' . $i;
             // grafische Ansicht: beide Fassungen so gezeigt, wie Besucher sie sehen würden (höchstens 12 Abschnitte, wegen der Ladezeit)
+            [$abm, $nabm] = self::aenderungen_markieren($ab, $nab);
             $bild = fn(string $t) => self::vorschau_rahmen(do_shortcode(wpautop($t)));
             $grafisch = $i <= 12;
             $code = '<details style="margin-top:6px"><summary style="cursor:pointer;color:#2271b1">HTML-Code zeigen</summary>';
-            $zeilen[] = '<tr><td colspan="2" style="background:#f6f7f7"><strong>' . esc_html($titelz) . '</strong></td></tr><tr><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($ab) . $code . $kurz($ab, $la) . '</details>' : $kurz($ab, $la)) . '</td><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($nab) . $code . $kurz($nab, $lb) . '</details>' : $kurz($nab, $lb)) . '</td></tr>';
+            $zeilen[] = '<tr><td colspan="2" style="background:#f6f7f7"><strong>' . esc_html($titelz) . '</strong></td></tr><tr><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($abm) . $code . $kurz($ab, $la) . '</details>' : $kurz($ab, $la)) . '</td><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($nabm) . $code . $kurz($nab, $lb) . '</details>' : $kurz($nab, $lb)) . '</td></tr>';
         }
         $h .= '' . (get_option('sab_karten_css') !== '0' ? '<style>' . self::KARTEN_CSS . '</style>' : '') . '<style>.sab-umb-bild img{max-width:100%;height:auto}</style><p><strong>Abschnitte, die sich ändern (' . count($zeilen) . '):</strong> links vorher, rechts nachher, so wie Besucher es sehen (bei den ersten 12 Abschnitten als Bild im Aussehen der Webseite, den HTML-Code gibt es per Klick). Die Vorher-Seite zeigt, was jetzt im Artikel steht.</p><table class="widefat striped"><thead><tr><th>Vorher</th><th>Nachher</th></tr></thead><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td colspan="2">Nichts.</td></tr>') . '</tbody></table>';
         $rest = [];
