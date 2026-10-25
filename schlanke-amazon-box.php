@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.27
+ * Version: 0.75.28
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.27';
+    const VERSION = '0.75.28';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -930,7 +930,7 @@ final class SAB {
         if (function_exists('current_user_can') && current_user_can('edit_posts')) {
             return '<span style="display:inline-block;padding:6px 10px;background:#fcf0f1;border:2px solid #d63638;color:#8a1f1f;font:600 13px sans-serif">Produktbild fehlt: ' . esc_html($asin) . ' (nur für Redakteure sichtbar)</span>';
         }
-        return '';
+        return '<span class="sab-weg" style="display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;max-width:240px;min-height:120px;padding:10px;text-align:center;background:#f3f4f4;border:1px dashed #b6babd;border-radius:6px;color:#555;font:600 13px/1.3 sans-serif">Momentan nicht verfügbar</span>';
     }
 
     private static function brauchbar(?array $p): bool {
@@ -3104,6 +3104,14 @@ final class SAB {
     }
 
     /** Kennt Amazon das Produkt laut letztem Abruf der Übersicht nicht mehr? Ohne Abruf oder bei unbekanntem Land: nein. */
+    /** Umbau trotz „Amazon kennt das Produkt nicht“: Standard ja. Die Stelle zeigt dann „Momentan nicht verfügbar“, der Austausch kommt später mit Vorrang. Merkt das Produkt für die Austauschkarte in der Vorschau. */
+    private static function weg_umbauen(string $asin): bool {
+        if (get_option('sab_weg_umbauen', '1') !== '1') { return false; }
+        self::$umbau_weg[$asin] = 1;
+        self::$umbau_info[] = 'Produkt ' . $asin . ' kennt Amazon nicht mehr: wird trotzdem umgebaut und zeigt „Momentan nicht verfügbar“, bitte danach mit Vorrang tauschen';
+        return true;
+    }
+
     private static function asin_weg(string $asin, string $land): bool {
         $mp = self::land('');
         $st = get_option('sab_uebersicht_stand_' . ($land !== '' ? $land : $mp));
@@ -3177,7 +3185,7 @@ final class SAB {
             if (preg_match_all('#<a\b[^>]*href=["\'][^"\']*(?:amazon|amzn)[^"\']*["\'][^>]*>(.*?)</a>#is', $vor, $al)) { foreach ($al[1] as $in) { if (stripos($in, '<img') === false) { return $m[0]; } } }   // dito (Bild-Links zählen nicht)
             $asin = (string) array_key_first($ids); $land = self::land('');
             if (in_array($asin, $getauscht, true)) { self::$umbau_abw[] = 'Kurzlink ' . html_entity_decode($m[3]) . ' steht unter getauschtem Produkt ' . $asin . ', nicht geraten'; return $m[0]; }
-            if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land)) { self::$umbau_keys[self::$umbau_abw[] = 'Kurzlink ' . html_entity_decode($m[3]) . ' steht unter ' . $asin . ', das Amazon nicht mehr kennt, nicht geraten'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; return $m[0]; }
+            if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land) && !self::weg_umbauen($asin)) { self::$umbau_keys[self::$umbau_abw[] = 'Kurzlink ' . html_entity_decode($m[3]) . ' steht unter ' . $asin . ', das Amazon nicht mehr kennt, nicht geraten'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; return $m[0]; }
             return '<a' . $m[1] . 'href=' . $m[2] . 'https://' . self::LAENDER[$land][0] . '/dp/' . $asin . $m[2] . $m[4] . '>' . $m[5] . '</a>';
         }, $c);
     }
@@ -3255,7 +3263,7 @@ final class SAB {
                 [$asin, $land] = array_values($sp)[0];
                 if ($nur !== '' && $asin !== $nur) { return $t[0]; }
                 if (!self::tag($land)) { return $t[0]; }
-                if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land)) { self::$umbau_keys[self::$umbau_abw[] = 'Produkt ' . $asin . ' ist bei Amazon nicht mehr bekannt, Tabelle nicht umgebaut (erst tauschen)'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; return $t[0]; }
+                if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land) && !self::weg_umbauen($asin)) { self::$umbau_keys[self::$umbau_abw[] = 'Produkt ' . $asin . ' ist bei Amazon nicht mehr bekannt, Tabelle nicht umgebaut (erst tauschen)'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; return $t[0]; }
                 $titel = ''; $attr = ''; $text = '';
                 foreach ($zellen as $ri => $zs) {
                     $cell = $zs[$ci] ?? ''; $in = preg_replace('#^<t[dh]\b[^>]*>|</t[dh]>$#i', '', $cell);
@@ -3397,7 +3405,7 @@ final class SAB {
             [$land, $asin] = $u;
             if ($nur !== '' && $asin !== $nur) { return $m[0]; }
             if (!self::tag($land) || strpos($m[2], '[') !== false) { $skip++; return $m[0]; }
-            if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land)) { self::$umbau_keys[self::$umbau_abw[] = 'Link „' . mb_substr(trim(strip_tags($m[2])), 0, 40) . '“ zeigt auf ' . $asin . ', das Amazon nicht mehr kennt, nicht umgebaut (erst das Produkt tauschen)'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; $skip++; return $m[0]; }
+            if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land) && !self::weg_umbauen($asin)) { self::$umbau_keys[self::$umbau_abw[] = 'Link „' . mb_substr(trim(strip_tags($m[2])), 0, 40) . '“ zeigt auf ' . $asin . ', das Amazon nicht mehr kennt, nicht umgebaut (erst das Produkt tauschen)'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; $skip++; return $m[0]; }
             $cls = '';
             if (preg_match('#class=(["\'])(.*?)\1#is', $m[1], $cl)) { $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', $cl[2])); }
             $attr = ' asin="' . $asin . '" land="' . $land . '"' . ($cls !== '' ? ' class="' . $cls . '"' : '');
@@ -3492,6 +3500,7 @@ final class SAB {
         foreach (array_unique(array_map('strtoupper', $m[1])) as $a) {
             if (isset($vorher[$a])) { continue; }
             $a = self::getauscht($a);
+            if (get_option('sab_weg_umbauen', '1') === '1' && self::asin_weg($a, $land)) { continue; }   // unbekanntes Produkt: Platzhalter statt Abbruch
             if (!get_transient("sab_{$land}_{$a}")) { if ($geholt >= 25) { continue; } $geholt++; }
             if (!self::hat_bild(self::produkt($a, $land, false, true))) { $ohne[] = $a; }
         }
@@ -4210,6 +4219,7 @@ final class SAB {
         if (preg_match_all('/\[amz_(?:produkt|bild|link)\b[^\]]*\basin="([A-Za-z0-9]{10})"/', $neu, $mm)) {
             foreach (array_unique(array_map([__CLASS__, 'asin'], $mm[1])) as $pa) {
                 if (!get_transient("sab_{$vl}_{$pa}")) { if ($geholt >= 20) { continue; } $geholt++; }
+                if (get_option('sab_weg_umbauen', '1') === '1' && self::asin_weg($pa, $vl)) { continue; }
                 if (!self::hat_bild(self::produkt($pa, $vl, false, true))) { $unbrauchbar[] = $pa; }
             }
         }
@@ -4506,6 +4516,7 @@ JS;
                 update_option('sab_default_land', sanitize_key(wp_unslash($_POST['sab_default_land'] ?? 'de')), false);
                 update_option('sab_hinweis_auto', !empty($_POST['sab_hinweis_auto']) ? '1' : '0', false);
                 update_option('sab_karten_css', !empty($_POST['sab_karten_css']) ? '1' : '0', false);
+                update_option('sab_weg_umbauen', !empty($_POST['sab_weg_umbauen']) ? '1' : '0', false);
                 update_option('sab_strikt', !empty($_POST['sab_strikt']) ? '1' : '0', false);
                 update_option('sab_preis_test', !empty($_POST['sab_preis_test']) ? '1' : '0', false);
                 update_option('sab_btn_a', sanitize_text_field(wp_unslash($_POST['sab_btn_a'] ?? '')), false);
@@ -4826,6 +4837,8 @@ JS;
                . esc_attr((string) get_option('sab_hinweis_text', '')) . '"></td></tr>'
                . '<tr><th>Karten-Design</th><td><label><input type="checkbox" name="sab_karten_css" value="1"' . (get_option('sab_karten_css') !== '0' ? ' checked' : '')
                . '> kleines Karten-Design für <code>[amz_produkt]</code> laden (weißer Kasten, grüner Button)</label></td></tr>'
+               . '<tr><th>Umbau bei unbekannten Produkten</th><td><label><input type="checkbox" name="sab_weg_umbauen" value="1"' . (get_option('sab_weg_umbauen', '1') === '1' ? ' checked' : '')
+               . '> Produkte, die Amazon nicht mehr kennt, trotzdem umbauen: Die Stelle zeigt „Momentan nicht verfügbar“, getauscht wird später mit Vorrang im Reiter Austausch</label></td></tr>'
                . '<tr><th>Nicht verfügbar</th><td><label><input type="checkbox" name="sab_strikt" value="1"' . (get_option('sab_strikt') === '1' ? ' checked' : '')
                . '> Produkte, die Amazons Schnittstelle als „nicht verfügbar“ meldet, wie ausgefallen behandeln und durch den Ersatz aus der Liste ersetzen</label><p class="description">Aus lassen, wenn Amazon die Lieferbarkeit für einen anderen Lieferort prüft als deinen: Dann würde ein lieferbares Produkt fälschlich ersetzt.</p></td></tr>'
                . '<tr><th>Wochenbericht</th><td><input type="email" name="sab_mail_an" class="regular-text" placeholder="leer = keine Mail" value="' . esc_attr((string) get_option('sab_mail_an', '')) . '"><p class="description">Einmal pro Woche eine Mail mit Klicks, Ausfällen und Seiten mit vielen Partnerlinks. An dieselbe Adresse gehen sofort Meldungen, wenn ein Produkt ausfällt oder die Amazon-Schnittstelle nicht antwortet.</p></td></tr>'

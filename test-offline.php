@@ -756,8 +756,11 @@ $txt = '<p>Text</p><hr /><p><strong>Vasos</strong></p><p>[amz_bild asin="B0ALT00
 [$tl, $tn, $th] = SAB::tausch_kurzlinks($txt, 'B0ALT00002', 'B0NEU00002');
 ok($tn === 1 && strpos($tl, '[amz_link asin="B0NEU00002" land="es"]oferta de Amazon[/amz_link]') !== false && strpos($tl, '3Anderes') !== false, 'Tausch: Textlink direkt unter dem Produkt wird mitgetauscht, Link im nächsten Abschnitt nicht');
 $GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0LEBT0001' => ['titel' => 'x']], 'ts' => time()]; $GLOBALS['opt']['sab_produkte'] = "B0LEBT0001 | Lebt\nB0TOT00001 | Tot"; unset($GLOBALS['tr']['sab_alle_asins']); $wpdb_alt2 = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null;
-SAB::$umbau_abw = []; [$uw, $un] = SAB::umbau_text('<p><a href="https://www.amazon.es/dp/B0TOT00001">Oferta</a></p>');
+$GLOBALS['opt']['sab_weg_umbauen'] = '0'; SAB::$umbau_abw = []; [$uw, $un] = SAB::umbau_text('<p><a href="https://www.amazon.es/dp/B0TOT00001">Oferta</a></p>');
 ok($un === 0 && strpos($uw, 'amz_link') === false && count(SAB::$umbau_abw) === 1, 'Umbau: Link auf ein Produkt, das Amazon nicht mehr kennt, bleibt unverändert und wird gemeldet');
+$GLOBALS['opt']['sab_weg_umbauen'] = '1'; SAB::$umbau_abw = []; SAB::$umbau_weg = []; [$uw2, $un2] = SAB::umbau_text('<p><a href="https://www.amazon.es/dp/B0TOT00001">Oferta</a></p>');
+ok($un2 === 1 && strpos($uw2, 'amz_link') !== false && isset(SAB::$umbau_weg['B0TOT00001']) && !SAB::$umbau_abw, 'Umbau: unbekanntes Produkt wird standardmäßig mit Platzhalter umgebaut');
+unset($GLOBALS['opt']['sab_weg_umbauen']);
 SAB::$umbau_abw = []; [$uw2, $un2] = SAB::umbau_text('<p><a href="https://www.amazon.es/dp/B0LEBT0001">Oferta</a></p>');
 ok($un2 === 1 && strpos($uw2, 'amz_link asin="B0LEBT0001"') !== false, 'Umbau: Link auf ein bekanntes Produkt wird umgebaut');
 $GLOBALS['wpdb'] = $wpdb_alt2; unset($GLOBALS['opt']['sab_uebersicht_stand_es']);
