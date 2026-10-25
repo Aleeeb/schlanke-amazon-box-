@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.71.1
+ * Version: 0.71.2
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.71.1';
+    const VERSION = '0.71.2';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -487,7 +487,12 @@ final class SAB {
     /** Produkte ohne Handdaten oder mit Handdaten älter als 30 Tage: [ASIN => Hinweis]. */
     private static function handdaten_fehlen(array $d): array {
         $m = self::manuell_daten(); $out = [];
+        $erledigt = array_flip(array_merge(array_keys(self::tausch_regeln()), array_column((array) get_option('sab_tausch_log', []), 'alt')));   // schon ersetzt: nicht mehr messen
         foreach (self::alle_asins() as $a) {
+            if (isset($erledigt[$a])) { continue; }
+            $it = $d['items'][$a] ?? null;
+            $weg = !$it || (empty($it['lieferbar']) && empty($it['trotz'])) || ($it['status'] ?? '') === 'OUT_OF_STOCK' || ($it['preis'] ?? '') === '';
+            if (isset($m[$a]) && (!empty($m[$a]['gelesen_weg']) || ($weg && (string) ($m[$a]['manuell_stand'] ?? '') !== ''))) { continue; }   // einmal gelesen und bei Amazon nicht verfügbar: bleibt weg, nicht erneut suchen
             if (!isset($m[$a])) { $out[$a] = 'keine Handdaten'; continue; }
             $st = (string) ($m[$a]['manuell_stand'] ?? ''); $t = $st !== '' ? strtotime($st) : false;
             if (!$t) { $out[$a] = 'ohne Datum'; }
@@ -593,7 +598,7 @@ final class SAB {
             $p = mb_strtolower($t[3] ?? '');
             $out[$a] = [
                 'sterne' => $zahl($t[1] ?? ''), 'anzahl' => isset($t[2]) && $t[2] !== '' ? (int) preg_replace('/\D/', '', $t[2]) : null,
-                'prime' => $p === '' ? null : in_array($p, ['ja', 'yes', 'j', '1', 'prime'], true), 'liefertage' => $tage,
+                'prime' => $p === '' || in_array($p, ['-', '?', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true) ? null : in_array($p, ['ja', 'yes', 'j', '1', 'prime'], true), 'gelesen_weg' => in_array($p, ['-', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true), 'liefertage' => $tage,
                 'liefertext' => $t[4] ?? '', 'manuell_stand' => $t[5] ?? '', 'provision' => isset($t[6]) && preg_match('/\\d/', $t[6]) ? (float) str_replace(',', '.', preg_replace('/[^\\d,.]/', '', $t[6])) : null,
             ];
         }
@@ -2633,7 +2638,7 @@ final class SAB {
                    . (isset($x['sterne']) && $x['sterne'] !== null ? '<span class="sab-chip" title="von Hand gepflegt' . (!empty($x['manuell_stand']) ? ', Stand ' . esc_attr($x['manuell_stand']) : '') . '">★ ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')</span>' : '')
                    . '<span class="sab-chip" style="padding:0;background:none">' . self::prime_zeichen(isset($x['prime']) ? $x['prime'] : null) . '</span>'
                    . (isset($x['liefertage']) && $x['liefertage'] !== null ? '<span class="sab-chip ' . ($x['liefertage'] <= 3 ? 'ok' : ($x['liefertage'] >= 7 ? 'bad' : 'warn')) . '" title="Lieferzeit Ø in Tagen: ' . esc_attr((string) ($x['liefertext'] ?? '')) . '">&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T</span>' : '');
-            if (!isset($x['sterne']) || $x['sterne'] === null || !isset($x['prime']) || $x['prime'] === null || !isset($x['liefertage']) || $x['liefertage'] === null) { $chips .= '<span class="sab-chip warn" title="Sterne, Prime oder Lieferzeit fehlen (Reiter Score, Handdaten)">Handdaten fehlen</span>'; }
+            if ((!isset($x['sterne']) || $x['sterne'] === null || !isset($x['prime']) || $x['prime'] === null || !isset($x['liefertage']) || $x['liefertage'] === null) && !(!empty($x['manuell_stand']) && ($lief[0] === 'bad' || !empty($x['gelesen_weg'])))) { $chips .= '<span class="sab-chip warn" title="Sterne, Prime oder Lieferzeit fehlen (Reiter Score, Handdaten)">Handdaten fehlen</span>'; }
             $sp = (array) ($x['spar'] ?? []);
             $preis = ($x['preis'] ?? '') !== '' ? '<strong>' . esc_html($x['preis']) . '</strong>' . (!empty($sp['streich']) ? '<br><small><s>' . esc_html($sp['streich']) . '</s>' . (isset($sp['prozent']) ? ' &minus;' . (int) $sp['prozent'] . ' %' : '') . '</small>' : '') : '–';
             $rang = isset($x['rang']) && $x['rang'] !== null ? '<span title="' . esc_attr((string) ($x['kategorie'] ?? '')) . '">' . number_format((int) $x['rang'], 0, ',', '.') . '</span>' : '–';

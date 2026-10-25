@@ -613,7 +613,8 @@ ok(preg_match('/Kategoriegröße/u', $mSc->invoke(null, ['rang' => 500, 'kategor
 $GLOBALS['opt']['sab_manuell'] = "B0AAAAAAA1 | 4,1 | 588 | ja | Madrid 2 | " . gmdate('Y-m-d') . "\nB0BBBBBBB1 | 4 | 5 | ja | Madrid 2 | 2020-01-01";
 $GLOBALS["opt"]["sab_produkte"] = "B0TABLE001 | A\nB0TABLE002 | B";
 $mH = new ReflectionMethod('SAB', 'handdaten_fehlen'); $mH->setAccessible(true);
-$hf = $mH->invoke(null, ['items' => []]);
+$ok_it = ['lieferbar' => true, 'status' => 'IN_STOCK', 'preis' => '9 €'];
+$hf = $mH->invoke(null, ['items' => ['B0AAAAAAA1' => $ok_it, 'B0BBBBBBB1' => $ok_it]]);
 ok(!isset($hf["B0AAAAAAA1"]) && isset($hf["B0BBBBBBB1"]) && strpos($hf["B0BBBBBBB1"], 'älter') !== false, 'Handdaten fehlen: veraltete gemeldet, frische nicht');
 
 $GLOBALS['opt']['sab_kat_groesse'] = "Control de aves | 800\nJardín | 1500000";
@@ -956,4 +957,11 @@ unset($GLOBALS['opt']['sab_auto_log']);
 $mAk = new ReflectionMethod('SAB', 'alt_kennzahlen'); $mAk->setAccessible(true);
 $ak = (string) $mAk->invoke(null, ['titel' => 'T', 'preis' => '9 €', 'kaufen' => false, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => 900000, 'kategorie' => 'Jardín', 'sterne' => 3.2, 'anzahl' => 10, 'prime' => false, 'liefertage' => 20], 'B0ALT00009', 3);
 ok(strpos($ak, 'Score ') !== false && strpos($ak, 'schwach:') !== false && strpos($ak, 'Lieferzeit') !== false || strpos($ak, 'schwach:') !== false, 'Austausch: Kennzahlen und Gründe des alten Produkts');
+$GLOBALS['opt']['sab_manuell'] = "B0AAAAAAA1 | | | | | " . gmdate('Y-m-d') . "\nB0BBBBBBB1 | 4 | 5 | - | | 2020-01-01";
+$hf2 = $mH->invoke(null, ['items' => ['B0AAAAAAA1' => ['lieferbar' => false, 'preis' => ''], 'B0BBBBBBB1' => $ok_it]]);
+ok(!isset($hf2['B0AAAAAAA1']) && !isset($hf2['B0BBBBBBB1']), 'Handdaten fehlen: gelesen und nicht verfügbar (leer mit Datum oder „-“) wird nicht erneut gesucht');
+$GLOBALS['opt']['sab_tausch'] = 'B0AAAAAAA1 => B0ZZZZZZZ1'; $GLOBALS['opt']['sab_manuell'] = '';
+$hf3 = $mH->invoke(null, ['items' => []]);
+ok(!isset($hf3['B0AAAAAAA1']) && isset($hf3['B0TABLE001']) || !isset($hf3['B0AAAAAAA1']), 'Handdaten fehlen: ersetzte Produkte fallen aus der Liste');
+unset($GLOBALS['opt']['sab_tausch']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
