@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.71.7
+ * Version: 0.72.0
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.71.7';
+    const VERSION = '0.72.0';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -89,6 +89,13 @@ final class SAB {
         add_action('wp_footer',      [__CLASS__, 'messskript']);
         add_action('wp_footer',      [__CLASS__, 'zeige_skript'], 99);
         add_action('admin_footer-post.php', [__CLASS__, 'zeige_editor_skript']);
+        add_filter('pre_do_shortcode_tag', [__CLASS__, 'ord_pre'], 10, 4);
+        add_filter('do_shortcode_tag',     [__CLASS__, 'ord_post'], 10, 4);
+        add_filter('the_content',          [__CLASS__, 'ord_reset'], 9);
+        add_action('wp_footer',            [__CLASS__, 'stellen_skript'], 97);
+        add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
+        add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
+        add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
         add_action('wp_footer',      [__CLASS__, 'fuss'], 5);
         add_filter('pre_set_site_transient_update_plugins', [__CLASS__, 'update_pruefen']);
         add_action('admin_init',     [__CLASS__, 'tabelle']);
@@ -1374,7 +1381,7 @@ final class SAB {
     }
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
-    const KARTE_CSS = '.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:170px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}';
+    const KARTE_CSS = '.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
@@ -1454,6 +1461,137 @@ final class SAB {
            . 'var wrap=document.getElementById("wp-content-wrap");if(wrap&&wrap.className.indexOf("html-active")>=0&&window.switchEditors){try{switchEditors.go("content","tmce")}catch(e){}}'
            . 'vis()}'
            . 'if(document.readyState==="complete"){setTimeout(los,600)}else{window.addEventListener("load",function(){setTimeout(los,600)})}})();</script>';
+    }
+
+
+    // ---------- Produkt an einer Stelle im Artikel tauschen (nur für angemeldete Redakteure, im Frontend) ----------
+
+    const ORD_TAGS = ['amz_produkt', 'amz_bild', 'amz_link', 'amz_karte', 'aawp'];
+    private static $ord = 0;
+    private static $ord_stack = [];
+
+    private static function ord_aktiv(): bool {
+        return function_exists('is_user_logged_in') && is_user_logged_in() && current_user_can('edit_posts') && is_singular() && in_the_loop() && is_main_query();
+    }
+
+    public static function ord_reset($c) { self::$ord = 0; self::$ord_stack = []; return $c; }
+
+    public static function ord_pre($r, $tag, $attr, $m) {
+        if (in_array($tag, self::ORD_TAGS, true) && self::ord_aktiv()) { self::$ord++; self::$ord_stack[] = self::$ord; }
+        return $r;
+    }
+
+    public static function ord_post($out, $tag, $attr, $m) {
+        if (!in_array($tag, self::ORD_TAGS, true) || !self::$ord_stack) { return $out; }
+        $n = array_pop(self::$ord_stack);
+        return str_replace('data-sab-asin="', 'data-sab-ord="' . (int) $n . '" data-sab-asin="', (string) $out);
+    }
+
+    /** Alle gezählten Platzhalter eines Artikeltexts in der Reihenfolge, in der WordPress sie ausführt. @return array<int,array{0:string,1:int}> [Text, Position] */
+    private static function stellen_finden(string $c): array {
+        $out = [];
+        if (!preg_match_all('/' . get_shortcode_regex(self::ORD_TAGS) . '/', $c, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { return $out; }
+        foreach ($m as $x) {
+            if (($x[1][0] ?? '') === '[' && ($x[6][0] ?? '') === ']') { continue; }   // [[amz_…]] wird von WordPress nicht ausgeführt
+            $out[] = [$x[0][0], (int) $x[0][1]];
+        }
+        return $out;
+    }
+
+    private static function stelle_pruefen(): array {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0);
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $ord = (int) ($_POST['ord'] ?? 0); $asin = self::asin((string) ($_POST['asin'] ?? ''));
+        $post = get_post($pid); if (!$post) { wp_send_json_error('Artikel nicht gefunden.'); }
+        $c = (string) $post->post_content; $st = self::stellen_finden($c);
+        if ($ord < 1 || !isset($st[$ord - 1])) { wp_send_json_error('Die Stelle passt nicht mehr zum Artikeltext. Bitte die Seite neu laden.'); }
+        [$tag, $pos] = $st[$ord - 1];
+        $quelle = '';
+        if (preg_match_all('/\b[A-Z0-9]{10}\b/', $tag, $tm)) { foreach (array_unique($tm[0]) as $t) { if (self::getauscht($t) === $asin) { $quelle = $t; break; } } }
+        if ($quelle === '') { wp_send_json_error('An dieser Stelle steht keine feste ASIN (vermutlich eine Ersatzliste/Slot). Bitte im Reiter „Produkte und Ersatzlisten“ ändern.'); }
+        return [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin];
+    }
+
+    public static function ajax_stelle_kand(): void {
+        [$post, , , , , , , $asin] = self::stelle_pruefen();
+        $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []);
+        $fund = self::fundstellen([$asin]); $namen = self::produkte();
+        $name = ($namen[$asin] ?? '') ?: self::kurzname_aus_titel((string) ($d['items'][$asin]['titel'] ?? ''));
+        $k = self::austausch_kandidaten($asin, (string) $name, (array) $d, $trotz, $fund, 8);
+        $out = [];
+        foreach ($k['liste'] as $c) {
+            $x = (array) $c['x'];
+            $img = !empty($x['bilder'][0]) ? (string) $x['bilder'][0] : '';
+            $out[] = ['asin' => $c['asin'], 'name' => ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? '')), 'score' => $c['score'], 'preis' => (string) ($x['preis'] ?? ''), 'img' => $img, 'quelle' => $c['quelle'], 'ok' => (bool) $c['ok']];
+        }
+        wp_send_json_success(['alt' => $name ?: $asin, 'liste' => $out, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
+    }
+
+    public static function ajax_stelle_tausch(): void {
+        [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin] = self::stelle_pruefen();
+        $neu = self::asin((string) ($_POST['neu'] ?? ''));
+        if (strlen($neu) !== 10 || $neu === $asin) { wp_send_json_error('Bitte eine gültige, andere ASIN angeben.'); }
+        $namen = self::produkte(); $neuer = (string) ($namen[$neu] ?? '');
+        $alte = array_filter([(string) ($namen[$asin] ?? ''), (string) ($namen[$quelle] ?? '')]);
+        // gleiche Tabellenzelle: alle zählenden Platzhalter desselben Produkts mitnehmen (Bild, Titel, Link)
+        $von = $pos; $bis = $pos + strlen($tag);
+        $td0 = strripos(substr($c, 0, $pos), '<td'); $td1 = strripos(substr($c, 0, $pos), '</td>');
+        if ($td0 !== false && ($td1 === false || $td1 < $td0)) {
+            $e = stripos($c, '</td>', $pos);
+            if ($e !== false) { $von = $td0; $bis = $e; }
+        }
+        $seg = substr($c, $von, $bis - $von);
+        $seg2 = preg_replace('/\btitel="[^"]*"/u', '', $seg);   // dein alter Titel passt nicht zum neuen Produkt
+        [$seg3, $n] = self::tausch_text($seg2, $quelle, $neu, $alte, $neuer);
+        if ($n === 0 || $seg3 === $seg) { wp_send_json_error('Nichts geändert.'); }
+        $c2 = substr($c, 0, $von) . $seg3 . substr($c, $bis);
+        $b = (array) get_post_meta($post->ID, '_sab_stelle_backup', true);
+        $b = array_slice(array_merge($b, [['ts' => time(), 'hash' => md5($c2), 'vorher' => $c, 'alt' => $asin, 'neu' => $neu]]), -5);
+        update_post_meta($post->ID, '_sab_stelle_backup', wp_slash($b));
+        wp_update_post(['ID' => $post->ID, 'post_content' => wp_slash($c2)]);
+        delete_transient('sab_alle_asins');
+        wp_send_json_success(['n' => $n]);
+    }
+
+    public static function ajax_stelle_zurueck(): void {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0);
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $b = (array) get_post_meta($pid, '_sab_stelle_backup', true); $post = get_post($pid);
+        $l = end($b);
+        if (!$post || !$l) { wp_send_json_error('Es gibt nichts rückgängig zu machen.'); }
+        if (md5((string) $post->post_content) !== ($l['hash'] ?? '')) { wp_send_json_error('Der Artikel wurde seitdem geändert; Rückgängig ist zu riskant. Bitte über „Bearbeiten“ prüfen.'); }
+        wp_update_post(['ID' => $pid, 'post_content' => wp_slash((string) $l['vorher'])]);
+        array_pop($b); update_post_meta($pid, '_sab_stelle_backup', wp_slash($b));
+        wp_send_json_success(['alt' => $l['alt'] ?? '', 'neu' => $l['neu'] ?? '']);
+    }
+
+    public static function stellen_skript(): void {
+        if (!function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts') || !is_singular()) { return; }
+        $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => (int) get_queried_object_id()]);
+        echo '<script>(function(){var C=' . $cfg . ';var seen={};'
+           . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
+           . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
+           . 'function oeffne(o,asin){var ov=el("div","position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto");'
+           . 'var bx=el("div","background:#fff;color:#222;max-width:640px;width:100%;border-radius:10px;padding:18px;font:14px/1.4 sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)");ov.appendChild(bx);'
+           . 'ov.onclick=function(e){if(e.target===ov){ov.remove()}};document.body.appendChild(ov);'
+           . 'bx.appendChild(el("h3","margin:0 0 6px;font-size:18px","Produkt an dieser Stelle tauschen"));var inf=el("p","margin:0 0 10px;color:#555","Lade Vorschläge …");bx.appendChild(inf);'
+           . 'var lst=el("div","");bx.appendChild(lst);'
+           . 'function tausche(neu){inf.textContent="Tausche …";post("sab_stelle_tausch",{ord:o,asin:asin,neu:neu},function(r){if(r.success){inf.textContent="Getauscht. Seite wird neu geladen …";location.reload()}else{inf.textContent="Nicht möglich: "+r.data;inf.style.color="#a00"}})}'
+           . 'post("sab_stelle_kand",{ord:o,asin:asin},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}'
+           . 'inf.textContent="Jetzt: "+r.data.alt+". Nur diese Stelle im Artikel wird getauscht (mit Sicherung).";'
+           . 'r.data.liste.forEach(function(c){var row=el("div","display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eee");'
+           . 'if(c.img){var im=el("img","width:56px;height:56px;object-fit:contain;flex:none");im.src=c.img;row.appendChild(im)}'
+           . 'var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555","Score "+(c.score===null?"?":c.score)+(c.preis?" · "+c.preis:"")+" · "+c.quelle+(c.ok?"":" · nicht lieferbar")));row.appendChild(tx);'
+           . 'var bt=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");bt.onclick=function(){tausche(c.asin)};row.appendChild(bt);lst.appendChild(row)});'
+           . 'if(!r.data.liste.length){lst.appendChild(el("p","","Keine passenden Vorschläge. Gib unten eine ASIN ein."))}'
+           . 'var fr=el("div","display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid #eee");var ip=el("input","flex:1;padding:6px;border:1px solid #bbb;border-radius:6px");ip.placeholder="Eigene ASIN, z. B. B0XXXXXXXX";var b2=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");b2.onclick=function(){tausche(ip.value.trim().toUpperCase())};fr.appendChild(ip);fr.appendChild(b2);bx.appendChild(fr);'
+           . 'if(r.data.zurueck){var zu=el("a","display:inline-block;margin-top:10px;color:#a00;cursor:pointer;text-decoration:underline","Letzten Tausch in diesem Artikel rückgängig machen");zu.onclick=function(){post("sab_stelle_zurueck",{},function(q){if(q.success){location.reload()}else{inf.textContent=q.data;inf.style.color="#a00"}})};bx.appendChild(zu)}'
+           . '});}'
+           . 'function mk(e){var o=e.getAttribute("data-sab-ord");if(!o||seen[o]){return}seen[o]=1;var box=e.closest(".sab-karte,.sab-produkt,td")||e.parentNode;if(getComputedStyle(box).position==="static"){box.style.position="relative"}'
+           . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b)}'
+           . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}})();</script>';
     }
 
     /** Sprung zur Stelle: ?sab_zeige=ASIN öffnet den Artikel und markiert die Stelle (nur für angemeldete Redakteure). */

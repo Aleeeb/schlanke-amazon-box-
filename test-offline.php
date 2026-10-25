@@ -964,4 +964,20 @@ $GLOBALS['opt']['sab_tausch'] = 'B0AAAAAAA1 => B0ZZZZZZZ1'; $GLOBALS['opt']['sab
 $hf3 = $mH->invoke(null, ['items' => []]);
 ok(!isset($hf3['B0AAAAAAA1']) && isset($hf3['B0TABLE001']) || !isset($hf3['B0AAAAAAA1']), 'Handdaten fehlen: ersetzte Produkte fallen aus der Liste');
 unset($GLOBALS['opt']['sab_tausch']);
+
+// ---- 0.72.0: Produkt an einer Stelle tauschen ----
+if (!function_exists('get_shortcode_regex')) { function get_shortcode_regex($tagnames = null) { $tagregexp = implode('|', array_map('preg_quote', $tagnames)); return '\[(\[?)(' . $tagregexp . ')(?![\w-])([^\]\/]*(?:\/(?!\])[^\]\/]*)*?)(?:(\/)\]|\](?:([^\[]*+(?:\[(?!\/\2\])[^\[]*+)*+)\[\/\2\])?)(\]?)'; } }
+if (!function_exists('wp_update_post')) { function wp_update_post($a) { $GLOBALS['gespeichert'] = $a['post_content']; return 1; } }
+if (!function_exists('update_post_meta')) { function update_post_meta($i, $k, $v) { return true; } }
+if (!function_exists('wp_slash')) { function wp_slash($v) { return $v; } }
+$GLOBALS['pc'] = '<table><tr><td>[amz_bild asin="B0AAAAAAA1"] [amz_link asin="B0AAAAAAA1"]Zaun A[/amz_link]</td><td>[amz_bild asin="B0BBBBBBB1"]</td></tr></table>';
+$mSt = new ReflectionMethod('SAB', 'stellen_finden'); $mSt->setAccessible(true);
+ok(count($mSt->invoke(null, $GLOBALS['pc'])) === 3, 'Stellen: drei Platzhalter in Ausführungsreihenfolge');
+$_POST = ['post' => 1, 'ord' => 3, 'asin' => 'B0BBBBBBB1', 'neu' => 'B0CCCCCCC1']; unset($GLOBALS['gespeichert']);
+SAB::ajax_stelle_tausch();
+ok(($GLOBALS['gespeichert'] ?? '') !== '' && strpos($GLOBALS['gespeichert'], 'B0CCCCCCC1') !== false && substr_count($GLOBALS['gespeichert'], 'B0AAAAAAA1') === 2 && strpos($GLOBALS['gespeichert'], 'B0BBBBBBB1') === false, 'Stelle tauschen: nur die zweite Zelle ändert sich');
+$_POST = ['post' => 1, 'ord' => 1, 'asin' => 'B0AAAAAAA1', 'neu' => 'B0DDDDDDD1']; unset($GLOBALS['gespeichert']);
+SAB::ajax_stelle_tausch();
+ok(substr_count($GLOBALS['gespeichert'] ?? '', 'B0DDDDDDD1') === 2 && substr_count($GLOBALS['gespeichert'] ?? '', 'B0BBBBBBB1') === 1, 'Stelle tauschen: Bild und Link derselben Zelle zusammen');
+unset($GLOBALS['pc'], $_POST);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
