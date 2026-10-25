@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1a Amazon Box 0.70.7
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.71.0
+ * Version: 0.71.1
  * Requires PHP: 7.4
  */
 
@@ -45,7 +45,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.71.0';
+    const VERSION = '0.71.1';
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
     /** Größte Bildbreite für Bilder aus [aawp image_width=…]: 500 px wirkten am Desktop zu groß. */
@@ -705,6 +705,36 @@ final class SAB {
         if (isset($x['liefertage']) && $x['liefertage'] !== null && (float) $x['liefertage'] > 14) { $d = max($d, 40); }
         if (isset($x['sterne']) && $x['sterne'] !== null && (float) $x['sterne'] < 3.5) { $d = max($d, 30); }
         return min(100, $d);
+    }
+
+    /** Kleine Balkengrafik der Score-Bestandteile (ein Balken je Faktor, Höhe = Wert 0 bis 1) und die schwächsten Gründe als Text. Rot = schwach, grün = stark. */
+    private static function score_grafik(array $det): string {
+        $b = ''; $schwach = [];
+        foreach ($det as [$name, $gew, $wert, $pkt, $text]) {
+            if ((float) $gew <= 0) { continue; }
+            $hoehe = max(2, (int) round(18 * (float) $wert));
+            $farbe = $wert < 0.35 ? '#d63638' : ($wert < 0.65 ? '#dba617' : '#2e9a47');
+            $b .= '<span title="' . esc_attr($name . ': ' . $text . ' (' . round((float) $wert * 100) . ' von 100)') . '" style="display:inline-block;width:7px;height:18px;margin-right:2px;background:#eee;position:relative;vertical-align:bottom"><span style="position:absolute;left:0;right:0;bottom:0;height:' . $hoehe . 'px;background:' . $farbe . '"></span></span>';
+            if ($wert < 0.35) { $schwach[] = [$wert * $gew, $name . ' (' . $text . ')']; }
+        }
+        usort($schwach, fn($p, $q) => $p[0] <=> $q[0]);
+        $g = $schwach ? '<br><small style="color:#a00" title="Diese Bestandteile drücken den Score am stärksten">schwach: ' . esc_html(implode(', ', array_map(fn($z) => $z[1], array_slice($schwach, 0, 3)))) . '</small>' : '';
+        return '<span style="display:inline-block;line-height:1">' . $b . '</span>' . $g;
+    }
+
+    /** Rechts neben dem zu tauschenden Produkt: Score (farbig), Preis, Sterne, Prime, Lieferzeit, Rang, Provision und die Grafik der Score-Bestandteile. */
+    private static function alt_kennzahlen(array $x, string $asin, int $seiten): string {
+        if (!$x) { return '<div style="margin-left:auto;color:#a00"><small>Amazon liefert keine Daten (mehr)</small></div>'; }
+        $trotz = (array) get_option('sab_trotz', []); $x['trotz'] = isset($trotz[$asin]);
+        [$sc, , $det] = self::score($x); $pv = self::provision_satz($x);
+        $t = [];
+        $t[] = ($x['preis'] ?? '') !== '' ? esc_html((string) $x['preis']) : '<span style="color:#a00">kein Preis</span>';
+        if (isset($x['sterne']) && $x['sterne'] !== null) { $t[] = '&#9733; ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')'; }
+        $t[] = self::prime_zeichen(isset($x['prime']) ? $x['prime'] : null);
+        if (isset($x['liefertage']) && $x['liefertage'] !== null) { $t[] = '&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T'; }
+        if (isset($x['rang']) && $x['rang'] !== null) { $t[] = 'Rang ' . number_format((int) $x['rang'], 0, ',', '.'); }
+        $t[] = $pv !== null ? esc_html(str_replace('.', ',', (string) $pv)) . ' % Prov.' : 'Prov. ?';
+        return '<div style="margin-left:auto;text-align:right;min-width:260px"><span style="font-size:20px;font-weight:700;color:' . self::score_farbe($sc) . '" title="Score des alten Produkts">Score ' . (int) $sc . '</span><br><small>' . implode(' · ', $t) . '</small><br>' . self::score_grafik($det) . '</div>';
     }
 
     /** Prime als Schildchen: blau mit Haken, bei „kein Prime“ grau und durchgestrichen, bei unbekannt gestrichelt (eigene Gestaltung, nicht das Amazon-Logo). */
@@ -3500,7 +3530,7 @@ final class SAB {
                 $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
             }
             $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
-                . '<div><strong>Zu tauschen:</strong> <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><small style="color:#a00">' . esc_html($z['grund']) . '</small> · ' . $wo . '</div></div>'
+                . '<div><strong>Zu tauschen:</strong> <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><small style="color:#a00">' . esc_html($z['grund']) . '</small> · ' . $wo . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
                 . '<div style="display:flex;flex-wrap:wrap;gap:10px">';
             foreach ($k['liste'] as $i => $c) {
                 $x = $c['x']; $pv = $c['pv'] ?? null; $nm = ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
@@ -3509,7 +3539,7 @@ final class SAB {
                     . self::mini_bild($c['asin'], $x) . '<span>' . (!empty($c['neu']) ? '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#dbe9ff;color:#0b3d91;font-size:11px;font-weight:700">NEU durch Amazon-Suche</span><br>' : '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#eee;color:#444;font-size:11px">aus dem Bestand</span><br>') . '<strong>' . esc_html($nm !== '' ? $nm : '(noch keine Daten)') . '</strong><br><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($c['asin']) . '</code></a><br>'
                     . '<small>' . esc_html($c['quelle']) . ' · <strong>Score ' . ($c['score'] !== null ? (int) $c['score'] : '?') . '</strong>' . (!empty($x['bonus']) ? ' <span style="color:#6a3fb0;font-weight:700" title="Von Hand vergebener Bonus, im Score enthalten">&#9998; ' . ($x['bonus'] > 0 ? '+' : '') . (int) $x['bonus'] . ' manuell</span>' : '') . ($x && ($x['preis'] ?? '') !== '' ? ' · ' . esc_html((string) $x['preis']) : '') . ($x && isset($x['sterne']) && $x['sterne'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' ★' . (isset($x['anzahl']) && $x['anzahl'] !== null ? ' (' . number_format((int) $x['anzahl'], 0, ',', '.') . ')' : '') : '') . ' · ' . self::prime_zeichen($x && isset($x['prime']) ? $x['prime'] : null) . ($x && isset($x['liefertage']) && $x['liefertage'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : '') . '</small><br>'
                     . ($pv !== null ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;' . $pvStil . '">' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision</span>' : '<span style="color:#a00">Provision unbekannt</span>')
-                    . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . '</span></label>';
+                    . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . ($x ? '<br>' . self::score_grafik(self::score($x)[2]) . (($sa = (int) (self::score(array_merge($xalt, ['trotz' => isset($trotz[$alt])]))[0] ?? 0)) && $c['score'] !== null ? ' <small style="font-weight:700;color:' . ($c['score'] >= $sa ? '#1a7f37' : '#a00') . '" title="Unterschied zum alten Produkt">' . ($c['score'] - $sa >= 0 ? '+' : '') . ((int) $c['score'] - $sa) . ' gegenüber dem alten</small>' : '') : '') . '</span></label>';
             }
             $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
             if (!$k['liste']) { $h .= '<p style="margin:0"><em>Kein passender Kandidat gefunden.</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }

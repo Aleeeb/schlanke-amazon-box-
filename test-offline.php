@@ -953,4 +953,7 @@ $GLOBALS['opt']['sab_auto_log'] = [['ts' => time(), 'alt' => 'B0ALT00001', 'neu'
 $ah = (string) $mA->invoke(null);
 ok(strpos($ah, 'Zu tauschen') !== false && strpos($ah, 'Automatisch getauscht') !== false && strpos($ah, 'Rückgängig') !== false, 'Austausch-Reiter rendert mit Prioritätsliste und Protokoll');
 unset($GLOBALS['opt']['sab_auto_log']);
+$mAk = new ReflectionMethod('SAB', 'alt_kennzahlen'); $mAk->setAccessible(true);
+$ak = (string) $mAk->invoke(null, ['titel' => 'T', 'preis' => '9 €', 'kaufen' => false, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => 900000, 'kategorie' => 'Jardín', 'sterne' => 3.2, 'anzahl' => 10, 'prime' => false, 'liefertage' => 20], 'B0ALT00009', 3);
+ok(strpos($ak, 'Score ') !== false && strpos($ak, 'schwach:') !== false && strpos($ak, 'Lieferzeit') !== false || strpos($ak, 'schwach:') !== false, 'Austausch: Kennzahlen und Gründe des alten Produkts');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
