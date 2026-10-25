@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.32
+ * Version: 0.75.33
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.32';
+    const VERSION = '0.75.33';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -742,9 +742,11 @@ final class SAB {
 
     private static function tausch_dringlichkeit(array $x, int $score): int {
         $nicht = empty($x['trotz']) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK' || ($x['preis'] ?? '') === '');
-        if ($nicht || (array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null)) { return 100; }
+        if ($nicht || (array_key_exists('bilder', $x) && empty($x['bilder']) && empty($x['bild']))) { return 100; }   // nicht lieferbar, kein Preis oder kein Bild
         $q = self::dringlichkeit_werte();
-        $d = $score < $q['schwelle'] ? (int) round(($q['schwelle'] - $score) * $q['faktor']) : 0;
+        $primeUnklar = array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null;
+        if ($primeUnklar && (($x['preis'] ?? '') === '' || ($x['kaufen'] ?? null) === false)) { return 100; }   // ohne Preis oder Buy Box und ohne Prime: wohl nicht mehr zu haben
+        $d = max($primeUnklar ? 20 : 0, $score < $q['schwelle'] ? (int) round(($q['schwelle'] - $score) * $q['faktor']) : 0);
         if (isset($x['liefertage']) && $x['liefertage'] !== null && (float) $x['liefertage'] > $q['tage']) { $d = max($d, $q['tage_dr']); }
         if (isset($x['sterne']) && $x['sterne'] !== null && (float) $x['sterne'] < $q['sterne']) { $d = max($d, $q['sterne_dr']); }
         return min(100, $d);
@@ -3072,7 +3074,7 @@ final class SAB {
             $sc = self::score($x)[0];
             $zl[] = ['asin' => $asin, 'prio' => $ns > 0 ? self::tausch_dringlichkeit($x, $sc) * $ns : ($sc >= 60 ? $sc - 50 : -1), 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
         }
-        usort($zl, fn($a, $b) => [$b['prio'], $b['dr'], $a['sc']] <=> [$a['prio'], $a['dr'], $b['sc']]);   // wichtigste zuerst, dann dringlichste, dann schwächster Score
+        usort($zl, fn($a, $b) => [(int) ($b['dr'] >= 100 && $b['prio'] > 0), $b['prio'], $b['dr'], $a['sc']] <=> [(int) ($a['dr'] >= 100 && $a['prio'] > 0), $a['prio'], $a['dr'], $b['sc']]);   // wichtigste zuerst, dann dringlichste, dann schwächster Score
         $gesamt = count($zl);
         $pp = isset($_GET['sab_pp']) ? (string) $_GET['sab_pp'] : '25'; $pp = $pp === 'alle' ? max(1, $gesamt) : (in_array((int) $pp, [10, 25, 50, 100], true) ? (int) $pp : 25);
         $seiten_n = max(1, (int) ceil($gesamt / $pp)); $sn = max(1, min($seiten_n, (int) ($_GET['sab_s'] ?? 1)));
@@ -4081,16 +4083,20 @@ final class SAB {
             $toet = self::toetend_asin((string) $alt, (array) $d);   // steht schon in Artikeln, obwohl es Tiere töten kann: ganz nach oben, Ersatz suchen
             $zeilen[] = ['alt' => $alt, 'grund' => $toet ? 'Tierschutz-Prüfung: Begriff „' . self::toetend_wort((string) $alt, (array) $d) . '“ im Titel, bitte prüfen' : $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => $toet ? 1000 * max(1, $seiten) : ($dring[$alt] ?? 100) * max(1, $seiten), 'dr' => $toet ? 1000 : ($dring[$alt] ?? 100), 'f' => $f];
         }
-        usort($zeilen, fn($a, $b) => $b['prio'] <=> $a['prio']);
+        usort($zeilen, fn($a, $b) => [(int) ($b['dr'] >= 100), $b['prio'], $b['n']] <=> [(int) ($a['dr'] >= 100), $a['prio'], $a['n']]);   // zuerst alles Nicht-Lieferbare/ohne Bild, darin nach Priorität; danach der Rest
         $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = 10;
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
-            . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Es werden immer die ' . $ladeLimit . ' mit der höchsten Priorität gezeigt (Dringlichkeit mal Seiten); jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
+            . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
         $zaehler = 0;
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
             if (++$zaehler > $ladeLimit) { $h .= '<p class="description">… und ' . (count($zeilen) - $ladeLimit) . ' weitere (erst diese erledigen).</p>'; break; }
             $alt = $z['alt']; $xalt = $d['items'][$alt] ?? [];
             $k = self::austausch_kandidaten($alt, (string) $z['name'], (array) $d, $trotz, $fund);
+            if ($z['dr'] < 100 && $z['dr'] < 1000) {   // Produkt ist lieferbar: Ersatz nur, wenn der Score deutlich höher ist
+                $salt = (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0];
+                $k['liste'] = array_values(array_filter($k['liste'], fn($c) => $c['score'] !== null && (int) $c['score'] >= $salt + 10));
+            }
             $best = $k['liste'][0] ?? null;
             $voraus = false;   // nie vorwählen: getauscht wird nur, was bewusst angeklickt wurde (Alexander 25.10.)
             $wo = '<strong>' . (int) $z['n'] . '×</strong> auf <strong>' . (int) $z['seiten'] . '</strong> Seite' . ($z['seiten'] === 1 ? '' : 'n');
@@ -4117,7 +4123,7 @@ final class SAB {
                     . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . ($x ? '<br>' . self::score_grafik(self::score($x)[2]) . (($sa = (int) (self::score(array_merge($xalt, ['trotz' => isset($trotz[$alt])]))[0] ?? 0)) && $c['score'] !== null ? ' <small style="font-weight:700;color:' . ($c['score'] >= $sa ? '#1a7f37' : '#a00') . '" title="Unterschied zum alten Produkt">' . ($c['score'] - $sa >= 0 ? '+' : '') . ((int) $c['score'] - $sa) . ' gegenüber dem alten</small>' : '') : '') . '</span></label>';
             }
             $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
-            if (!$k['liste']) { $h .= '<p style="margin:0"><em>Kein passender Kandidat gefunden.</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
+            if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden.') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
             $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="12" maxlength="10" placeholder="B0…" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div><p style="margin:6px 0 0">' . ''
                 . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
         }

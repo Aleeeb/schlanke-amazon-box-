@@ -1093,4 +1093,9 @@ $mPe = new ReflectionMethod('SAB', 'prio_erklaerung_html'); $mPe->setAccessible(
 $wpdb_pe = $GLOBALS["wpdb"] ?? null; $GLOBALS["wpdb"] = null; $pe = $mPe->invoke(null, SAB::SCORE_STANDARD); $GLOBALS["wpdb"] = $wpdb_pe;
 ok(strpos($pe, 'Priorität = Dringlichkeit') !== false && strpos($pe, 'sab_dr[schwelle]') !== false, 'Score-Reiter: Prio-Erklärung und Dringlichkeits-Einstellung vorhanden');
 
+$rm = new ReflectionMethod('SAB', 'tausch_dringlichkeit'); $rm->setAccessible(true);
+$ok1 = $rm->invoke(null, ['lieferbar' => true, 'preis' => '9,99 €', 'kaufen' => true, 'prime' => null, 'manuell_stand' => '2026-10-25', 'bilder' => ['x']], 80);
+$ok2 = $rm->invoke(null, ['lieferbar' => true, 'preis' => '', 'bilder' => ['x']], 80);
+$ok3 = $rm->invoke(null, ['lieferbar' => true, 'preis' => '9,99 €', 'kaufen' => true, 'bilder' => []], 80);
+if ($ok1 < 100 && $ok2 === 100 && $ok3 === 100) { echo "ok  Dringlichkeit: lieferbar mit Score 80 nie ganz oben, ohne Preis/Bild 100\n"; } else { $fail = true; echo "FEHLER Dringlichkeit $ok1 $ok2 $ok3\n"; }
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
