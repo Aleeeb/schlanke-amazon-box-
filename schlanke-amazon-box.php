@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.85.3
+ * Version: 0.85.4
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.85.3';
+    const VERSION = '0.85.4';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -5171,7 +5171,7 @@ final class SAB {
 
     private static function austausch_html(): string {
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte();
-        $h = self::name_offen_html() . '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2><p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten aus dem eigenen Bestand plus neue Treffer der Amazon-Suche (zwei, bei wenig Passendem im Bestand bis zu vier) (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>';
+        $h = '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2><p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten aus dem eigenen Bestand plus neue Treffer der Amazon-Suche (zwei, bei wenig Passendem im Bestand bis zu vier) (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>';
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         $faelle = self::tausch_faelle((array) $d, $trotz);
         $fund = self::fundstellen(array_keys($faelle) ?: ['XXXXXXXXXX']);
@@ -5217,22 +5217,24 @@ final class SAB {
         $h .= self::austausch_skript($d, $trotz, $namen, $land);
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
             . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
-        $zaehler = 0; $lq = self::lernen_quote(); $ohneVorschlag = [];
-        $h .= '<p><button class="button button-primary button-hero" name="sab_form" value="ersatz_suchen">Ersatz suchen</button> <span class="description">Bewertet Bestand und eingetragene Amazon-Treffer neu (nach Titel, Kategorie und Text davor), bis zu 12 Vorschläge je Produkt, 4 auf einmal. Wo zu wenig gefunden wird, erscheint der Prompt für die Sitzung.</span></p><!--SAB_PROMPT-->';
+        $zaehler = 0; $kopf_a = $kopf_b = $kopf_c = false; $lq = self::lernen_quote(); $ohneVorschlag = [];
+        $h .= '<p><button class="button button-primary button-hero" name="sab_form" value="ersatz_suchen">Ersatz suchen</button> <span class="description">Bewertet Bestand und eingetragene Amazon-Treffer neu (nach Titel, Kategorie und Text davor), bis zu 12 Vorschläge je Produkt, 4 auf einmal. Wo zu wenig gefunden wird, steht der Prompt für die Sitzung ganz unten.</span></p><!--SAB_HINWEIS-->';
         $h .= '<p style="font-size:14px"><strong>Amazon-Treffer im Plugin:</strong> ' . count(self::such_kandidaten()) . ' Produkte mit Suchtreffern, ' . count((array) get_option('sab_importe_erledigt', [])) . ' Importe eingespielt.</p>';
         $h .= '<p style="font-size:14px"><strong>Trefferquote der Vorschläge:</strong> ' . ($lq['n'] ? 'Platz 1 gewählt: ' . $lq['eins'] . ' von ' . $lq['n'] . ' (' . $lq['quote'] . ' %)' : 'noch keine Tausche gemerkt') . '. <span class="description">Gemerkt werden nur ASINs und der Platz im Ranking (höchstens 500 Einträge). Übergangene Vorschläge rutschen für dasselbe Produkt nach hinten. ' . ($lq['n'] >= 30 && $lq['quote'] >= 90 ? 'Grün markierte Karten würden bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet).' : 'Eine Auto-Markierung gibt es ab 30 Tauschen mit 90 % Platz 1.') . '</span></p>';
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
-            if ($nb > 0 && $zaehler === 0) { $h .= '<h3 style="margin:18px 0 6px;color:#8a1f1f">Dringend tauschen: Produkte ohne Bild (' . (int) $nb . '), zuerst die auf den meisten Seiten</h3><p class="description">Hier bekommen Besucher kein Bild. Oben stehen die Produkte, die auf vielen Seiten vorkommen.</p>'; }
-            if ($nb > 0 && $zaehler === $nb && $nvorn > $nb) { $h .= '<h3 style="margin:22px 0 6px">Weitere Produkte zu tauschen</h3>'; }
-            if ($zh && $zaehler === $nvorn) { $h .= '<h3 style="margin:22px 0 6px;color:#555">Ans Ende geschoben (' . count($zh) . ')</h3><p class="description">Diese Produkte hast du zurückgestellt. Mit „Wieder nach vorn“ stehen sie wieder in der Reihenfolge oben.</p>'; }
+            if ($nb > 0 && !$kopf_a) { $kopf_a = true; $h .= '<h3 style="margin:18px 0 6px;color:#8a1f1f">Dringend tauschen: Produkte ohne Bild (' . (int) $nb . '), zuerst die auf den meisten Seiten</h3><p class="description">Hier bekommen Besucher kein Bild. Oben stehen die Produkte, die auf vielen Seiten vorkommen.</p>'; }
+            if ($nb > 0 && $zaehler === $nb && $nvorn > $nb && !$kopf_b) { $kopf_b = true; $h .= '<h3 style="margin:22px 0 6px">Weitere Produkte zu tauschen</h3>'; }
+            if ($zh && $zaehler === $nvorn && !$kopf_c) { $kopf_c = true; $h .= '<h3 style="margin:22px 0 6px;color:#555">Ans Ende geschoben (' . count($zh) . ')</h3><p class="description">Diese Produkte hast du zurückgestellt. Mit „Wieder nach vorn“ stehen sie wieder in der Reihenfolge oben.</p>'; }
             if (++$zaehler > $ladeLimit) { $h .= '<p class="description">… und ' . (count($zeilen) - $ladeLimit) . ' weitere (erst diese erledigen).</p>'; break; }
             self::$tk_sammeln = true; $kh = self::austausch_karte_html($z, $d, $trotz, $namen, $land, $fund, $lq, $ohneVorschlag); self::$tk_sammeln = false;
             if ($kh === '') { $zaehler--; } else { $h .= $kh; }
         }
         $h .= self::austausch_abschnitte_html($d, $land);
-        $h = str_replace('<!--SAB_PROMPT-->', self::ersatz_prompt_html($ohneVorschlag), $h);
         $h .= ($zeilen ? '<p><button class="button button-primary button-hero">Auswahl tauschen (jeweils mit Sicherung)</button> <span class="description">Der Tausch gilt in allen Artikeln, Titel und Textlinks folgen dem neuen Bildprodukt. Bis zu 10 pro Klick.</span></p>' : '<p>Nichts zu tauschen.</p>') . '</form>';
+        $pr_ = self::ersatz_prompt_html($ohneVorschlag); $no_ = self::name_offen_html();   // Hilfsmittel für die Suche-Sitzung stehen unten, damit die Tauschliste oben beginnt
+        $h = str_replace('<!--SAB_HINWEIS-->', ($pr_ !== '' || $no_ !== '') ? '<p class="description">Weiter unten: ' . ($pr_ !== '' ? 'Prompt für die Suche-Sitzung' : '') . ($pr_ !== '' && $no_ !== '' ? ' und ' : '') . ($no_ !== '' ? 'Kurznamen prüfen' : '') . ' (<a href="#sab-unten">dorthin springen</a>).</p>' : '', $h);
+        $h .= '<div id="sab-unten">' . $pr_ . $no_ . '</div>';
         // Austauschliste: Amazons Alternativen im Überblick
         $alts = self::amz_alternativen();
         $h .= '<h3 style="margin-top:2em">Amazons Alternativen (Austauschliste)</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="amz_alt">'
