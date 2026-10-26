@@ -1330,4 +1330,8 @@ ok($eb !== null && substr_count($eb, '[amz_ebay') === 2 && strpos($eb, 'oder bei
 ok(SAB::ebay_hinter_textlink($eb, 'B0AKKUALT1', 'Akku 12V', 'www.ebay.de') === null, 'eBay-Ausweichlink nicht doppelt');
 ok(isset(SAB::TABS['helfer']), 'Reiter Helferaufgaben vorhanden');
 ok(SAB::ebay_host('de') === 'www.ebay.de' && SAB::ebay_host('uk') !== '', 'eBay-Host je Land');
+// 0.87.1: Bild- und Textlink direkt nebeneinander = eine Stelle
+$bt = '<p>[amz_bild asin="B0AKKUALT1"] <a href="https://www.amazon.de/dp/B0AKKUALT1">Angebot bei Amazon</a></p><p>Später <a href="https://www.amazon.de/dp/B0AKKUALT1"><img src="x/B0AKKUALT1.jpg"></a></p><p>Noch einmal mit Satz davor [amz_link asin="B0AKKUALT1"]Angebot[/amz_link] und Ende.</p>';
+ok(SAB::stellen_gruppen($bt, 'B0AKKUALT1') === [1, 3, 5], 'Stellen: Bild+Text nebeneinander zählen einmal, ein Link mit zwei Treffern auch (' . json_encode(SAB::stellen_gruppen($bt, 'B0AKKUALT1')) . ')');
+ok(SAB::stellen_gruppen('<p>A <a href="https://www.amazon.de/dp/B0AKKUALT1">x</a> und mitten drin Text <a href="https://www.amazon.de/dp/B0AKKUALT1">y</a></p>', 'B0AKKUALT1') === [1, 2], 'Stellen: Text dazwischen = zwei Stellen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

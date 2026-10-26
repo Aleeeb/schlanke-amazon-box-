@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.87.0
+ * Version: 0.87.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.87.0';
+    const VERSION = '0.87.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1787,7 +1787,7 @@ final class SAB {
         wp_update_post(['ID' => $post->ID, 'post_content' => wp_slash($c2)]);
         delete_transient('sab_alle_asins');
         $sj0 = self::satz_mit_link($c2, $neu); $kk = (array) get_option('sab_kontrolle', []);   // auch Tausch an einer Stelle im Frontend kommt in die Kontrollliste
-        $kk[(string) time() . substr(md5($asin . $neu), 0, 4)] = ['ts' => time(), 'art' => 'stelle', 'pid' => (int) $post->ID, 'alt' => $asin, 'neu' => $neu, 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => substr_count($c2, $neu)]]];
+        $kk[(string) time() . substr(md5($asin . $neu), 0, 4)] = ['ts' => time(), 'art' => 'stelle', 'pid' => (int) $post->ID, 'alt' => $asin, 'neu' => $neu, 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => count(self::stellen_gruppen($c2, $neu)), 'ords' => self::stellen_gruppen($c2, $neu)]]];
         update_option('sab_kontrolle', array_slice($kk, -20, null, true), false);
         wp_send_json_success(['n' => $n]);
     }
@@ -2521,6 +2521,7 @@ final class SAB {
             $ohne = preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]|\[(?:amz_[a-z]+|aawp|amazon)\b[^\]]*\]#is', '', $c);   // ohne Plugin-Platzhalter: was übrig bleibt, sind feste Links
             foreach ($asins as $a) {
                 $n = substr_count($c, $a);
+                if ($n > 1) { $n = max(1, count(self::stellen_gruppen($c, $a))); }
                 if ($n > 0) { $out[$a][(int) $r['ID']] = ['titel' => (string) $r['post_title'], 'n' => $n, 'fest' => substr_count($ohne, $a)]; }
             }
         }
@@ -3183,11 +3184,35 @@ final class SAB {
     }
 
     /** Alle Textlink-Stellen eines Produkts in einem Artikel (höchstens 8), jede mit Satz. @return array<int,array> */
+    /** Fundstellen einer ASIN im Artikel als Liste der laufenden Nummern (1, 2 …) des jeweils ersten Vorkommens. Bild- und Textlink direkt nebeneinander (nur Tags/Leerraum dazwischen, kein Absatz-/Listenwechsel) sind eine Stelle. */
+    public static function stellen_gruppen(string $c, string $asin): array {
+        $ords = []; $ab = 0; $nr = 0; $prev_end = -1; $gruppe_offen = false;
+        while (($p = strpos($c, $asin, $ab)) !== false) {
+            $nr++; $ab = $p + 1;
+            if ($p < $prev_end) { continue; }   // steht im selben Link/Platzhalter wie das vorige Vorkommen
+            $kopf = substr($c, 0, $p); $a1 = strrpos($kopf, '[amz_'); $a2 = strrpos($kopf, '<a ');
+            $s = $p; $e = $p + strlen($asin);
+            if ($a2 !== false && ($a1 === false || $a2 > $a1) && ($z = stripos($c, '</a>', $p)) !== false && $z - $a2 < 900) { $s = $a2; $e = $z + 4; }
+            elseif ($a1 !== false && ($cl = strpos($c, ']', $a1)) !== false && $cl >= $p && $cl - $a1 < 600) {
+                $s = $a1; $e = $cl + 1;
+                if (preg_match('/^\[(amz_[a-z_]+)/', substr($c, $a1, 30), $nm)) { $zu = strpos($c, '[/' . $nm[1] . ']', $e); if ($zu !== false && $zu - $e < 600 && strpos(substr($c, $e, $zu - $e), '[') === false) { $e = $zu + strlen($nm[1]) + 3; } }
+            }
+            $gleich = false;
+            if ($prev_end >= 0 && $s >= $prev_end) {
+                $gap = substr($c, $prev_end, $s - $prev_end);
+                if (strlen($gap) < 400 && !preg_match('#</p>|<p[\s>]|</?li\b|<h[1-6]\b|</?t[rdh]\b#i', $gap) && trim(str_replace("\xC2\xA0", ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', '', $gap))))) === '') { $gleich = true; }
+            }
+            if (!$gleich) { $ords[] = $nr; }
+            $prev_end = $e;
+        }
+        return $ords;
+    }
+
     public static function satz_stellen(string $c, string $asin): array {
-        $out = []; $ab = 0;
+        $out = []; $ab = 0; $grp = self::stellen_gruppen($c, $asin);
         while (count($out) < 8 && ($i = strpos($c, $asin, $ab)) !== false) {
             $sm = self::satz_mit_link($c, $asin, $ab);
-            if ($sm && $sm['linkende'] > $i) { $out[] = $sm; $ab = $sm['linkende']; } else { $ab = $i + 1; }
+            if ($sm && $sm['linkende'] > $i) { $g_ = array_filter($grp, fn($x) => $x <= $sm['ord']); $sm['ord'] = $g_ ? max($g_) : $sm['ord']; $out[] = $sm; $ab = $sm['linkende']; } else { $ab = $i + 1; }
         }
         return $out;
     }
@@ -3264,9 +3289,9 @@ final class SAB {
                 $url = add_query_arg('sab_zeige', $neu, (string) get_permalink((int) $x['pid']));
                 $h .= '<div style="margin:6px 0 0">' . ($x['satz'] !== '' && count($st) <= 2 ? '<div style="background:#fff;border:1px solid #c3e6cb;border-radius:6px;padding:6px 10px;margin:0 0 4px;max-width:760px">' . esc_html($x['satz']) . '<br><small style="color:#555">【…】 = Link mit diesem Text</small></div>' : '')
                     . esc_html($x['titel']) . ' <small>(' . (int) $x['n'] . '×)</small>';
-                $nst = max(1, min(8, (int) $x['n']));
-                for ($k = 1; $k <= $nst; $k++) {
-                    $lab = $nst > 1 ? 'Stelle ' . $k . ' ' : '';
+                $ords = array_slice(array_values(array_map('intval', (array) ($x['ords'] ?? []))) ?: range(1, max(1, min(8, (int) $x['n']))), 0, 8); $nst = count($ords);
+                foreach ($ords as $k0 => $k) {
+                    $lab = $nst > 1 ? 'Stelle ' . ($k0 + 1) . ' ' : '';
                     $h .= ' <span style="display:inline-block;margin:2px 6px 2px 0"><a class="button button-small" href="' . esc_url(add_query_arg('sab_nr', $k, $url)) . '" target="_blank" rel="noopener">' . esc_html($lab) . 'ansehen ↗</a> <a class="button button-small" href="' . esc_url(admin_url('post.php?post=' . (int) $x['pid'] . '&action=edit&sab_zeige=' . rawurlencode($neu) . '&sab_nr=' . $k)) . '" target="_blank" rel="noopener">' . esc_html($lab) . 'bearbeiten ↗</a></span>';
                 }
                 $h .= '</div>';
@@ -3327,7 +3352,7 @@ final class SAB {
             update_post_meta($pid, '_sab_tausch_' . $id, wp_slash($c));
             wp_update_post(['ID' => $pid, 'post_content' => wp_slash($neu_c)]);
             $posts[$pid] = md5($neu_c);
-            $sj0 = self::satz_mit_link($neu_c, $neu); $stellen[] = ['pid' => $pid, 'titel' => (string) ($r['post_title'] ?? ('Beitrag ' . $pid)), 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => substr_count($neu_c, $neu)];
+            $sj0 = self::satz_mit_link($neu_c, $neu); $stellen[] = ['pid' => $pid, 'titel' => (string) ($r['post_title'] ?? ('Beitrag ' . $pid)), 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => count(self::stellen_gruppen($neu_c, $neu)), 'ords' => self::stellen_gruppen($neu_c, $neu)];
             foreach ($hw as $w) { $hinweise[] = ($r['post_title'] ?? ('Beitrag ' . $pid)) . ': ' . $w; }
             if ($hw0) { foreach (self::satz_stellen($neu_c, $neu) as $sj) { $hinweise[] = 'Satz jetzt: ' . mb_substr(str_replace('【LINK】', '[Link „' . $sj['linktext'] . '“]', $sj['maske']), 0, 260); } }
             $kurz += preg_match_all('#amzn\.to|amzn\.eu|a\.co/|link\.amazon/#i', $neu_c);
