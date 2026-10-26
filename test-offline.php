@@ -1312,6 +1312,6 @@ ok(SAB::link_pruefung('<p>Text (<a href="https://www.amazon.de/dp/B0AKKUALT1">An
 if (!function_exists('get_permalink')) { function get_permalink($i) { return 'https://example.test/artikel-' . $i . '/'; } }
 $GLOBALS['opt']['sab_kontrolle'] = ['1' => ['ts' => time(), 'alt' => 'B0AKKUALT1', 'neu' => 'B0AKKUNEU1', 'stellen' => [['pid' => 7, 'titel' => 'Elektrozaun', 'satz' => 'Außerdem betreibt Kay den Zaun mit Akku (【Angebot bei Amazon】).', 'n' => 1]]]];
 $mKo = new ReflectionMethod('SAB', 'kontrolle_html'); $mKo->setAccessible(true); $ko = $mKo->invoke(null, 'austausch');
-ok(strpos($ko, 'sab_zeige=B0AKKUNEU1') !== false && strpos($ko, 'Außerdem betreibt Kay') !== false && strpos($ko, 'kontrolle_ok') !== false, 'Kontrollliste: Sprunglink, Satz und Bestätigen');
+ok(strpos($ko, 'sab_zeige=B0AKKUNEU1') !== false && strpos($ko, 'Außerdem betreibt Kay') !== false && strpos($ko, 'kontrolle_ok') !== false && strpos($ko, 'post.php?post=7') !== false, 'Kontrollliste: Sprunglink, Satz und Bestätigen');
 unset($GLOBALS['opt']['sab_kontrolle']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.84.1
+ * Version: 0.84.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.84.1';
+    const VERSION = '0.84.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1916,7 +1916,7 @@ final class SAB {
         $ed = $eid && current_user_can('edit_post', $eid) ? admin_url('post.php?post=' . $eid . '&action=edit&sab_zeige=' . rawurlencode($a)) : '';
         echo '<script>(function(){var ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:10px 16px;font:600 15px sans-serif;text-align:center";'
-           . 'b.textContent=s.length?"Hier steht "+a+" ("+s.length+" Stelle"+(s.length>1?"n":"")+", rot markiert)":"Im sichtbaren Text steht "+a+" nicht"+(ed?"; ich öffne den Editor an der Stelle ...":" (vielleicht in einem Bild oder Code-Block).");document.body.appendChild(b);if(!s.length&&ed){setTimeout(function(){location.href=ed},1200)}'
+           . 'b.textContent=s.length?"Hier steht "+a+" ("+s.length+" Stelle"+(s.length>1?"n":"")+", rot markiert)":"Im sichtbaren Text steht "+a+" nicht"+(ed?"; ich öffne den Editor an der Stelle ...":" (vielleicht in einem Bild oder Code-Block).");document.body.appendChild(b);if(s.length&&ed){var l=document.createElement("a");l.href=ed;l.textContent="Im Editor bearbeiten";l.style.cssText="margin-left:14px;background:#fff;color:#d63638;padding:4px 10px;border-radius:4px;text-decoration:none";b.appendChild(l);var x=document.createElement("span");x.textContent=" ×";x.style.cssText="cursor:pointer;margin-left:12px";x.onclick=function(){b.remove()};b.appendChild(x)}if(!s.length&&ed){setTimeout(function(){location.href=ed},1200)}'
            . 'for(var i=0;i<s.length;i++){s[i].style.outline="4px solid #d63638";s[i].style.background="#fde8e8";}'
            . 'if(s.length){setTimeout(function(){s[0].scrollIntoView({block:"center"})},300)}})();</script>';
     }
@@ -3183,7 +3183,7 @@ final class SAB {
             foreach (array_slice($st, 0, 12) as $x) {
                 $url = add_query_arg('sab_zeige', $neu, (string) get_permalink((int) $x['pid']));
                 $h .= '<div style="margin:6px 0 0">' . ($x['satz'] !== '' && count($st) <= 2 ? '<div style="background:#fff;border:1px solid #c3e6cb;border-radius:6px;padding:6px 10px;margin:0 0 4px;max-width:760px">' . esc_html($x['satz']) . '<br><small style="color:#555">【…】 = Link mit diesem Text</small></div>' : '')
-                    . esc_html($x['titel']) . ' <small>(' . (int) $x['n'] . '×)</small> <a class="button button-small" href="' . esc_url($url) . '" target="_blank" rel="noopener">Stelle ansehen ↗</a></div>';
+                    . esc_html($x['titel']) . ' <small>(' . (int) $x['n'] . '×)</small> <a class="button button-small" href="' . esc_url($url) . '" target="_blank" rel="noopener">Stelle ansehen ↗</a> <a class="button button-small" href="' . esc_url(admin_url('post.php?post=' . (int) $x['pid'] . '&action=edit&sab_zeige=' . rawurlencode($neu))) . '" target="_blank" rel="noopener">Im Editor bearbeiten ↗</a></div>';
             }
             if (count($st) > 12) { $h .= '<p class="description">… und ' . (count($st) - 12) . ' weitere Artikel.</p>'; }
             $h .= '<form method="post" style="margin:8px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="' . esc_attr($tab) . '"><input type="hidden" name="sab_form" value="kontrolle_ok"><input type="hidden" name="sab_id" value="' . esc_attr((string) $id) . '"><button class="button button-primary">Kontrolliert, in Ordnung</button></form></div>';
