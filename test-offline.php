@@ -1211,4 +1211,7 @@ $GLOBALS['opt']['sab_lern'] = array_fill(0, 30, ['t' => 'x', 'a' => 'A', 'n' => 
 $mQ = new ReflectionMethod('SAB', 'lernen_quote'); $mQ->setAccessible(true); $lq = $mQ->invoke(null);
 ok($lq['n'] === 30 && $lq['eins'] === 29 && $lq['quote'] === 97, 'Lernen: Trefferquote Platz 1 der letzten 30 Tausche');
 unset($GLOBALS['opt']['sab_lern']);
+$mm = new ReflectionMethod('SAB', 'merkmale'); $mm->setAccessible(true); $mw = new ReflectionMethod('SAB', 'merkmal_widerspruch'); $mw->setAccessible(true);
+$ref = $mm->invoke(null, 'Mehlschwalben Einzelnest aus Holzbeton');
+ok($mw->invoke(null, $ref, $mm->invoke(null, 'Schwegler Doppelnest aus Lehm für Mehlschwalben')) && !$mw->invoke(null, $ref, $mm->invoke(null, 'Schwegler Mehlschwalbennest Einzelnest Holzbeton')) && !$mw->invoke(null, $ref, $mm->invoke(null, 'Schwalbennest Nr. 1')), 'Merkmale: Einzel/Doppel, Holzbeton/Lehm und Tierart müssen übereinstimmen, fehlende Merkmale sind kein Widerspruch');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

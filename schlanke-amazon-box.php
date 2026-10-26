@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.77.0
+ * Version: 0.77.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.77.0';
+    const VERSION = '0.77.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4156,6 +4156,33 @@ final class SAB {
         return $q['n'] >= 30 && $q['quote'] >= 90 && !empty($c['ok']) && $c['score'] !== null && (int) $c['score'] - $alt_score >= 15 && (int) ($c['aehn'] ?? 0) >= 1 && (int) ($c['passt'] ?? 0) >= 2;
     }
 
+    /** Schlüsselmerkmale eines Produkttexts: Zahl (einzel/doppel), Material, Tierart. Dienen als Ausschluss: widerspricht ein Merkmal, passt der Kandidat nicht. @return array<string,string[]> */
+    private static function merkmale(string $t): array {
+        $t = mb_strtolower($t); $o = [];
+        $reg = [
+            'zahl' => ['einzel' => '/einzel|\b1er\b|\bsingle\b|\bindividual\b|\bsimple\b|\bunique\b/u', 'doppel' => '/doppel|\b2er\b|\bdouble\b|\bdoble\b|\bduo\b|\btwin\b|\bzwillings/u'],
+            'material' => ['holzbeton' => '/holzbeton|woodcrete|wood\s?concrete|hormig[oó]n de madera/u', 'lehm' => '/lehm|schlamm|\bton\b|\bclay\b|\bmud\b|arcilla|barro|argile/u', 'keramik' => '/keramik|ceramic|cer[aá]mic/u', 'metall' => '/metall|\bmetal\b|stahl|steel/u', 'stein' => '/granit|sandstein|\bstein\b|\bstone\b|piedra/u'],
+            'tier' => ['mehlschwalbe' => '/mehlschwalbe/u', 'rauchschwalbe' => '/rauchschwalbe/u', 'schwalbe' => '/schwalbe|swallow|golondrina|hirondelle/u', 'meise' => '/meise|\btit\b|carbonero|m[eé]sange/u', 'star' => '/\bstar(en)?\b|starling/u', 'fledermaus' => '/fledermaus|\bbat\b|murci[eé]lago|chauve/u', 'igel' => '/\bigel|hedgehog|erizo|h[eé]risson/u', 'eule' => '/eule|kauz|\bowl\b|b[uú]ho|hibou/u', 'biene' => '/wildbiene|\bbiene|\bbee\b|abeja|abeille|insektenhotel|insect hotel/u', 'specht' => '/specht|woodpecker|pic\b/u', 'rotkehlchen' => '/rotkehlchen|robin|petirrojo/u']
+        ];
+        foreach ($reg as $g => $liste) { foreach ($liste as $k => $re) { if (preg_match($re, $t)) { $o[$g][] = $k; } } }
+        if (!empty($o['material']) && in_array('holzbeton', $o['material'], true)) { $o['material'] = array_values(array_diff($o['material'], ['holz'])); }
+        if (isset($o['tier']) && count($o['tier']) > 1) { $o['tier'] = array_values(array_diff($o['tier'], ['schwalbe'])); }
+        return $o;
+    }
+
+    /** Widerspricht der Kandidat den Schlüsselmerkmalen des Produkts (Einzel/Doppel, Material, Tierart)? Fehlt ein Merkmal auf einer Seite, gilt es nicht als Widerspruch. */
+    private static function merkmal_widerspruch(array $ref, array $cand): bool {
+        foreach ($ref as $g => $a) {
+            $b = $cand[$g] ?? []; if (!$b) { continue; }
+            if ($g === 'tier') {
+                $ok = false;
+                foreach ($a as $x) { foreach ($b as $y) { if ($x === $y || $x === 'schwalbe' || $y === 'schwalbe') { $ok = true; } } }
+                if (!$ok) { return true; }
+            } elseif (!array_intersect($a, $b)) { return true; }
+        }
+        return false;
+    }
+
     private static function austausch_kandidaten(string $alt, string $name, array $d, array $trotz, array $fund, int $max = 4): array {
         $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $marken = (array) get_option('sab_marken', []);
         if (!defined('SAB_SYNC') && get_transient('sab_such_pruefung') === false) {   // eingetragene Suchtreffer ohne Amazon-Daten: Abruf im Hintergrund anstoßen (höchstens alle 10 Minuten)
@@ -4170,7 +4197,8 @@ final class SAB {
         foreach (array_keys($namen) as $a) { if (!isset($q[$a])) { $q[$a] = 'Katalog'; } }
         $gruppe = []; foreach (self::gruppen() as $liste) { if (in_array($alt, $liste, true)) { $gruppe = array_merge($gruppe, $liste); } }
         $wn = self::woerter(trim($name . ' ' . (string) ($items[$alt]['titel'] ?? '')));
-        $wk = self::woerter(self::text_vor_stelle($alt, $fund[$alt] ?? []));   // Hinweise aus dem Satz vor dem Link   // nur der Produktname selbst, ohne Artikeltext: Namensähnlichkeit
+        $wk = self::woerter(self::text_vor_stelle($alt, $fund[$alt] ?? []));
+        $refm = self::merkmale(trim($name . ' ' . (string) ($items[$alt]['titel'] ?? '') . ' ' . self::text_vor_stelle($alt, $fund[$alt] ?? [])));   // Schlüsselmerkmale aus Name, Titel und Text vor dem Link   // Hinweise aus dem Satz vor dem Link   // nur der Produktname selbst, ohne Artikeltext: Namensähnlichkeit
         $text = $name;   // der Textzusammenhang bringt nur etwas, wenn der Name fast nichts sagt: sonst ziehen Wörter wie „Schnecken“ aus dem Artikel unpassende Produkte heran
         if (count(self::woerter($name)) < 2) { $text .= ' ' . self::stellen_kontext($alt, $fund[$alt] ?? []); }
         $a1 = self::arten($text); $w1 = self::woerter($text);
@@ -4181,6 +4209,7 @@ final class SAB {
             $ok = ($x['preis'] ?? '') !== '' && !empty($x['lieferbar']) && ($x['status'] ?? '') !== 'OUT_OF_STOCK';
             $tc = ($namen[$a] ?? '') . ' ' . (string) ($x['titel'] ?? '');
             if (self::toetend($tc)) { continue; }   // tötende Produkte nie vorschlagen
+            if ($refm && self::merkmal_widerspruch($refm, self::merkmale($tc))) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; continue; }   // z. B. Einzelnest vs. Doppelnest, Holzbeton vs. Lehm
             $ar = count(array_intersect($a1, self::arten($tc))); $tr = count(array_intersect($w1, self::woerter($tc))) + (self::aehnliche_woerter($text, $tc) ? 1 : 0);
             $ing = in_array($a, $gruppe, true);
             $tk = $wk ? count(array_intersect($wk, self::woerter($tc))) : 0;
@@ -4514,7 +4543,7 @@ final class SAB {
                     . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . ($x ? '<br>' . self::score_grafik(self::score($x)[2]) . (($sa = (int) (self::score(array_merge($xalt, ['trotz' => isset($trotz[$alt])]))[0] ?? 0)) && $c['score'] !== null ? ' <small style="font-weight:700;color:' . ($c['score'] >= $sa ? '#1a7f37' : '#a00') . '" title="Unterschied zum alten Produkt">' . ($c['score'] - $sa >= 0 ? '+' : '') . ((int) $c['score'] - $sa) . ' gegenüber dem alten</small>' : '') : '') . '</span></label>';
             }
             $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
-            if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden.') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
+            if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
             $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="12" maxlength="10" placeholder="B0…" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div><div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off"></label><div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
                 . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
         }
