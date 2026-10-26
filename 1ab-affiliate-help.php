@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.78.2
+ * Version: 0.78.3
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.78.2';
+    const VERSION = '0.78.3';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3286,6 +3286,7 @@ final class SAB {
 
     /** Seite der Gesamtvorschau, die nach einem Tausch wieder geöffnet wird. */
     public static int $vorschau_seite = 1;
+    public static int $vorschau_ab = 0;   // Gesamtvorschau: Artikel-ID, ab der die Seite beginnt (hält die Reihenfolge stabil, auch wenn zwischendurch Artikel umgebaut werden)
 
     const UMBAU_MAX = 30;       // Artikel, die per Häkchen auf einmal umgebaut werden dürfen
     const UMBAU_PROSEITE = 15; // Artikel pro Durchgang (kurz genug gegen Zeitlimits)
@@ -3876,7 +3877,7 @@ final class SAB {
         global $wpdb;
         $out = [];
         if (!isset($wpdb)) { return $out; }
-        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%' OR post_content LIKE '%link.amazon%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %') ORDER BY ID", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content, post_status FROM {$wpdb->posts} WHERE post_status IN ('publish','private','draft','pending','future') AND post_type NOT IN ('revision','attachment','nav_menu_item','customize_changeset','oembed_cache','wp_template','wp_template_part','wp_global_styles','wp_navigation','wp_block') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%' OR post_content LIKE '%link.amazon%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %') ORDER BY ID", ARRAY_A);
         foreach ((array) $rows as $r) {
             $c = (string) $r['post_content'];
             $c = preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', $c);
@@ -3887,10 +3888,11 @@ final class SAB {
                     if (self::umbau_url($url)) { $fest++; } elseif (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', html_entity_decode($url))) { $kurz++; }
                 }
             }
-            $fertig = get_post_meta((int) $r['ID'], '_sab_umbau_backup', true) !== '';
-            if ($fest + $kurz > 0 || $fertig) { $out[] = ['id' => (int) $r['ID'], 'titel' => (string) $r['post_title'], 'fest' => $fest, 'kurz' => $kurz, 'fertig' => $fertig]; }
+            $gesichert = get_post_meta((int) $r['ID'], '_sab_umbau_backup', true) !== '';
+            $fertig = $gesichert && $fest + $kurz === 0;   // „umgebaut“ erst, wenn kein fester Link und kein Kurzlink mehr übrig ist (sonst bliebe ein halb umgebauter Artikel unsichtbar)
+            if ($fest + $kurz > 0 || $gesichert) { $out[] = ['id' => (int) $r['ID'], 'titel' => (string) $r['post_title'], 'fest' => $fest, 'kurz' => $kurz, 'fertig' => $fertig, 'teil' => $gesichert && !$fertig, 'status' => (string) ($r['post_status'] ?? 'publish')]; }
         }
-        usort($out, fn($a, $b) => [(int) $a['fertig'], $b['fest'] + $b['kurz']] <=> [(int) $b['fertig'], $a['fest'] + $a['kurz']]);   // offene Artikel oben, die mit den meisten Links zuerst
+        usort($out, fn($a, $b) => [(int) $a['fertig'], $b['fest'] + $b['kurz'], $a['id']] <=> [(int) $b['fertig'], $a['fest'] + $a['kurz'], $b['id']]);   // offene Artikel oben, die mit den meisten Links zuerst
         return $out;
     }
 
@@ -3923,17 +3925,19 @@ final class SAB {
      * Vorschau für mehrere offene Artikel auf einmal (je Seite UMBAU_PROSEITE): Status je Artikel, alle Problemprodukte mit Ersatzkasten (je ASIN einmal)
      * und ein Knopf, der nur die Artikel ohne Problem umbaut.
      */
-    private static function umbau_uebersicht_html(int $seite): string {
-        $seite = max(1, $seite); self::$vorschau_seite = $seite;
+    private static function umbau_uebersicht_html(int $ab): string {
+        $ab = max(0, $ab); self::$vorschau_ab = $ab;
         $offen = array_values(array_filter(self::umbau_artikelliste(), fn($a) => !$a['fertig']));
-        usort($offen, fn($a, $b) => ($a['fest'] + $a['kurz']) <=> ($b['fest'] + $b['kurz']));   // einfache Artikel (wenige Links) zuerst, schwierige später
-        $gesamt = count($offen); $seiten = max(1, (int) ceil($gesamt / self::UMBAU_PROSEITE));
-        $liste = array_slice($offen, ($seite - 1) * self::UMBAU_PROSEITE, self::UMBAU_PROSEITE);
-        $h = '<h3>Vorschau für alle offenen Artikel (Seite ' . $seite . ' von ' . $seiten . ', ' . $gesamt . ' Artikel offen)</h3><p class="description">Es wird nichts gespeichert. Jeder Artikel wird so geprüft wie beim Umbau. „Bereit“ heißt: kein Problem gefunden. Probleme siehst du unten, dort kannst du auch Ersatz für Produkte wählen, die Amazon nicht mehr kennt.</p>';
-        $zeilen = []; $bereit = []; $wegAlle = []; $kurzOffen = 0; $nProb = 0;
+        usort($offen, fn($a, $b) => $a['id'] <=> $b['id']);   // feste Reihenfolge nach ID: Umbauen verschiebt nichts, „Nächste“ überspringt keinen Artikel
+        $gesamt = count($offen);
+        $rest = array_values(array_filter($offen, fn($a) => $a['id'] > $ab));
+        $liste = array_slice($rest, 0, self::UMBAU_PROSEITE);
+        $h = '<h3>Vorschau für die offenen Artikel (' . $gesamt . ' Artikel offen' . ($ab > 0 ? ', weiter nach Artikel-Nr. ' . $ab : '') . ')</h3><p class="description">Es wird nichts gespeichert. Jeder Artikel wird so geprüft wie beim Umbau. „Bereit“ heißt: kein Problem gefunden. Probleme siehst du unten, dort kannst du auch Ersatz für Produkte wählen, die Amazon nicht mehr kennt.</p>';
+        $zeilen = []; $bereit = []; $wegAlle = []; $kurzOffen = 0; $nProb = 0; $letzte = $ab; $geprueft = 0;
         $t_start = microtime(true); $uebrig = 0;
         foreach ($liste as $a) {
-            if (microtime(true) - $t_start > 20) { $uebrig++; continue; }   // Zeitgrenze: Rest über „Nächste Seite“ beziehungsweise erneut öffnen
+            if (microtime(true) - $t_start > 20) { $uebrig++; continue; }   // Zeitgrenze: Der Rest kommt auf der nächsten Seite (sie beginnt nach dem letzten geprüften Artikel)
+            $letzte = (int) $a['id']; $geprueft++;
             $post = get_post($a['id']); if (!$post) { continue; }
             self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
             try { self::umbau_text((string) $post->post_content); }
@@ -3946,24 +3950,95 @@ final class SAB {
             $meld = ''; foreach (array_slice($abw, 0, 3) as $m) { $meld .= '<li>' . esc_html($m) . self::ort_links($m, (int) $a['id']) . '</li>'; }
             $zeilen[] = [$abw ? 1 : 0, '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>'];
         }
-        $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', array_column((function (array $z) { usort($z, fn($a, $b) => $a[0] <=> $b[0]); return $z; })($zeilen), 1)) : '<tr><td colspan="4">Keine offenen Artikel.</td></tr>') . '</tbody></table>';
-        $nGeprueft = count($zeilen);
-        $h = str_replace('</h3><p class="description">Es wird nichts gespeichert.', '</h3><p style="font-size:15px"><strong>Diese Seite: ' . count($bereit) . ' bereit · ' . $nProb . ' mit Problem · ' . max(0, $nGeprueft - count($bereit) - $nProb) . ' noch nicht fertig geprüft' . ($uebrig ? ' · ' . $uebrig . ' ungeprüft (Zeitgrenze)' : '') . '</strong> (von ' . count($liste) . ' auf dieser Seite, ' . $gesamt . ' offen insgesamt). Umbau in zwei Stufen: <strong>Stufe 1</strong> baut nur die Artikel ohne Problem um, <strong>Stufe 2</strong> sind die Artikel mit Problem, sobald das Ersatzprodukt getauscht ist.</p><p class="description">Es wird nichts gespeichert.', $h);
-        if ($uebrig) { $h .= '<p><strong>' . $uebrig . ' Artikel dieser Seite wurden wegen der Zeitgrenze noch nicht geprüft.</strong> Bitte die Seite noch einmal öffnen, die Kurzlinks werden dabei Stück für Stück aufgelöst.</p>'; }
+        $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', array_column((function (array $z) { usort($z, fn($a, $b) => $a[0] <=> $b[0]); return $z; })($zeilen), 1)) : '<tr><td colspan="4">Keine weiteren offenen Artikel.</td></tr>') . '</tbody></table>';
+        $nGeprueft = $geprueft;
+        $h = str_replace('</h3><p class="description">Es wird nichts gespeichert.', '</h3><p style="font-size:15px"><strong>Diese Seite: ' . count($bereit) . ' bereit · ' . $nProb . ' mit Problem · ' . max(0, $nGeprueft - count($bereit) - $nProb) . ' noch nicht fertig geprüft' . ($uebrig ? ' · ' . $uebrig . ' ungeprüft (Zeitgrenze)' : '') . '</strong> (' . $gesamt . ' offen insgesamt). Umbau in zwei Stufen: <strong>Stufe 1</strong> baut nur die Artikel ohne Problem um (oben „Alle problemlosen umbauen“ erledigt das für alle Artikel auf einmal), <strong>Stufe 2</strong> sind die Artikel mit Problem, sobald das Ersatzprodukt getauscht ist.</p><p class="description">Es wird nichts gespeichert.', $h);
+        if ($uebrig) { $h .= '<p><strong>' . $uebrig . ' Artikel dieser Seite wurden wegen der Zeitgrenze noch nicht geprüft.</strong> Sie kommen auf der nächsten Seite dran.</p>'; }
         if ($kurzOffen) { $h .= '<p><strong>' . $kurzOffen . ' Kurzlinks wurden noch nicht aufgelöst</strong> (Abrufgrenze pro Aufruf), bitte diese Seite noch einmal öffnen.</p>'; }
         if ($wegAlle) {
             arsort($wegAlle);
             $h .= self::umbau_ersatz_html(array_keys($wegAlle), 0, '');
         }
         if ($bereit) {
-            $h .= '<form method="post" style="margin:14px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_viele">';
+            $h .= '<form method="post" style="margin:14px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_viele"><input type="hidden" name="sab_alle_vorschau" value="1"><input type="hidden" name="sab_ab" value="' . (int) $ab . '">';
             foreach ($bereit as $i) { $h .= '<input type="hidden" name="sab_ids[]" value="' . $i . '">'; }
             $h .= '<button class="button button-primary button-hero">Stufe 1: diese ' . count($bereit) . ' Artikel ohne Problem jetzt umbauen</button> <span class="description">Jeder Artikel wird vorher gesichert, Rückgängig geht in der Liste. Artikel mit Problem bleiben unberührt.</span></form>';
         } else { $h .= '<p><em>Auf dieser Seite ist kein Artikel bereit.</em></p>'; }
         $nav = '';
-        if ($seite > 1) { $nav .= '<a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'seite' => $seite - 1], admin_url('admin.php'))) . '">« Vorherige Seite</a> '; }
-        if ($seite < $seiten) { $nav .= '<a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'seite' => $seite + 1], admin_url('admin.php'))) . '">Nächste Seite »</a>'; }
+        if ($ab > 0) { $nav .= '<a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'ab' => 0], admin_url('admin.php'))) . '">« Zum Anfang</a> '; }
+        if ($geprueft && count(array_filter($rest, fn($a) => $a['id'] > $letzte)) > 0) { $nav .= '<a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'ab' => $letzte], admin_url('admin.php'))) . '">Nächste ' . self::UMBAU_PROSEITE . ' Artikel »</a>'; }
         return $h . ($nav !== '' ? '<p>' . $nav . '</p>' : '');
+    }
+
+    public static bool $lauf_weiter = false;   // true, wenn die Seite direkt aus einem Klick auf „Alle problemlosen umbauen“ kommt (nur dann macht sie von selbst weiter)
+
+    private static function umbau_lauf_stand(): array {
+        return array_merge(['aktiv' => false, 'umgebaut' => 0, 'versuche' => [], 'probleme' => [], 'start' => 0, 'ende' => 0, 'rest' => 0], (array) get_option('sab_umbau_lauf', []));
+    }
+
+    /**
+     * Stufe 1 des Umbaus: alle Artikel ohne Problem umbauen, Problemartikel (unbekannte Produkte, Abweichungen, Duplikate …) merken und überspringen.
+     * Arbeitet in Schritten von etwa 30 Sekunden; die Seite macht von selbst weiter, bis nichts mehr zu prüfen ist.
+     */
+    private static function umbau_problemlos_schritt(bool $neu): string {
+        $l = $neu ? ['aktiv' => true, 'umgebaut' => 0, 'versuche' => [], 'probleme' => [], 'start' => time(), 'ende' => 0, 'rest' => 0] : self::umbau_lauf_stand();
+        $t0 = microtime(true); $umg = 0; $rest = 0;
+        foreach (self::umbau_artikelliste() as $a) {
+            $id = (int) $a['id'];
+            if ($a['fertig'] || isset($l['probleme'][$id])) { continue; }
+            if (microtime(true) - $t0 > 30) { $rest++; continue; }
+            $post = get_post($id); if (!$post) { continue; }
+            $problem = function (array $m, array $weg) use (&$l, $id, $a): void { $l['probleme'][$id] = ['t' => (string) $a['titel'], 'm' => array_slice(array_values(array_unique($m)), 0, 4), 'weg' => array_values(array_map('strval', array_keys($weg)))]; };
+            self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
+            try { self::umbau_text((string) $post->post_content); }
+            catch (\Throwable $e) { self::$umbau_abw[] = 'Prüfung abgebrochen: ' . $e->getMessage(); }
+            if (self::$umbau_abw) { $problem(self::$umbau_abw, self::$umbau_weg); continue; }
+            if (self::$kurz_offen) {   // Kurzlinks werden pro Aufruf nur zum Teil aufgelöst: im nächsten Schritt weiter
+                $v = (int) ($l['versuche'][$id] ?? 0) + 1; $l['versuche'][$id] = $v;
+                if ($v >= 10) { $problem(['Kurzlinks konnten nicht aufgelöst werden.'], []); } else { $rest++; }
+                continue;
+            }
+            self::$umbau_abw = []; self::$umbau_info = []; $gea = 0; $sk = 0;
+            try { [$n, $sk, $gea] = self::umbau_artikel($id); }
+            catch (\Throwable $e) { self::$umbau_abw[] = 'Umbau abgebrochen (' . $e->getMessage() . '), Artikel unverändert'; }
+            if (self::$umbau_abw) { $problem(self::$umbau_abw, self::$umbau_weg); }
+            elseif ($gea) { $umg++; $l['umgebaut'] = (int) $l['umgebaut'] + 1; }
+            else { $problem(['Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: keine Partner-ID für das Land oder Sonderinhalt)' : '') . '.'], []); }
+        }
+        $l['rest'] = $rest;
+        if ($rest === 0) { $l['aktiv'] = false; $l['ende'] = time(); }
+        update_option('sab_umbau_lauf', $l, false);
+        self::$lauf_weiter = $rest > 0;
+        return $umg . ' Artikel ohne Problem umgebaut (insgesamt in diesem Lauf: ' . $l['umgebaut'] . '). ' . count($l['probleme']) . ' Problemartikel bleiben unberührt und stehen unten.' . ($rest > 0 ? ' Noch ' . $rest . ' Artikel zu prüfen, es geht gleich automatisch weiter.' : ' Der Lauf ist fertig.');
+    }
+
+    /** Anzeige zum Lauf „Alle problemlosen umbauen“: Stand, Weiter-Knopf, danach die Problemartikel und deren Problemprodukte (zuletzt). */
+    private static function umbau_lauf_html(bool $mit_karten): string {
+        $l = self::umbau_lauf_stand();
+        if (!$l['start']) { return ''; }
+        $np = count($l['probleme']);
+        $h = '<div style="border:2px solid #2271b1;background:#fff;padding:8px 16px;margin:12px 0;max-width:1100px"><h3 style="margin:.4em 0">Alle problemlosen umbauen: ' . ($l['aktiv'] ? 'läuft' : 'fertig') . '</h3>'
+           . '<p><strong>' . (int) $l['umgebaut'] . '</strong> Artikel umgebaut, <strong>' . $np . '</strong> Problemartikel übersprungen' . ($l['aktiv'] ? ', <strong>' . (int) $l['rest'] . '</strong> noch zu prüfen' : '') . '. Gestartet ' . esc_html(wp_date('d.m. H:i', (int) $l['start'])) . ($l['ende'] ? ', beendet ' . esc_html(wp_date('d.m. H:i', (int) $l['ende'])) : '') . '.</p>';
+        if ($l['aktiv']) {
+            $h .= '<form method="post" id="sab-lauf-weiter">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_problemlos_weiter"><button class="button button-primary">Weiter</button> <span class="description">' . (self::$lauf_weiter ? 'Die Seite macht gleich von selbst weiter. Bitte offen lassen.' : 'Der Lauf wurde unterbrochen: mit „Weiter“ geht es dort weiter, wo er aufgehört hat.') . '</span></form>'
+                . (self::$lauf_weiter ? '<script>setTimeout(function(){var f=document.getElementById("sab-lauf-weiter");if(f){f.submit();}},1500);</script>' : '');
+        }
+        $h .= '</div>';
+        if ($np && !$l['aktiv']) {
+            $h .= '<h3>Problemartikel (' . $np . '), zuletzt zu klären</h3><p class="description">Diese Artikel wurden nicht angefasst. Meist fehlt ein Ersatz für ein Produkt, das Amazon nicht mehr kennt: unten gleich tauschen, dann „Alle problemlosen umbauen“ erneut starten.</p><table class="widefat striped" style="max-width:1100px"><thead><tr><th>Artikel</th><th>Problem</th><th></th></tr></thead><tbody>';
+            foreach ($l['probleme'] as $pid => $pr) {
+                $m = ''; foreach ((array) $pr['m'] as $t) { $m .= '<li>' . esc_html($t) . self::ort_links($t, (int) $pid) . '</li>'; }
+                $h .= '<tr><td><a href="' . esc_url((string) get_permalink((int) $pid)) . '" target="_blank" rel="noopener">' . esc_html($pr['t'] ?: ('Beitrag ' . $pid)) . '</a></td><td><ul style="margin:0 0 0 14px">' . $m . '</ul></td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => (int) $pid], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>';
+            }
+            $h .= '</tbody></table>';
+            if ($mit_karten) {
+                $zaehl = [];
+                foreach ($l['probleme'] as $pr) { foreach ((array) $pr['weg'] as $w) { $zaehl[(string) $w] = ($zaehl[(string) $w] ?? 0) + 1; } }
+                arsort($zaehl);
+                if ($zaehl) { $h .= '<h3>Problemprodukte (' . count($zaehl) . '): Ersatz wählen</h3>' . self::umbau_ersatz_html(array_keys($zaehl), 0, '', 10, 'lauf'); }
+            }
+        }
+        return $h;
     }
 
     /** Tausch ALT => NEU in allen Artikeln (mit Sicherung, Kurzlinks der Spalte, Titel, Schutz vor Doppelung). @return string Meldung für den Redakteur */
@@ -4551,6 +4626,70 @@ final class SAB {
     }
 
     /** Reiter „Austausch“: Produkte, die getauscht werden müssen, nach Priorität, mit bis zu drei passenden Ersatzkandidaten (mit Bild), eigener ASIN und Automatik. */
+    /** Suchfeld „Im ganzen Bestand suchen“, „Weitere vier Vorschläge“ und Handy-Darstellung der Austausch-Karten (gemeinsam für Austausch und Umbau). */
+    private static function austausch_skript(array $d, array $trotz, array $namen, string $land): string {
+        $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
+        $out = '<script>window.SAB_PS=' . wp_json_encode($ps) . ';window.SAB_DP=' . wp_json_encode('https://' . self::LAENDER[$land][0] . '/dp/') . ';'
+            . "document.addEventListener('input',function(e){var t=e.target;if(!t.classList||!t.classList.contains('sab-ps-in')){return;}var w=t.parentNode,out=w.querySelector('.sab-ps-out'),q=t.value.toLowerCase().trim().split(/\\s+/).filter(Boolean),alt=w.getAttribute('data-alt'),n=0,h='';if(!q.length){out.innerHTML='';return;}"
+            . "for(var i=0;i<window.SAB_PS.length&&n<8;i++){var p=window.SAB_PS[i],hay=(p[0]+' '+p[1]+' '+p[2]).toLowerCase(),ok=true;for(var j=0;j<q.length;j++){if(hay.indexOf(q[j])<0){ok=false;break;}}if(!ok||p[0]===alt){continue;}n++;"
+            . "h+='<div style=\"display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #eee\"><button type=\"button\" class=\"button button-small sab-ps-pick\" data-asin=\"'+p[0]+'\" data-name=\"'+(p[1]||p[2]).replace(/\"/g,'')+'\">wählen</button><span><strong>'+(p[1]||p[2]||'(ohne Name)').replace(/</g,'&lt;')+'</strong> <small>'+(p[3]>=0?'Score '+p[3]+' · ':'')+p[0]+'</small></span> <a href=\"'+window.SAB_DP+p[0]+'\" target=\"_blank\" rel=\"noopener\">bei Amazon ansehen ↗</a></div>';}"
+            . "out.innerHTML=h||'<em>Kein Treffer im Bestand.</em>';});"
+            . "document.addEventListener('click',function(e){var b=e.target;if(!b.classList||!b.classList.contains('sab-ps-pick')){return;}var w=b.closest('.sab-ps'),alt=w.getAttribute('data-alt');document.querySelector('input[name=\"sab_eigen['+alt+']\"]').value=b.getAttribute('data-asin');var nf=document.querySelector('input[name=\"sab_eigen_name['+alt+']\"]');if(nf&&!nf.value){nf.value=b.getAttribute('data-name');}document.getElementById('sabr_'+alt).checked=true;w.querySelector('.sab-ps-out').innerHTML='<strong>Gewählt: '+b.getAttribute('data-asin')+'</strong> (steht unter „Eigene ASIN“, dann „Jetzt tauschen“)';});</script>";
+        $out .= '<style>@media(max-width:782px){.sab-tk{padding:8px!important;overflow:hidden}.sab-tk,.sab-tk *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.sab-tk-kopf{flex-direction:column;align-items:flex-start!important}.sab-tk-k{flex:1 1 100%!important;max-width:none!important}.sab-tk input[type=text]{width:100%!important;max-width:100%!important;size:auto}.sab-tk .sab-ps-out>div{flex-wrap:wrap}}</style>';
+        $out .= '<script>document.addEventListener("click",function(e){var t=e.target;if(!t.closest)return;var b=t.closest(".sab-weiter");if(b){var k=+b.getAttribute("data-n"),c=b.closest(".sab-tk");c.querySelectorAll(".sab-g"+k).forEach(function(x){x.style.display="flex"});b.setAttribute("data-n",k+1);if(!c.querySelector(".sab-g"+(k+1)))b.style.display="none";return}var r=t.closest(".sab-kn input");if(r){var l=r.closest(".sab-tk-k");if(l){var a=l.querySelector("input[name^=sab_a]");if(a)a.checked=true}}});</script>';
+        return $out;
+    }
+
+    /** Eine Austausch-Karte zu einem Produkt (Kandidaten, eigene ASIN, Suchknöpfe); gemeinsam für den Reiter Austausch und den Umbau. */
+    private static function austausch_karte_html(array $z, array $d, array $trotz, array $namen, string $land, array $fund, array $lq, array &$ohneVorschlag): string {
+        $h = '';
+        $alt = $z['alt']; $xalt = $d['items'][$alt] ?? [];
+        $k = self::austausch_kandidaten($alt, (string) $z['name'], (array) $d, $trotz, $fund, 8);
+        if (empty($z['bl']) && $z['dr'] < 100 && $z['dr'] < 1000) {   // Produkt ist lieferbar: Ersatz nur, wenn der Score deutlich höher ist
+            $salt = (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0];
+            $k['liste'] = array_values(array_filter($k['liste'], fn($c) => $c['score'] !== null && (int) $c['score'] >= $salt + 10));
+        }
+        $best = $k['liste'][0] ?? null;
+        $voraus = false;   // nie vorwählen: getauscht wird nur, was bewusst angeklickt wurde (Alexander 25.10.)
+        $wo = '<strong>' . (int) $z['n'] . '×</strong> auf <strong>' . (int) $z['seiten'] . '</strong> Seite' . ($z['seiten'] === 1 ? '' : 'n');
+        if ($z['f']) {
+            $an = ''; $ed = ''; $nr = 0;
+            foreach ($z['f'] as $pid => $f) {
+                if (++$nr > 10) { break; }
+                $tt = ' title="' . esc_attr((string) ($f['titel'] ?: ('Beitrag ' . $pid)) . ' (' . (int) $f['n'] . '×)') . '"';
+                $an .= ' <a href="' . esc_url(add_query_arg('sab_zeige', $alt, (string) get_permalink((int) $pid))) . '" target="_blank" rel="noopener"' . $tt . '>' . ($z['seiten'] === 1 ? esc_html((string) ($f['titel'] ?: ('Beitrag ' . $pid))) : $nr) . '</a>';
+                $ed .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $alt)) . '" target="_blank" rel="noopener"' . $tt . '>' . ($z['seiten'] === 1 ? 'Seite bearbeiten' : $nr) . '</a>';
+            }
+            $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
+        }
+        $badge = !empty($z['bl']) ? ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#fcf0f1;color:#8a1f1f;font-weight:700;font-size:12px">ohne Bild</span>' : '';
+        if ($best && self::lernen_auto($best, (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0], $lq)) { $badge .= ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#e3f4e7;color:#1a7f37;font-weight:700;font-size:12px" title="Würde bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet)">Auto-Kandidat</span>'; }
+        $extra = '';
+        if (!isset($d['items'][$alt])) { $extra .= '<br><strong style="color:#a00">Amazon liefert für dieses Produkt weder Titel noch Bild.</strong>' . ($z['name'] !== '' ? ' Der Name stammt aus dem Artikel.' : ' Auch im Artikel ist kein Name zu finden: bitte ASIN bei Amazon suchen.'); }
+        elseif ((self::produkte()[$alt] ?? '') === '' && empty($d['items'][$alt]['titel']) && $z['name'] !== '') { $extra .= '<br><small>Name aus dem Artikel.</small>'; }
+        $tv = self::text_vor_stelle((string) $alt, (array) $z['f']); if ($tv !== '') { $extra .= '<br><small style="color:#444"><strong>Text davor im Artikel:</strong> „' . esc_html($tv) . '“</small>'; }
+        $extra .= '<br><a class="button button-small" href="' . esc_url(self::such_link($z['name'] !== '' ? (string) $z['name'] : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a>';
+        $h .= '<div class="sab-tk" style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div class="sab-tk-kopf" style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
+            . '<div><strong>Zu tauschen:</strong>' . $badge . ' <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><span style="color:#a00;font-size:16px;font-weight:700">' . esc_html($z['grund']) . '</span><br><small style="color:#555" title="Reihenfolge der Liste: Dringlichkeit (0 bis 100) mal Zahl der Seiten">Priorität ' . (int) $z['prio'] . ' = Dringlichkeit ' . (int) $z['dr'] . ' &times; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . '</small><br>' . $wo . $extra . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
+            . '<div style="display:flex;flex-wrap:wrap;gap:10px">';
+        foreach ($k['liste'] as $i => $c) {
+            $x = $c['x']; $pv = $c['pv'] ?? null; $nm = ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
+            $pvStil = $pv !== null && $pv >= 5 ? 'background:#e3f4e7;color:#1a7f37' : ($pv !== null && $pv >= 4 ? 'background:#fdf0d8;color:#8a5a00' : 'background:#eef0f0;color:#333');
+            $h .= '<label class="sab-tk-k' . ($i >= 4 ? ' sab-g' . intdiv($i, 4) : '') . '" style="' . ($i >= 4 ? 'display:none;' : '') . 'flex:1 1 300px;max-width:340px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="' . esc_attr($c['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . '>'
+                . self::mini_bild($c['asin'], $x) . '<span>' . (!empty($c['neu']) ? '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#dbe9ff;color:#0b3d91;font-size:11px;font-weight:700">NEU durch Amazon-Suche</span><br>' : '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#eee;color:#444;font-size:11px">aus dem Bestand</span><br>') . '<strong>' . esc_html($nm !== '' ? $nm : '(noch keine Daten)') . '</strong><br><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($c['asin']) . '</code></a> <small><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener">bei Amazon ansehen ↗</a></small><br>'
+                . '<small>' . esc_html($c['quelle']) . ' · <strong>Score ' . ($c['score'] !== null ? (int) $c['score'] : '?') . '</strong>' . (!empty($x['bonus']) ? ' <span style="color:#6a3fb0;font-weight:700" title="Von Hand vergebener Bonus, im Score enthalten">&#9998; ' . ($x['bonus'] > 0 ? '+' : '') . (int) $x['bonus'] . ' manuell</span>' : '') . ($x && ($x['preis'] ?? '') !== '' ? ' · ' . esc_html((string) $x['preis']) : '') . ($x && isset($x['sterne']) && $x['sterne'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' ★' . (isset($x['anzahl']) && $x['anzahl'] !== null ? ' (' . number_format((int) $x['anzahl'], 0, ',', '.') . ')' : '') : '') . ' · ' . self::prime_zeichen($x && isset($x['prime']) ? $x['prime'] : null) . ($x && isset($x['liefertage']) && $x['liefertage'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : '') . '</small><br>'
+                . ($pv !== null ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;' . $pvStil . '">' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision</span>' : '<span style="color:#a00">Provision unbekannt</span>')
+                . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . ($x ? '<br>' . self::score_grafik(self::score($x)[2]) . (($sa = (int) (self::score(array_merge($xalt, ['trotz' => isset($trotz[$alt])]))[0] ?? 0)) && $c['score'] !== null ? ' <small style="font-weight:700;color:' . ($c['score'] >= $sa ? '#1a7f37' : '#a00') . '" title="Unterschied zum alten Produkt">' . ($c['score'] - $sa >= 0 ? '+' : '') . ((int) $c['score'] - $sa) . ' gegenüber dem alten</small>' : '') : '') . self::handdaten_hinweis((string) $c['asin']) . self::kurzname_wahl_html($alt, $c, $namen, $x) . '</span></label>';
+        }
+        if (count($k['liste']) > 4) { $h .= '<p style="flex:1 1 100%;margin:0"><button type="button" class="button sab-weiter" data-n="1">Weitere vier Vorschläge anzeigen</button> <small class="description">(' . count($k['liste']) . ' insgesamt)</small></p>'; }
+        if (!$k['liste']) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f'])]; }
+        $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
+        if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
+        $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div><div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off"></label><div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
+            . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
+        return $h;
+    }
+
     private static function austausch_html(): string {
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte();
         $h = self::name_offen_html() . '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2><p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten aus dem eigenen Bestand plus neue Treffer der Amazon-Suche (zwei, bei wenig Passendem im Bestand bis zu vier) (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>';
@@ -4593,68 +4732,17 @@ final class SAB {
         usort($zb, fn($a, $b) => [$b['seiten'], $b['n']] <=> [$a['seiten'], $a['n']]);
         $zeilen = array_merge($zb, $zr); $nb = count($zb);
         $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = min(60, $nb + 10);
-        $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
-        $h .= '<script>window.SAB_PS=' . wp_json_encode($ps) . ';window.SAB_DP=' . wp_json_encode('https://' . self::LAENDER[$land][0] . '/dp/') . ';'
-            . "document.addEventListener('input',function(e){var t=e.target;if(!t.classList||!t.classList.contains('sab-ps-in')){return;}var w=t.parentNode,out=w.querySelector('.sab-ps-out'),q=t.value.toLowerCase().trim().split(/\\s+/).filter(Boolean),alt=w.getAttribute('data-alt'),n=0,h='';if(!q.length){out.innerHTML='';return;}"
-            . "for(var i=0;i<window.SAB_PS.length&&n<8;i++){var p=window.SAB_PS[i],hay=(p[0]+' '+p[1]+' '+p[2]).toLowerCase(),ok=true;for(var j=0;j<q.length;j++){if(hay.indexOf(q[j])<0){ok=false;break;}}if(!ok||p[0]===alt){continue;}n++;"
-            . "h+='<div style=\"display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #eee\"><button type=\"button\" class=\"button button-small sab-ps-pick\" data-asin=\"'+p[0]+'\" data-name=\"'+(p[1]||p[2]).replace(/\"/g,'')+'\">wählen</button><span><strong>'+(p[1]||p[2]||'(ohne Name)').replace(/</g,'&lt;')+'</strong> <small>'+(p[3]>=0?'Score '+p[3]+' · ':'')+p[0]+'</small></span> <a href=\"'+window.SAB_DP+p[0]+'\" target=\"_blank\" rel=\"noopener\">bei Amazon ansehen ↗</a></div>';}"
-            . "out.innerHTML=h||'<em>Kein Treffer im Bestand.</em>';});"
-            . "document.addEventListener('click',function(e){var b=e.target;if(!b.classList||!b.classList.contains('sab-ps-pick')){return;}var w=b.closest('.sab-ps'),alt=w.getAttribute('data-alt');document.querySelector('input[name=\"sab_eigen['+alt+']\"]').value=b.getAttribute('data-asin');var nf=document.querySelector('input[name=\"sab_eigen_name['+alt+']\"]');if(nf&&!nf.value){nf.value=b.getAttribute('data-name');}document.getElementById('sabr_'+alt).checked=true;w.querySelector('.sab-ps-out').innerHTML='<strong>Gewählt: '+b.getAttribute('data-asin')+'</strong> (steht unter „Eigene ASIN“, dann „Jetzt tauschen“)';});</script>";
-        $h .= '<style>@media(max-width:782px){.sab-tk{padding:8px!important;overflow:hidden}.sab-tk,.sab-tk *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.sab-tk-kopf{flex-direction:column;align-items:flex-start!important}.sab-tk-k{flex:1 1 100%!important;max-width:none!important}.sab-tk input[type=text]{width:100%!important;max-width:100%!important;size:auto}.sab-tk .sab-ps-out>div{flex-wrap:wrap}}</style>';
+        $h .= self::austausch_skript($d, $trotz, $namen, $land);
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
             . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
         $zaehler = 0; $lq = self::lernen_quote(); $ohneVorschlag = [];
-        $h .= '<script>document.addEventListener("click",function(e){var t=e.target;if(!t.closest)return;var b=t.closest(".sab-weiter");if(b){var k=+b.getAttribute("data-n"),c=b.closest(".sab-tk");c.querySelectorAll(".sab-g"+k).forEach(function(x){x.style.display="flex"});b.setAttribute("data-n",k+1);if(!c.querySelector(".sab-g"+(k+1)))b.style.display="none";return}var r=t.closest(".sab-kn input");if(r){var l=r.closest(".sab-tk-k");if(l){var a=l.querySelector("input[name^=sab_a]");if(a)a.checked=true}}});</script>';
         $h .= '<p style="font-size:14px"><strong>Trefferquote der Vorschläge:</strong> ' . ($lq['n'] ? 'Platz 1 gewählt: ' . $lq['eins'] . ' von ' . $lq['n'] . ' (' . $lq['quote'] . ' %)' : 'noch keine Tausche gemerkt') . '. <span class="description">Gemerkt werden nur ASINs und der Platz im Ranking (höchstens 500 Einträge). Übergangene Vorschläge rutschen für dasselbe Produkt nach hinten. ' . ($lq['n'] >= 30 && $lq['quote'] >= 90 ? 'Grün markierte Karten würden bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet).' : 'Eine Auto-Markierung gibt es ab 30 Tauschen mit 90 % Platz 1.') . '</span></p>';
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
             if ($nb > 0 && $zaehler === 0) { $h .= '<h3 style="margin:18px 0 6px;color:#8a1f1f">Dringend tauschen: Produkte ohne Bild (' . (int) $nb . '), zuerst die auf den meisten Seiten</h3><p class="description">Hier bekommen Besucher kein Bild. Oben stehen die Produkte, die auf vielen Seiten vorkommen.</p>'; }
             if ($nb > 0 && $zaehler === $nb) { $h .= '<h3 style="margin:22px 0 6px">Weitere Produkte zu tauschen</h3>'; }
             if (++$zaehler > $ladeLimit) { $h .= '<p class="description">… und ' . (count($zeilen) - $ladeLimit) . ' weitere (erst diese erledigen).</p>'; break; }
-            $alt = $z['alt']; $xalt = $d['items'][$alt] ?? [];
-            $k = self::austausch_kandidaten($alt, (string) $z['name'], (array) $d, $trotz, $fund, 8);
-            if (empty($z['bl']) && $z['dr'] < 100 && $z['dr'] < 1000) {   // Produkt ist lieferbar: Ersatz nur, wenn der Score deutlich höher ist
-                $salt = (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0];
-                $k['liste'] = array_values(array_filter($k['liste'], fn($c) => $c['score'] !== null && (int) $c['score'] >= $salt + 10));
-            }
-            $best = $k['liste'][0] ?? null;
-            $voraus = false;   // nie vorwählen: getauscht wird nur, was bewusst angeklickt wurde (Alexander 25.10.)
-            $wo = '<strong>' . (int) $z['n'] . '×</strong> auf <strong>' . (int) $z['seiten'] . '</strong> Seite' . ($z['seiten'] === 1 ? '' : 'n');
-            if ($z['f']) {
-                $an = ''; $ed = ''; $nr = 0;
-                foreach ($z['f'] as $pid => $f) {
-                    if (++$nr > 10) { break; }
-                    $tt = ' title="' . esc_attr((string) ($f['titel'] ?: ('Beitrag ' . $pid)) . ' (' . (int) $f['n'] . '×)') . '"';
-                    $an .= ' <a href="' . esc_url(add_query_arg('sab_zeige', $alt, (string) get_permalink((int) $pid))) . '" target="_blank" rel="noopener"' . $tt . '>' . ($z['seiten'] === 1 ? esc_html((string) ($f['titel'] ?: ('Beitrag ' . $pid))) : $nr) . '</a>';
-                    $ed .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $alt)) . '" target="_blank" rel="noopener"' . $tt . '>' . ($z['seiten'] === 1 ? 'Seite bearbeiten' : $nr) . '</a>';
-                }
-                $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
-            }
-            $badge = !empty($z['bl']) ? ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#fcf0f1;color:#8a1f1f;font-weight:700;font-size:12px">ohne Bild</span>' : '';
-            if ($best && self::lernen_auto($best, (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0], $lq)) { $badge .= ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#e3f4e7;color:#1a7f37;font-weight:700;font-size:12px" title="Würde bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet)">Auto-Kandidat</span>'; }
-            $extra = '';
-            if (!isset($d['items'][$alt])) { $extra .= '<br><strong style="color:#a00">Amazon liefert für dieses Produkt weder Titel noch Bild.</strong>' . ($z['name'] !== '' ? ' Der Name stammt aus dem Artikel.' : ' Auch im Artikel ist kein Name zu finden: bitte ASIN bei Amazon suchen.'); }
-            elseif ((self::produkte()[$alt] ?? '') === '' && empty($d['items'][$alt]['titel']) && $z['name'] !== '') { $extra .= '<br><small>Name aus dem Artikel.</small>'; }
-            $tv = self::text_vor_stelle((string) $alt, (array) $z['f']); if ($tv !== '') { $extra .= '<br><small style="color:#444"><strong>Text davor im Artikel:</strong> „' . esc_html($tv) . '“</small>'; }
-            $extra .= '<br><a class="button button-small" href="' . esc_url(self::such_link($z['name'] !== '' ? (string) $z['name'] : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a>';
-            $h .= '<div class="sab-tk" style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div class="sab-tk-kopf" style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
-                . '<div><strong>Zu tauschen:</strong>' . $badge . ' <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><span style="color:#a00;font-size:16px;font-weight:700">' . esc_html($z['grund']) . '</span><br><small style="color:#555" title="Reihenfolge der Liste: Dringlichkeit (0 bis 100) mal Zahl der Seiten">Priorität ' . (int) $z['prio'] . ' = Dringlichkeit ' . (int) $z['dr'] . ' &times; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . '</small><br>' . $wo . $extra . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
-                . '<div style="display:flex;flex-wrap:wrap;gap:10px">';
-            foreach ($k['liste'] as $i => $c) {
-                $x = $c['x']; $pv = $c['pv'] ?? null; $nm = ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
-                $pvStil = $pv !== null && $pv >= 5 ? 'background:#e3f4e7;color:#1a7f37' : ($pv !== null && $pv >= 4 ? 'background:#fdf0d8;color:#8a5a00' : 'background:#eef0f0;color:#333');
-                $h .= '<label class="sab-tk-k' . ($i >= 4 ? ' sab-g' . intdiv($i, 4) : '') . '" style="' . ($i >= 4 ? 'display:none;' : '') . 'flex:1 1 300px;max-width:340px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="' . esc_attr($c['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . '>'
-                    . self::mini_bild($c['asin'], $x) . '<span>' . (!empty($c['neu']) ? '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#dbe9ff;color:#0b3d91;font-size:11px;font-weight:700">NEU durch Amazon-Suche</span><br>' : '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#eee;color:#444;font-size:11px">aus dem Bestand</span><br>') . '<strong>' . esc_html($nm !== '' ? $nm : '(noch keine Daten)') . '</strong><br><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($c['asin']) . '</code></a> <small><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener">bei Amazon ansehen ↗</a></small><br>'
-                    . '<small>' . esc_html($c['quelle']) . ' · <strong>Score ' . ($c['score'] !== null ? (int) $c['score'] : '?') . '</strong>' . (!empty($x['bonus']) ? ' <span style="color:#6a3fb0;font-weight:700" title="Von Hand vergebener Bonus, im Score enthalten">&#9998; ' . ($x['bonus'] > 0 ? '+' : '') . (int) $x['bonus'] . ' manuell</span>' : '') . ($x && ($x['preis'] ?? '') !== '' ? ' · ' . esc_html((string) $x['preis']) : '') . ($x && isset($x['sterne']) && $x['sterne'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' ★' . (isset($x['anzahl']) && $x['anzahl'] !== null ? ' (' . number_format((int) $x['anzahl'], 0, ',', '.') . ')' : '') : '') . ' · ' . self::prime_zeichen($x && isset($x['prime']) ? $x['prime'] : null) . ($x && isset($x['liefertage']) && $x['liefertage'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : '') . '</small><br>'
-                    . ($pv !== null ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;' . $pvStil . '">' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision</span>' : '<span style="color:#a00">Provision unbekannt</span>')
-                    . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . ($x ? '<br>' . self::score_grafik(self::score($x)[2]) . (($sa = (int) (self::score(array_merge($xalt, ['trotz' => isset($trotz[$alt])]))[0] ?? 0)) && $c['score'] !== null ? ' <small style="font-weight:700;color:' . ($c['score'] >= $sa ? '#1a7f37' : '#a00') . '" title="Unterschied zum alten Produkt">' . ($c['score'] - $sa >= 0 ? '+' : '') . ((int) $c['score'] - $sa) . ' gegenüber dem alten</small>' : '') : '') . self::handdaten_hinweis((string) $c['asin']) . self::kurzname_wahl_html($alt, $c, $namen, $x) . '</span></label>';
-            }
-            if (count($k['liste']) > 4) { $h .= '<p style="flex:1 1 100%;margin:0"><button type="button" class="button sab-weiter" data-n="1">Weitere vier Vorschläge anzeigen</button> <small class="description">(' . count($k['liste']) . ' insgesamt)</small></p>'; }
-            if (!$k['liste']) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f'])]; }
-            $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
-            if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
-            $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div><div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off"></label><div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
-                . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
+            $h .= self::austausch_karte_html($z, $d, $trotz, $namen, $land, $fund, $lq, $ohneVorschlag);
         }
         if ($ohneVorschlag) {
             $zl = ''; foreach ($ohneVorschlag as [$a_, $n_, $t_]) { $zl .= $a_ . ' | ' . trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $n_))) . ' | ' . mb_substr(trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $t_))), 0, 200) . "\n"; }
@@ -4731,40 +4819,30 @@ final class SAB {
     }
 
     /** Zu Produkten, die Amazon nicht mehr kennt: Ersatz-ASIN eingeben oder den Vorschlag (Favorit mit hohem Score, passende Art) übernehmen; tauscht in allen Artikeln, danach öffnet sich die Vorschau neu. */
-    private static function umbau_ersatz_html(array $weg, int $id, string $c): string {
+    private static function umbau_ersatz_html(array $weg, int $id, string $c, int $limit = 0, string $kontext = ''): string {
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte();
-        $favs = array_keys(array_filter((array) get_option('sab_marken', []), fn($t) => $t === 'fav'));
-        $fund = self::fundstellen(array_values(array_unique(array_merge($weg, $favs))));
-        $h = '<div class="notice notice-warning inline"><p><strong>Produkte, die Amazon nicht mehr kennt: Ersatz wählen</strong></p>';
+        $fund = self::fundstellen(array_values(array_unique($weg)) ?: ['XXXXXXXXXX']);
+        $kontext = $kontext !== '' ? $kontext : ($id > 0 ? 'einzel' : 'gesamt');
+        $karten = []; $uebrig = 0; $lq = self::lernen_quote(); $ohneVorschlag = [];
         foreach ($weg as $alt) {
-            $name = ($namen[$alt] ?? '') ?: self::kontext_titel($c, $alt);
-            $nf = count($fund[$alt] ?? []);
+            $f = $fund[$alt] ?? []; if (!$f && $kontext === 'lauf') { continue; }   // steht in keinem Artikel mehr (schon getauscht): nichts zu tun
+            if ($limit > 0 && count($karten) >= $limit) { $uebrig++; continue; }
+            $name = ($namen[$alt] ?? '') ?: ($c !== '' ? self::kontext_titel($c, $alt) : '');
+            if ($name === '') { $name = self::anzeige_name((string) $alt, (array) $d, $fund); }
             $xalt = (array) ($d['items'][$alt] ?? []);
-            $k = self::austausch_kandidaten($alt, (string) $name, (array) $d, $trotz, $fund, 5);
-            $voraus = false;   // keine Vorauswahl: getauscht wird nur, was bewusst angeklickt wurde
-            $h .= '<form method="post" style="margin:10px 0;padding:10px 14px;background:#fff;border:1px solid #c3c4c7;border-radius:8px;max-width:1100px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false)
-               . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="tausch_fest"><input type="hidden" name="sab_alt" value="' . esc_attr($alt) . '">' . ($id > 0 ? '<input type="hidden" name="sab_vorschau" value="' . (int) $id . '">' : '<input type="hidden" name="sab_alle_vorschau" value="' . max(1, self::$vorschau_seite) . '">')
-               . '<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt) . '<div><strong>Zu tauschen:</strong> <code>' . esc_html($alt) . '</code> ' . esc_html((string) $name) . ' <small>(steht in ' . $nf . ' Artikel' . ($nf === 1 ? '' : 'n') . ')</small><br><span style="color:#a00;font-weight:600">Grund: Amazon kennt dieses Produkt nicht (mehr). Es kann nicht umgebaut werden und hat bei Besuchern kein Bild.</span></div></div>'
-               . self::fundstellen_links($alt, $fund[$alt] ?? []);
-            $tv = self::text_vor_stelle((string) $alt, (array) ($fund[$alt] ?? [])); if ($tv !== '') { $h .= '<small style="color:#444"><strong>Text davor im Artikel:</strong> „' . esc_html($tv) . '“</small><br>'; }
-            $ce = self::claude_empfehlungen()[$alt] ?? null;
-            if ($ce) { $h .= '<small><strong>Empfehlung (von Amazons Alternativen):</strong> <code>' . esc_html($ce[0]) . '</code> ' . esc_html($ce[1]) . '</small><br>'; }
-            $h .= '<div style="display:flex;flex-wrap:wrap;gap:10px;margin:8px 0">';
-            foreach ($k['liste'] as $i => $cd) {
-                $x = (array) $cd['x']; $pv = $cd['pv'] ?? null; $nm = ($namen[$cd['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
-                $h .= '<label style="flex:1 1 280px;max-width:330px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_wahl" value="' . esc_attr($cd['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . ' onclick="this.form.sab_neu.value=this.value">'
-                    . self::mini_bild($cd['asin'], $x) . '<span><strong>' . esc_html($nm ?: $cd['asin']) . '</strong><br><small><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $cd['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($cd['asin']) . '</code></a> · ' . esc_html((string) $cd['quelle']) . '<br><strong>Score ' . ($cd['score'] !== null ? (int) $cd['score'] : '?') . '</strong>'
-                    . (!empty($x['preis']) ? ' · ' . esc_html((string) $x['preis']) : '') . ($pv !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision' : '') . (!$cd['ok'] ? ' · <span style="color:#a00">nicht lieferbar</span>' : '') . '</small></span></label>';
-            }
-            if (!$k['liste']) { $h .= '<p style="margin:0"><em>Kein passender Kandidat gefunden.</em></p>'; }
-            $h .= '<p style="margin:0 0 6px;flex:1 1 100%"><a class="button button-small" href="' . esc_url(self::such_link($name !== '' ? (string) $name : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a></p>';
-            $vorn = '';
-            $vorname = '';
-            $h .= '</div><label>Neue ASIN: <input type="text" name="sab_neu" size="12" maxlength="10" value="' . esc_attr($vorn) . '" placeholder="B0…"></label> '
-               . '<label>Name im Artikel: <input type="text" name="sab_name" class="regular-text" style="max-width:240px" value="' . esc_attr((string) $vorname) . '"></label> '
-               . '<button class="button button-primary">Tauschen (in allen ' . $nf . ' Artikeln), danach Vorschau neu</button><span class="description"> Eine Karte anklicken füllt die ASIN ein, Name bitte prüfen.</span></form>';
+            $bl = !isset($d['items'][$alt]) || (empty($xalt['bilder']) && !is_file(self::bild_pfad($land, (string) $alt, 0)));
+            $z = ['alt' => (string) $alt, 'grund' => 'Amazon kennt dieses Produkt nicht (mehr). Es kann nicht umgebaut werden und hat bei Besuchern kein Bild.', 'seiten' => count($f), 'n' => (int) array_sum(array_column($f, 'n')), 'name' => (string) $name, 'dr' => 100, 'prio' => 100 * max(1, count($f)), 'f' => $f, 'bl' => $bl];
+            $karten[] = self::austausch_karte_html($z, (array) $d, $trotz, $namen, $land, $fund, $lq, $ohneVorschlag);
         }
-        return $h . '</div>';
+        if (!$karten) { return ''; }
+        $h = '<div class="notice notice-warning inline"><p><strong>Produkte, die Amazon nicht mehr kennt: Ersatz wählen</strong> (dieselben Karten wie im Reiter „Austausch“, mit Vorschlägen, eigener ASIN und Suche bei Amazon). Getauscht wird in allen Artikeln, danach läuft die Prüfung neu.</p></div>'
+            . self::austausch_skript((array) $d, $trotz, $namen, $land)
+            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="austausch_viele">'
+            . ($kontext === 'einzel' ? '<input type="hidden" name="sab_vorschau" value="' . (int) $id . '">' : ($kontext === 'gesamt' ? '<input type="hidden" name="sab_alle_vorschau" value="1"><input type="hidden" name="sab_ab" value="' . (int) self::$vorschau_ab . '">' : ''))
+            . implode('', $karten)
+            . ($uebrig ? '<p class="description">… und ' . $uebrig . ' weitere Produkte (erst diese erledigen, dann „Alle problemlosen umbauen“ erneut starten).</p>' : '')
+            . '<p><button class="button button-primary button-hero">Auswahl tauschen (jeweils mit Sicherung)</button> <span class="description">Bis zu 10 pro Klick. Oder an einer Karte „Jetzt tauschen“.</span></p></form>';
+        return $h;
     }
 
     /** Stylesheets und Körperklassen der echten Webseite (von der Startseite gelesen, 6 Stunden gemerkt), damit Vorschauen wie bei Besuchern aussehen. */
@@ -4827,7 +4905,7 @@ final class SAB {
         $h .= $knopf;
         if (self::$umbau_info) { $h .= '<div class="notice notice-info inline"><p><strong>Das Bild bestimmt das Produkt, daher angepasst:</strong></p><ul>' . implode('', array_map(fn($x) => '<li>' . esc_html($x) . self::ort_links($x, $id) . self::ok_knopf($x, $id) . '</li>', array_unique(self::$umbau_info))) . '</ul></div>'; }
         if (self::$umbau_abw) { $h .= '<div class="notice notice-warning inline"><p><strong>Wird bewusst nicht umgebaut (bitte von Hand klären):</strong></p><ul>' . implode('', array_map(fn($x) => '<li>' . esc_html($x) . self::ort_links($x, $id) . self::ok_knopf($x, $id) . '</li>', array_unique(self::$umbau_abw))) . '</ul></div>'; }
-        if (self::$umbau_weg) { $h .= self::umbau_ersatz_html(array_keys(self::$umbau_weg), $id, $c); }
+        if (self::$umbau_weg) { $h .= self::umbau_ersatz_html(array_keys(self::$umbau_weg), $id, $c, 0, 'einzel'); }
         if (self::$kurz_offen) { $h .= '<p><strong>' . (int) self::$kurz_offen . ' Kurzlinks wurden noch nicht aufgelöst</strong> (Abrufgrenze), bitte die Vorschau noch einmal öffnen.</p>'; }
         // Vorher / Nachher nebeneinander: der Artikel wird an den Trennlinien in Abschnitte geteilt, jeder Abschnitt einzeln umgebaut und gezeigt, wenn er sich ändert
         // Karten brauchen Produktdaten: fehlen sie im Zwischenspeicher, würde die Karte leer bleiben. Daher jetzt (höchstens 20 Abrufe) holen.
@@ -5331,6 +5409,10 @@ JS;
                 $meldung = ($gea ? $n . ' Link(s) in diesem Artikel umgebaut. Bitte den Artikel ansehen; Rückgängig geht in der Liste.' : 'Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: keine Partner-ID für das Land oder Sonderinhalt)' : '') . '.')
                     . (self::$umbau_info ? ' Nach dem Bild angepasst: ' . implode(' | ', array_slice(array_unique(self::$umbau_info), 0, 8)) . '.' : '')
                     . (self::$umbau_abw ? ' NICHT umgebaut wegen Abweichung: ' . implode(' | ', array_slice(array_unique(self::$umbau_abw), 0, 8)) . '.' : '');
+            } elseif ($form === 'umbau_problemlos_start' && !empty($_POST['sab_bestaetigt'])) {
+                $meldung = self::umbau_problemlos_schritt(true);
+            } elseif ($form === 'umbau_problemlos_weiter') {
+                $meldung = self::umbau_problemlos_schritt(false);
             } elseif ($form === 'umbau_zurueck_einzeln') {
                 $meldung = self::umbau_zurueck_artikel((int) ($_POST['sab_id'] ?? 0));
             } elseif ($form === 'umbau_zurueck' && !empty($_POST['sab_bestaetigt'])) {
@@ -5378,23 +5460,29 @@ JS;
         } elseif ($tab === 'umbau') {
             $eid = (int) ($_GET['entzerren'] ?? ($_POST['sab_id'] ?? 0));
             if (!empty($_GET['entzerren']) || (isset($_POST['sab_form']) && in_array($_POST['sab_form'], ['entzerren_los', 'entzerren_zurueck'], true))) { echo '<div id="sab-entzerren" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">' . self::entzerren_vorschau_html($eid) . '</div>'; }
-            $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0;
-            foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; }
+            $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
+            foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
             echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>'
                . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
                . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'
                . '<p>Tipp: Zuerst <strong>einen einzelnen Artikel</strong> umbauen und im Browser ansehen. Wenn alles stimmt, unten „Alle auf einmal“.</p>'
-               . '<p>Gefunden: <strong>' . count($liste) . '</strong> Artikel mit Amazon-Links, davon <strong>' . $nfertig . '</strong> schon umgebaut; <strong>' . $nf . '</strong> feste Produkt-Links und <strong>' . $nk . '</strong> Kurzlinks (amzn.to) offen.</p>';
-            echo '<p><a class="button button-primary" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'seite' => 1], admin_url('admin.php'))) . '">Vorschau für alle offenen Artikel (Probleme sehen, dann mehrere auf einmal umbauen)</a></p>';
-            if (!empty($_GET['alle_vorschau']) || !empty($_POST['sab_alle_vorschau'])) { echo self::umbau_uebersicht_html((int) ($_GET['seite'] ?? ($_POST['sab_alle_vorschau'] ?? 1))); }
+               . '<p>Gefunden: <strong>' . count($liste) . '</strong> Artikel (Beiträge, Seiten und Entwürfe) mit Amazon-Links: <strong>' . ($nfertig) . '</strong> vollständig umgebaut, <strong>' . (count($liste) - $nfertig) . '</strong> noch offen' . ($nteil ? ' (davon ' . $nteil . ' teilweise umgebaut, es sind noch Links übrig)' : '') . '. Offen sind noch <strong>' . $nf . '</strong> feste Produkt-Links und <strong>' . $nk . '</strong> Kurzlinks (amzn.to).</p>';
+            echo self::umbau_lauf_html(empty($_GET['alle_vorschau']) && empty($_POST['sab_alle_vorschau']) && empty($_GET['vorschau']) && empty($_POST['sab_vorschau']));
+            if ($nfertig < count($liste)) {
+                echo '<form method="post" style="margin:12px 0;padding:10px 16px;background:#fff;border:1px solid #c3c4c7;max-width:1100px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false)
+                   . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_problemlos_start"><p style="margin:0 0 6px"><strong>Stufe 1: Alle Artikel ohne Problem auf einmal umbauen.</strong> Das Plugin prüft jeden offenen Artikel wie die Vorschau und baut nur die um, bei denen nichts zu beanstanden ist (jeweils mit Sicherung). Artikel mit Problem, etwa mit einem Produkt, das Amazon nicht mehr kennt, bleiben unberührt und stehen danach getrennt am Ende. Es läuft in Schritten von selbst durch.</p>'
+                   . '<p style="margin:0 0 8px"><label><input type="checkbox" name="sab_bestaetigt" value="1" required> Ja, alle Artikel ohne Problem jetzt umbauen</label></p><button class="button button-primary button-hero">Alle problemlosen umbauen</button></form>';
+            }
+            echo '<p><a class="button button-primary" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'ab' => 0], admin_url('admin.php'))) . '">Vorschau für alle offenen Artikel (Probleme sehen, dann mehrere auf einmal umbauen)</a></p>';
+            if (!empty($_GET['alle_vorschau']) || !empty($_POST['sab_alle_vorschau'])) { echo self::umbau_uebersicht_html((int) ($_GET['ab'] ?? ($_POST['sab_ab'] ?? 0))); }
             $vid = (int) ($_GET['vorschau'] ?? ($_POST['sab_vorschau'] ?? 0));
             if ($vid) { echo self::umbau_vorschau($vid); }
             if ($liste) {
                 $zeile = function (array $a): void {
                     $vu = add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'));
                     echo '<tr><td>' . ($a['fertig'] ? '' : '<input type="checkbox" name="sab_ids[]" form="umbau-sammel" value="' . (int) $a['id'] . '" class="sab-wahl">') . '</td><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td data-v="' . (int) $a['fest'] . '">' . (int) $a['fest'] . '</td><td data-v="' . (int) $a['kurz'] . '">' . (int) $a['kurz'] . '</td>'
-                       . '<td>' . ($a['fertig'] ? '<strong style="color:#1a7f37">umgebaut</strong>' : 'offen') . '</td><td><a class="button" href="' . esc_url($vu) . '">Vorschau</a> ';
+                       . '<td>' . ($a['fertig'] ? '<strong style="color:#1a7f37">umgebaut</strong>' : (!empty($a['teil']) ? '<strong style="color:#b36b00">teilweise umgebaut</strong>' : 'offen')) . ($a['status'] !== 'publish' && $a['status'] !== '' ? ' <small>(' . esc_html(['draft' => 'Entwurf', 'private' => 'privat', 'pending' => 'zur Review', 'future' => 'geplant'][$a['status']] ?? $a['status']) . ')</small>' : '') . '</td><td><a class="button" href="' . esc_url($vu) . '">Vorschau</a> ';
                     echo '<form method="post" style="display:inline">'; wp_nonce_field('sab_speichern');
                     echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_id" value="' . (int) $a['id'] . '">'
                        . ($a['fertig'] ? '<input type="hidden" name="sab_form" value="umbau_zurueck_einzeln"><button class="button">Rückgängig</button>' : '<input type="hidden" name="sab_form" value="umbau_einzeln"><button class="button button-primary">Umbauen</button>')
@@ -5403,7 +5491,7 @@ JS;
                 $kopf = '<table class="widefat striped sab-sort2" style="margin-top:1em"><thead><tr><th style="width:28px"><input type="checkbox" onclick="event.stopPropagation();document.querySelectorAll(\'.sab-wahl\').forEach(function(c){c.checked=this.checked}.bind(this))" title="Alle offenen markieren"></th><th>Artikel</th><th>feste Links</th><th>Kurzlinks</th><th>Stand</th><th>Aktion</th></tr></thead><tbody>';
                 $offene = array_values(array_filter($liste, fn($x) => !$x['fertig'])); $fertige = array_values(array_filter($liste, fn($x) => $x['fertig']));
                 echo '<h3>Noch offen (' . count($offene) . ')</h3><p class="description">Auf eine Überschrift klicken sortiert die Liste. Häkchen setzen und unten „Markierte umbauen“ klicken (bis zu ' . self::UMBAU_MAX . ' auf einmal).</p>' . $kopf;
-                foreach (array_slice($offene, 0, 200) as $a) { $zeile($a); }
+                foreach ($offene as $a) { $zeile($a); }
                 echo '</tbody></table>';
                 if ($offene) {
                     echo '<form method="post" id="umbau-sammel" style="margin:10px 0">'; wp_nonce_field('sab_speichern');
@@ -5411,7 +5499,7 @@ JS;
                 }
                 if ($fertige) {
                     echo '<details style="margin-top:1em"><summary><strong>Schon umgebaut (' . count($fertige) . ')</strong></summary>' . $kopf;
-                    foreach (array_slice($fertige, 0, 200) as $a) { $zeile($a); }
+                    foreach ($fertige as $a) { $zeile($a); }
                     echo '</tbody></table></details>';
                 }
                 echo self::tabellenhilfe();

@@ -822,7 +822,7 @@ $GLOBALS['pc'] = '<p>[amz_bild asin="B0TOT00002" land="es"][/amz_bild]</p><p><a 
 $wpdb_e = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null; $GLOBALS['tr']['sab_luecke_es'] = 1;
 $mV3 = new ReflectionMethod('SAB', 'umbau_vorschau'); $vh3 = $mV3->invoke(null, 9);
 $GLOBALS['wpdb'] = $wpdb_e; unset($GLOBALS['pc'], $GLOBALS['tr']['sab_uebersicht_es']);
-ok(substr_count($vh3, 'Jetzt so umbauen') === 2 && strpos($vh3, 'Ersatz wählen') !== false && strpos($vh3, 'value="B0ERSATZ01"') !== false && strpos($vh3, 'name="sab_form" value="tausch_fest"') !== false, 'Vorschau: Umbau-Knopf oben und unten, bei totem Produkt Ersatzvorschlag aus den Favoriten mit Eingabefeld');
+ok(substr_count($vh3, 'Jetzt so umbauen') === 2 && strpos($vh3, 'Ersatz wählen') !== false && strpos($vh3, 'B0ERSATZ01') !== false && strpos($vh3, 'name="sab_form" value="austausch_viele"') !== false, 'Vorschau: Umbau-Knopf oben und unten, bei totem Produkt Ersatzvorschlag aus den Favoriten mit Eingabefeld');
 
 // ---- 0.55.0: Sprung zur Stelle ----
 $GLOBALS['loggedin'] = true; $GLOBALS['admin'] = true; $_GET['sab_zeige'] = 'B0TOT00002';
@@ -872,7 +872,7 @@ $GLOBALS['pc'] = '<p>[amz_bild asin="B0TOT00002" land="es"][/amz_bild]</p><p><a 
 $wpdb_g = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null;
 $mV5 = new ReflectionMethod('SAB', 'umbau_vorschau'); $vh5 = $mV5->invoke(null, 11);
 $GLOBALS['wpdb'] = $wpdb_g; unset($GLOBALS['pc'], $GLOBALS['tr']['sab_uebersicht_es'], $GLOBALS['opt']['sab_claude_empf'], $GLOBALS['opt']['sab_uebersicht_stand_es']);
-ok(strpos($vh5, 'Empfehlung (von Amazons Alternativen)') !== false && strpos($vh5, 'value="B0ERSATZ01"') !== false, 'Ersatzkasten: eingetragene Empfehlung (Amazons Alternative) wird angezeigt und vorbelegt');
+ok(strpos($vh5, 'B0ERSATZ01') !== false && strpos($vh5, 'name="sab_form" value="austausch_viele"') !== false, 'Ersatzkasten im Umbau: eingetragene Empfehlung (Amazons Alternative) erscheint auf der Austausch-Karte');
 
 // ---- 0.57.0: Kurzname im Stil „Produktart | Merkmal“ ----
 $kn = fn($x) => SAB::kurzname_aus_titel($x);
@@ -890,6 +890,18 @@ $GLOBALS['pc'] = '<p><a href="https://www.amazon.es/dp/B0VIELE001"><img src="x.j
 $mUe = new ReflectionMethod('SAB', 'umbau_uebersicht_html'); $uh = $mUe->invoke(null, 1);
 $GLOBALS['wpdb'] = $wpdb_m; unset($GLOBALS['pc']);
 ok(strpos($uh, 'Artikel A') !== false && strpos($uh, 'bereit') !== false && strpos($uh, 'Artikel ohne Problem jetzt umbauen') !== false && strpos($uh, 'value="umbau_viele"') !== false, 'Gesamtvorschau: Status je Artikel und Knopf zum Umbau der bereiten Artikel');
+
+// ---- 0.78.2: Umbau: Seitenwechsel per Artikel-ID, Lauf „Alle problemlosen umbauen“ ----
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 12, 'post_title' => 'Artikel A', 'post_content' => '<p><a href="https://www.amazon.es/dp/B0VIELE001"><img src="x.jpg"></a></p>', 'post_status' => 'draft']]; } function prepare($q, ...$a) { return $q; } function get_col($q) { return []; } };
+$GLOBALS['pc'] = '<p><a href="https://www.amazon.es/dp/B0VIELE001"><img src="x.jpg"></a></p>';
+$uh0 = $mUe->invoke(null, 0); $uh12 = $mUe->invoke(null, 12);
+ok(strpos($uh0, 'Artikel A') !== false && strpos($uh0, 'name="sab_ab"') !== false && strpos($uh12, 'Keine weiteren offenen Artikel') !== false, 'Gesamtvorschau: Seitenwechsel per Artikel-Nr., nach dem letzten Artikel nichts mehr');
+$li0 = (new ReflectionMethod('SAB', 'umbau_artikelliste'))->invoke(null);
+ok(count($li0) === 1 && $li0[0]['status'] === 'draft' && $li0[0]['teil'] === false, 'Umbau-Liste: auch Entwürfe, mit Status');
+$GLOBALS['opt']['sab_umbau_lauf'] = ['aktiv' => false, 'umgebaut' => 3, 'versuche' => [], 'probleme' => [12 => ['t' => 'Artikel A', 'm' => ['Produkt B0VIELE001 unbekannt'], 'weg' => ['B0VIELE001']]], 'start' => time() - 60, 'ende' => time(), 'rest' => 0];
+$lh = (new ReflectionMethod('SAB', 'umbau_lauf_html'))->invoke(null, true);
+ok(strpos($lh, 'Problemartikel (1)') !== false && strpos($lh, '<strong>3</strong> Artikel umgebaut') !== false && strpos($lh, 'B0VIELE001') !== false, 'Lauf: Ergebnis, Problemartikel getrennt am Ende, Problemprodukt mit Austausch-Karte');
+unset($GLOBALS['opt']['sab_umbau_lauf'], $GLOBALS['pc']); $GLOBALS['wpdb'] = $wpdb_m;
 
 // ---- 0.58.1: Sprung im Bearbeiten-Fenster ----
 $GLOBALS['admin'] = true; $_GET['sab_zeige'] = 'B0TOT00002';
