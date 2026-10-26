@@ -1242,4 +1242,8 @@ ok(count($kv) >= 2 && count($kv) <= 3 && count(array_unique($kv)) === count($kv)
 $ar = SAB::aawp_reste('[aawp box="B0AAAAAAA1"] [aawp fields="B0AAAAAAA1" value="thumb"] [aawp fields="B0AAAAAAA1" value="price"] [aawp table="B0AAAAAAA1,B0AAAAAAA2"] [amazon bestseller="garden" items="5"] [aawp link="B0AAAAAAA1"]Text[/aawp]');
 ok(count($ar) === 3 && strpos($ar[0], 'price') !== false && strpos($ar[1], 'table') !== false && strpos($ar[2], 'bestseller') !== false, 'AAWP-Reste: nur nicht ersetzte Shortcodes (Preis, Tabelle, Bestseller) werden gemeldet');
 ok(SAB::asin_aus_text('https://www.amazon.de/Schwegler-Nistkasten/dp/B08VKRJ5D4/ref=sr_1_3?keywords=x') === 'B08VKRJ5D4' && SAB::asin_aus_text('b08vkrj5d4') === 'B08VKRJ5D4' && SAB::asin_aus_text('https://amazon.de/gp/product/B0037YHTMS') === 'B0037YHTMS', 'Eigene ASIN: Amazon-Link oder ASIN wird erkannt');
+$GLOBALS['opt']['sab_such_kand'] = "B0AAAAAAA1 | B0OLD00001, B0OLD00002 | 2026-10-25"; unset($GLOBALS['opt']['sab_importe_erledigt']);
+SAB::einmal_importe('federhilfe.de', ['m' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zusammen' => true, 'zeilen' => ['B0AAAAAAA1 | B0NEW00001, B0OLD00002 | 2026-10-26', 'B0AAAAAAA2 | B0NEW00002 | 2026-10-26']]]);
+ok(get_option('sab_such_kand') === "B0AAAAAAA1 | B0NEW00001, B0OLD00002, B0OLD00001 | 2026-10-26\nB0AAAAAAA2 | B0NEW00002 | 2026-10-26", 'Einmal-Import zusammen: neue Kandidaten vor die vorhandenen, nichts doppelt, neue Zeilen angehängt');
+unset($GLOBALS['opt']['sab_such_kand'], $GLOBALS['opt']['sab_importe_erledigt']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.78.5
+ * Version: 0.78.6
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.78.5';
+    const VERSION = '0.78.6';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4207,6 +4207,17 @@ final class SAB {
             'B09LFFZMVQ | B016QE4N4M, B00P160MKQ, B075DVVJQB | 2026-10-26',
             'B01KKDI5NA | B0001IP93O, B0001IP95M, B0001IP9YS | 2026-10-26',
         ]],
+        '2026-10-26-such-kand-feder-4' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zusammen' => true, 'zeilen' => [   // Mac-Sitzung: neue Kandidaten kommen vor die vorhandenen, nichts geht verloren
+            'B01MU8UQ64 | B0CXJFT8VK, B0CX6GF8HN, B004WO8ZIE, B0H2FL51W8, B0CK3W738W | 2026-10-26',
+            'B08VKRJ5D4 | B07C9W8VCS, B081ZCWS1F, B07QMYD8F3, B07QMYLZRD, B00H6HPSD4 | 2026-10-26',
+            'B0769DG96T | B07QMYD8F3, B00H6HPSD4, B0CGLY63PV, B07QMYLZRD | 2026-10-26',
+            'B08KJ9WTDN | B00BEE9XJ0, B005YCM6OC, B002HHP13K, B085CX8W6B | 2026-10-26',
+            'B09VH7LSN7 | B01617SWTQ, B003HSV67S, B07QJ719WS, B007MO6178, B00H7Z8RNI | 2026-10-26',
+            'B07R2DK75K | B00OY271PW, B0B21K47D4, B08FDFY9SL, B0DF57ZQF8 | 2026-10-26',
+            'B0869LW28K | B004WO8ZIE, B095RBG5SH, B00OY271L6, B0CK3W738W | 2026-10-26',
+            'B00ITDM31E | B00H6HPSD4, B0CGLY63PV | 2026-10-26',
+            'B09X65D63W | B0001IP95M, B0001IP94S, B09YDLG2FT | 2026-10-26',
+        ]],
         '2026-10-26-kurznamen-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
             'B0F3P51Q4M | Nistkasten   2er-Set, 32 mm',
         ]],
@@ -4230,6 +4241,21 @@ final class SAB {
             $txt = rtrim((string) get_option($j['option'], ''));
             $vorhanden = [];
             foreach (preg_split('/\R/', $txt) as $z) { $vorhanden[self::asin(explode('|', $z)[0])] = true; }
+            if (!empty($j['zusammen'])) {   // vorhandene Zeile desselben Produkts: Kandidatenlisten vereinen (neue zuerst)
+                $zl = array_map('rtrim', preg_split('/\R/', $txt));
+                foreach ($j['zeilen'] as $k_ => $z) {
+                    $t_ = array_map('trim', explode('|', $z)); $a_ = self::asin($t_[0] ?? '');
+                    foreach ($zl as $i_ => $alt_z) {
+                        $o_ = array_map('trim', explode('|', $alt_z));
+                        if (self::asin($o_[0] ?? '') !== $a_ || $a_ === '') { continue; }
+                        $neu_l = array_filter(array_map('trim', explode(',', (string) ($t_[1] ?? ''))));
+                        $alt_l = array_filter(array_map('trim', explode(',', (string) ($o_[1] ?? ''))));
+                        $zl[$i_] = $a_ . ' | ' . implode(', ', array_values(array_unique(array_merge($neu_l, $alt_l)))) . ' | ' . ($t_[2] ?? ($o_[2] ?? ''));
+                        unset($j['zeilen'][$k_]); break;
+                    }
+                }
+                $txt = implode("\n", $zl);
+            }
             foreach ($j['zeilen'] as $z) {
                 $a = self::asin(explode('|', $z)[0]);
                 if ($a !== '' && !isset($vorhanden[$a])) { $txt .= ($txt === '' ? '' : "\n") . $z; $vorhanden[$a] = true; }
