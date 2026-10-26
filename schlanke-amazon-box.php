@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.78.3
+ * Version: 0.78.4
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.78.3';
+    const VERSION = '0.78.4';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4142,6 +4142,70 @@ final class SAB {
         '2026-10-26-korrektur-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [], 'ersetzen' => [   // nur wenn die Zeile noch genau so dasteht (von Hand Geändertes bleibt)
             'B01MU8UQ64 | B004WO8ZIE, B000WFLAMA, B091TXGPP9 | 2026-10-26' => 'B01MU8UQ64 | B0CXJFT8VK, B0CX6GF8HN, B0F3P51Q4M | 2026-10-26',
             'B08VKRJ5D4 | B0037YHTMS | 2026-10-26' => '',
+        ]],
+        '2026-10-26-such-kand-feder-3' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [   // PC-Recherche, ab 60 % Namensübereinstimmung; Bauart prüft der Austausch beim Anzeigen gegen den Kontext
+            'B07R2DK75K | B0B4C4P424, B0D9JTH8DW, B0B21K47D4 | 2026-10-26',
+            'B07PYHJLMC | B00JA9UJW6, B0DN5Q2PS4, B0GH72QN8J | 2026-10-26',
+            'B08NVW6Z45 | B0GX1DVKCS, B0CFVP59DL | 2026-10-26',
+            'B01M8KINM2 | B07VJ5YW3D, B093XVHQ6D, B0H138BPXC | 2026-10-26',
+            'B005MIBCMK | B00J6C6FHA, B00JA9UJW6, B00J6C9XMY | 2026-10-26',
+            'B09X65D63W | B0D946TSVN | 2026-10-26',
+            'B002RXARXS | B0D31SBQNG, B0FGJFY77V, B0BHSRR2HW | 2026-10-26',
+            'B000WFLAKW | B09VXF8MCH, B09PR4L6CM, B09PR7T9MY | 2026-10-26',
+            'B079Y526G4 | B01EYG822I, B01EYG7Z3U | 2026-10-26',
+            'B08BRGLK3Y | B01MSE1PWU | 2026-10-26',
+            'B08CMNG99T | B0D8W48747, B0CGV79TGG, B0CGV639Q7 | 2026-10-26',
+            'B083M2SM3Y | B0CGV79TGG, B0CGV7MVHS | 2026-10-26',
+            'B083M4K3RL | B0D8TGXLHJ, B0D8VZGBZ4, B0CGV9Z17L | 2026-10-26',
+            'B083M1B2LT | B0CGV7878N, B0CGV727H2 | 2026-10-26',
+            'B08CMLN5VM | B0CGV7878N, B0D8WFHW2H, B0D8W9878Z | 2026-10-26',
+            'B08CN33RN6 | B0CGV7BYBN, B0D8TGXLHJ | 2026-10-26',
+            'B09YDLWJKR | B09YDLG2FT, B09JLLPD5S, B09C8WY395 | 2026-10-26',
+            'B07PJLHWKS | B07CZHNJ86, B085DNPH2C, B0CFYC456B | 2026-10-26',
+            'B00PEB3WF0 | B00G44JKVG, B00G44JBF6, B00PEB43KS | 2026-10-26',
+            'B0741D4LGG | B0B15C8TC1, B0FT1BSLBH | 2026-10-26',
+            'B00AJGKZC8 | B086VLXGGD, B00AJGL6U8, B08CHMWGYT | 2026-10-26',
+            'B00OJ7AIT8 | B006Z40T0Q, B007FG05WA | 2026-10-26',
+            'B0869PHW9P | B0CZ6JBSMG | 2026-10-26',
+            'B005YCM6OC | B002HHP13K, B005VQ8NBQ, B0CG6D8KJN | 2026-10-26',
+            'B086C4YR95 | B08M66FH21, B0CWB1XSR4, B0BLK8NP9Y | 2026-10-26',
+            'B005VQ8NBQ | B005YCM6OC, B002HHP13K, B0D8LDTF4Q | 2026-10-26',
+            'B009FASV5W | B009X737UQ, B00DL05QHI, B0FR38688H | 2026-10-26',
+            'B0073GYFHS | B005YCM6OC, B002HHP13K, B005VQ8NBQ | 2026-10-26',
+            'B0037YHTMS | B0F5HW6W31, B07C9W8VCS, B001E50USW | 2026-10-26',
+            'B0001IP93O | B09YDLG2FT, B07MCVNPP1, B07QQLLBSC | 2026-10-26',
+            'B00VV8L298 | B00VV8KXZM, B0CG6FVWDP, B00OY274M2 | 2026-10-26',
+            'B08M3FKVSL | B0CG6FVWDP, B0CGVGF4X7 | 2026-10-26',
+            'B07PJW211S | B07PDHJ4ML, B0CG6FVWDP | 2026-10-26',
+            'B08M8KF5NT | B08M98NC1C, B08M94PPT8, B0CGLY63PV | 2026-10-26',
+            'B01M3S25LR | B0G574MKHH, B01M2ZDF57 | 2026-10-26',
+            'B09FSPYFYG | B0CXJFT8VK, B0CX6GF8HN | 2026-10-26',
+            'B07MTG2Q59 | B07MTFDBRF, B07KHXBDSQ | 2026-10-26',
+            'B085BPN1BG | B0CG6FVWDP, B0D8PYWZ88 | 2026-10-26',
+            'B0816L8XGJ | B07KSN3D53, B07KSD9RWJ, B0BR6JQQGM | 2026-10-26',
+            'B00518JSGI | B00518MI9C, B00518IE86, B07J6NR9SQ | 2026-10-26',
+            'B08M94PPT8 | B08M98NC1C, B08M8KF5NT, B0CGLY63PV | 2026-10-26',
+            'B07QMYLZRD | B0GZ3CC8J7, B0CGLY63PV | 2026-10-26',
+            'B084C219C3 | B0CGLY63PV, B0GZ3CC8J7 | 2026-10-26',
+            'B0001IP9YS | B0001IP94I, B0001IP934, B0001IP95M | 2026-10-26',
+            'B085N96FZJ | B08X2WVNGZ, B085N89QYT, B085N8VNWT | 2026-10-26',
+            'B0G4VTPF2J | B0G4VSWP21, B085DNPH2C, B0CGV33WHG | 2026-10-26',
+            'B08W5F2GCV | B07R4LX23Q, B07KSN3D53, B088L46J1S | 2026-10-26',
+            'B00GQH1OYC | B0F5HWSTJQ | 2026-10-26',
+            'B09BYYMVVD | B09NBMR317, B09V6H5W6H | 2026-10-26',
+            'B08SYNFTFG | B08SYNVZRR, B002SKTJJS | 2026-10-26',
+            'B08F7XF8R1 | B0DM9DBWV6, B0843HQW9V | 2026-10-26',
+            'B0CS31QGHQ | B0B3MPG1N6, B0C5HW1S26, B0DQ6WPHSH | 2026-10-26',
+            'B000QSINPA | B0001IP95M, B0001IP94S, B0001IP9YS | 2026-10-26',
+            'B07PK47VMM | B01MSE1PWU | 2026-10-26',
+            'B01DAFTNEU | B0GVJP4THF, B0FXRFM3Z4, B097B5TJQB | 2026-10-26',
+            'B00AE9TF7G | B08C7YKNQX, B0BXPYC925, B0D53KPHN2 | 2026-10-26',
+            'B083M3MJYB | B0CGV7439P, B0CGV7BYBN | 2026-10-26',
+            'B08BZTGT4W | B0CFF5STTZ, B08FTBY4L4 | 2026-10-26',
+            'B07R6L3RZL | B0CL6H26D2, B0D2XBS1LY, B0D679PSYT | 2026-10-26',
+            'B07GBNVT5K | B00ANZL2UE, B00ANZL57Y, B00ANZL1IC | 2026-10-26',
+            'B09LFFZMVQ | B016QE4N4M, B00P160MKQ, B075DVVJQB | 2026-10-26',
+            'B01KKDI5NA | B0001IP93O, B0001IP95M, B0001IP9YS | 2026-10-26',
         ]],
         '2026-10-26-kurznamen-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
             'B0F3P51Q4M | Nistkasten   2er-Set, 32 mm',
