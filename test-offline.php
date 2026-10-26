@@ -1117,9 +1117,9 @@ ok(SAB::kontext_titel('<p>x</p>[amz_karten][amz_karte asin="B0KTITEL01" land="es
 ok(SAB::kontext_titel('<p>x</p>[amz_link asin="B0KTITEL02" land="es"]Cinta de cobre 50 mm[/amz_link]', 'B0KTITEL02') === 'Cinta de cobre 50 mm', 'Titel aus dem Artikel: Linktext als Ausweg');
 
 // ---- 0.75.40: Handdaten mit leerem Prime-Feld und Datum gelten als gelesen (kein Prime), Listing ohne Bewertung ist nicht „fehlend“ ----
-$GLOBALS['opt']['sab_manuell'] = "B0HDATEN01 | 4,2 | 14 |  | Berlin 3 | 2026-10-26 | 3\nB0HDATEN02 |  |  |  | Berlin 5 | 2026-10-26 | 3\nB0HDATEN03 | 4,0 | 9 |  |  |  | ";
+$GLOBALS['opt']['sab_manuell'] = "B0HDATEN01 | 4,2 | 14 | nein | Berlin 3 | 2026-10-26 | 3\nB0HDATEN02 |  |  |  | Berlin 5 | 2026-10-26 | 3\nB0HDATEN03 | 4,0 | 9 |  |  |  | ";
 $mMd = new ReflectionMethod('SAB', 'manuell_daten'); $mMd->setAccessible(true); $md2 = $mMd->invoke(null);
-ok($md2['B0HDATEN01']['prime'] === false && $md2['B0HDATEN02']['ohne_bewertung'] === true && $md2['B0HDATEN03']['prime'] === null, 'Handdaten: leeres Prime-Feld mit Datum und Lieferzeit = kein Prime; neues Listing ohne Bewertung; ohne Datum bleibt unklar');
+ok($md2['B0HDATEN01']['prime'] === false && $md2['B0HDATEN02']['prime'] === null && $md2['B0HDATEN02']['ohne_bewertung'] === true && $md2['B0HDATEN03']['prime'] === null, 'Handdaten: „nein“ = gelesen, kein Prime; leeres Prime-Feld bleibt unbekannt; neues Listing ohne Bewertung ist nicht fehlend');
 unset($GLOBALS['opt']['sab_manuell']);
 
 // ---- 0.75.40: Übersicht sortiert die ganze Liste nach Spalte (Score), unbekannte Produkte am Ende ----
