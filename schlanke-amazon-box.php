@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.81.1
+ * Version: 0.81.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.81.1';
+    const VERSION = '0.81.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4277,6 +4277,22 @@ final class SAB {
             'B083M3MJYB | B0CGV7439P, B0D8W48747, B0CGV7BYBN, B0CGV5W9ZQ, B0CGV6D865, B0D8VZGBZ4, B0D8WFHW2H, B0CGV7M582 | 2026-10-26',
             'B08BZTGT4W | B08FTBY4L4, B08FTC6QT5, B08FT8YF5P, B0CFXZNFX9, B0CFXYSQCW, B0CFY4YNXP, B0CFF5STTZ, B085DNPH2C | 2026-10-26',
             'B07GBNVT5K | B00KS3YLKE, B0157V16GS, B00ANZL2UE, B00AA7XCVM, B00N8L397O, B00ANZL56K, B00ANZL59W, B00AA7XD3E | 2026-10-26',
+        ]],
+        '2026-10-26-such-kand-maulwurf-2' => ['host' => 'maulwurfhilfe.de', 'option' => 'sab_such_kand', 'zusammen' => true, 'zeilen' => [   // Mac-Sitzung: Maulwurf-Schrecken alle Solar (teils 4er-Sets); neue vor die vorhandenen
+            'B0H4RCDFW6 | B0H4R83YBT, B0HMGJPJ16, B0H5WH8YWJ, B0HGQ2RZBQ, B0HGQDWB2F, B0H29XCMHV, B0HKXR1BV9, B0GXDQ93CY | 2026-10-26',
+            'B07PHCWNH1 | B0H29XCMHV, B0H4R83YBT, B0GXDQ93CY, B0HMGJPJ16, B0HGQ2RZBQ, B0H5KR79XS, B0HKXR1BV9, B0HGQDWB2F | 2026-10-26',
+            'B07PH1FNSP | B0H29XCMHV, B0H4R83YBT, B0GXDQ93CY, B0HMGJPJ16, B0HGQ2RZBQ, B0H5KR79XS, B0HKXR1BV9, B0HGQDWB2F | 2026-10-26',
+            'B0C3RM9RDH | B0H29XCMHV, B0H4R83YBT, B0GXDQ93CY, B0HMGJPJ16, B0HGQ2RZBQ, B0H5KR79XS, B0HKXR1BV9, B0HGQDWB2F | 2026-10-26',
+            'B09DGVNDDG | B00EIP9F8G, B0FXB6V2BG, B08KKCSFV9, B0DFYKKFSB, B0B4PQQVTH, B0D9MFN7CQ, B0FX691X1T, B09HNSLTBJ | 2026-10-26',
+            'B09DGTGY8Y | B00EIP9F8G, B0FXB6V2BG, B08KKCSFV9, B0DFYKKFSB, B0B4PQQVTH, B0D9MFN7CQ, B0FX691X1T, B09HNSLTBJ | 2026-10-26',
+            'B07K19PB9C | B00EIP9F8G, B0FXB6V2BG, B08KKCSFV9, B0DFYKKFSB, B0B4PQQVTH, B0D9MFN7CQ, B0FX691X1T, B09HNSLTBJ | 2026-10-26',
+            'B09Q363DTB | B00EIP9F8G, B0FXB6V2BG, B08KKCSFV9, B0DFYKKFSB, B0B4PQQVTH, B0D9MFN7CQ, B0FX691X1T, B09HNSLTBJ | 2026-10-26',
+            'B09WYY1K18 | B0BQLHM1C5, B0C3CRVH74, B07QW9C6NY, B0GGQN4XZ8, B0CQC6Q1TM, B0GSG6ZDGG, B0C5T47S73 | 2026-10-26',
+            'B0182BTRI4 | B0BW4BNGCF, B07SWBVL3R, B07PDGRWDB, B0DLH2HJDT, B0G3LVM8FG, B0F24HCM59, B0FR8CSYLD, B0F3JRRJCD | 2026-10-26',
+        ]],
+        '2026-10-26-such-kand-schnecken-4' => ['host' => 'schneckenhilfe.de', 'option' => 'sab_such_kand', 'zusammen' => true, 'zeilen' => [   // Mac-Sitzung: Schneckenzaun nur 6 Treffer, B07BHMJKFJ/B08SW421HX/B09TTYK5HZ/B006DUH03G wenige Bewertungen (weniger sicher); Saat: Wildblumen-/Bienenweide
+            'B08562GF55 | B00UVQQYFI, B00B8QSSZY, B07BHMJKFJ, B08SW421HX, B09TTYK5HZ, B006DUH03G | 2026-10-26',
+            'B00D1VO916 | B07MK3Q8G5, B07RD876TC, B07KVM35TW, B07ST2P369, B0GT56XWFJ, B0CDH4R958, B0GTBY1X9P, B0872JB5HX, B0CXGZ14Y5 | 2026-10-26',
         ]],
         '2026-10-26-korrektur-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [], 'ersetzen' => [   // nur wenn die Zeile noch genau so dasteht (von Hand Geändertes bleibt)
             'B01MU8UQ64 | B004WO8ZIE, B000WFLAMA, B091TXGPP9 | 2026-10-26' => 'B01MU8UQ64 | B0CXJFT8VK, B0CX6GF8HN, B0F3P51Q4M | 2026-10-26',
