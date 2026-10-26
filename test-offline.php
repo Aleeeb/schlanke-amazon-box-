@@ -1198,4 +1198,9 @@ ok(count($od) === 1 && $od[0]['asin'] === 'B0FERNDOP1', 'Austausch-Vorschläge: 
 $nt = SAB::nur_textlink_neben_bild('<p>[amz_bild asin="B0BILDGUT1" land="es"][/amz_bild]</p><p>[amz_link asin="B0TEXTTOT1" land="es"]Zaun[/amz_link]</p>');
 $nt2 = SAB::nur_textlink_neben_bild('<p>[amz_bild asin="B0BILDGUT1"][/amz_bild]</p><hr><p>[amz_link asin="B0TEXTTOT1"]x[/amz_link]</p>');
 ok($nt === ['B0TEXTTOT1'] && $nt2 === [], 'Textlink direkt unter einem funktionierenden Bild eines anderen Produkts löst keinen Austausch aus (anderer Abschnitt schon)');
+$GLOBALS['pc'] = '<p>Gegen Schnecken im Beet hilft ein Kupferband sehr gut. Es wird rund um das Hochbeet geklebt. <a href="https://www.amazon.de/dp/B0TVTEST01?tag=x">Hier kaufen</a></p>';
+$mTv = new ReflectionMethod('SAB', 'text_vor_stelle'); $mTv->setAccessible(true);
+$tv = $mTv->invoke(null, 'B0TVTEST01', [5 => ['titel' => 'T', 'n' => 1]]);
+ok(strpos($tv, 'Kupferband') !== false && strpos($tv, 'Hier kaufen') === false, 'Austausch-Kontext: Sätze vor dem Link werden als Hinweis gelesen');
+unset($GLOBALS['pc']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

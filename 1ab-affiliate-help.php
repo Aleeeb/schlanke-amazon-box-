@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.76.6
+ * Version: 0.76.7
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.76.6';
+    const VERSION = '0.76.7';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4060,6 +4060,24 @@ final class SAB {
         return $out;
     }
 
+    /** Die letzten ein bis zwei Sätze (höchstens ~260 Zeichen) vor der ersten Fundstelle des Produkts im Artikel: dort steht oft, welches Produkt gemeint war. */
+    private static function text_vor_stelle(string $asin, array $f): string {
+        static $c = [];
+        if (isset($c[$asin])) { return $c[$asin]; }
+        $c[$asin] = '';
+        if (!$f) { return ''; }
+        foreach (array_slice(array_keys($f), 0, 3, true) as $pid) {
+            $post = get_post((int) $pid); if (!$post) { continue; }
+            $t = (string) $post->post_content; $i = strpos($t, $asin); if ($i === false) { continue; }
+            $vor = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', mb_scrub(substr($t, max(0, $i - 900), min($i, 900))))))));
+            if (mb_strlen($vor) < 25) { continue; }
+            $teile = preg_split('/(?<=[.!?:])\s+/u', $vor); $out = '';
+            while ($teile && mb_strlen($out) < 160) { $out = array_pop($teile) . ($out !== '' ? ' ' . $out : ''); }
+            $c[$asin] = mb_strlen($out) > 260 ? '…' . mb_substr($out, -260) : $out; break;
+        }
+        return $c[$asin];
+    }
+
     /** Text rund um die Stelle, an der ein Produkt im Artikel steht (±600 Zeichen), für „passt der Ersatz inhaltlich?“. Nur bei Produkten auf wenigen Seiten. */
     private static function stellen_kontext(string $asin, array $f): string {
         if (!$f || count($f) > 10) { return ''; }
@@ -4104,7 +4122,8 @@ final class SAB {
         foreach ($marken as $a => $t) { if ($t === 'fav' && !isset($q[$a])) { $q[$a] = 'Favorit'; } }
         foreach (array_keys($namen) as $a) { if (!isset($q[$a])) { $q[$a] = 'Katalog'; } }
         $gruppe = []; foreach (self::gruppen() as $liste) { if (in_array($alt, $liste, true)) { $gruppe = array_merge($gruppe, $liste); } }
-        $wn = self::woerter(trim($name . ' ' . (string) ($items[$alt]['titel'] ?? '')));   // nur der Produktname selbst, ohne Artikeltext: Namensähnlichkeit
+        $wn = self::woerter(trim($name . ' ' . (string) ($items[$alt]['titel'] ?? '')));
+        $wk = self::woerter(self::text_vor_stelle($alt, $fund[$alt] ?? []));   // Hinweise aus dem Satz vor dem Link   // nur der Produktname selbst, ohne Artikeltext: Namensähnlichkeit
         $text = $name;   // der Textzusammenhang bringt nur etwas, wenn der Name fast nichts sagt: sonst ziehen Wörter wie „Schnecken“ aus dem Artikel unpassende Produkte heran
         if (count(self::woerter($name)) < 2) { $text .= ' ' . self::stellen_kontext($alt, $fund[$alt] ?? []); }
         $a1 = self::arten($text); $w1 = self::woerter($text);
@@ -4117,9 +4136,10 @@ final class SAB {
             if (self::toetend($tc)) { continue; }   // tötende Produkte nie vorschlagen
             $ar = count(array_intersect($a1, self::arten($tc))); $tr = count(array_intersect($w1, self::woerter($tc))) + (self::aehnliche_woerter($text, $tc) ? 1 : 0);
             $ing = in_array($a, $gruppe, true);
+            $tk = $wk ? count(array_intersect($wk, self::woerter($tc))) : 0;
             $passt = $ing ? 3 : ($ar >= 1 ? 2 : ($tr >= 3 ? 1 : 0));   // nur zwei gemeinsame Wörter („caracoles“, „protección“) reichen nicht
             $sc = self::score($x)[0]; $pv = self::provision_satz($x);
-            $aehn = count(array_intersect($wn, self::woerter($tc)));
+            $aehn = count(array_intersect($wn, self::woerter($tc))); if ($tk >= 2) { $aehn++; if ($passt === 0) { $passt = 1; } }
             if ($passt === 0 && ($quelle === 'Kunden kauften auch' || strpos($quelle, 'Amazon-Suche') === 0)) { $passt = 2; }   // von Amazon als zugehörig gezeigt beziehungsweise von Hand geprüft   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
             if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; if ($ok && $quelle === 'Katalog') { $rest[] = ['asin' => $a, 'quelle' => 'Bestes im Portfolio (Passung unklar)', 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => 0, 'pv' => $pv, 'rang' => $sc, 'ausgeschlossen' => false]; } continue; }
             $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
@@ -4428,6 +4448,7 @@ final class SAB {
             $extra = '';
             if (!isset($d['items'][$alt])) { $extra .= '<br><strong style="color:#a00">Amazon liefert für dieses Produkt weder Titel noch Bild.</strong>' . ($z['name'] !== '' ? ' Der Name stammt aus dem Artikel.' : ' Auch im Artikel ist kein Name zu finden: bitte ASIN bei Amazon suchen.'); }
             elseif ((self::produkte()[$alt] ?? '') === '' && empty($d['items'][$alt]['titel']) && $z['name'] !== '') { $extra .= '<br><small>Name aus dem Artikel.</small>'; }
+            $tv = self::text_vor_stelle((string) $alt, (array) $z['f']); if ($tv !== '') { $extra .= '<br><small style="color:#444"><strong>Text davor im Artikel:</strong> „' . esc_html($tv) . '“</small>'; }
             $extra .= '<br><a class="button button-small" href="' . esc_url(self::such_link($z['name'] !== '' ? (string) $z['name'] : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a>';
             $h .= '<div class="sab-tk" style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div class="sab-tk-kopf" style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
                 . '<div><strong>Zu tauschen:</strong>' . $badge . ' <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><span style="color:#a00;font-size:16px;font-weight:700">' . esc_html($z['grund']) . '</span><br><small style="color:#555" title="Reihenfolge der Liste: Dringlichkeit (0 bis 100) mal Zahl der Seiten">Priorität ' . (int) $z['prio'] . ' = Dringlichkeit ' . (int) $z['dr'] . ' &times; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . '</small><br>' . $wo . $extra . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
@@ -4532,6 +4553,7 @@ final class SAB {
                . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="tausch_fest"><input type="hidden" name="sab_alt" value="' . esc_attr($alt) . '">' . ($id > 0 ? '<input type="hidden" name="sab_vorschau" value="' . (int) $id . '">' : '<input type="hidden" name="sab_alle_vorschau" value="' . max(1, self::$vorschau_seite) . '">')
                . '<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt) . '<div><strong>Zu tauschen:</strong> <code>' . esc_html($alt) . '</code> ' . esc_html((string) $name) . ' <small>(steht in ' . $nf . ' Artikel' . ($nf === 1 ? '' : 'n') . ')</small><br><span style="color:#a00;font-weight:600">Grund: Amazon kennt dieses Produkt nicht (mehr). Es kann nicht umgebaut werden und hat bei Besuchern kein Bild.</span></div></div>'
                . self::fundstellen_links($alt, $fund[$alt] ?? []);
+            $tv = self::text_vor_stelle((string) $alt, (array) ($fund[$alt] ?? [])); if ($tv !== '') { $h .= '<small style="color:#444"><strong>Text davor im Artikel:</strong> „' . esc_html($tv) . '“</small><br>'; }
             $ce = self::claude_empfehlungen()[$alt] ?? null;
             if ($ce) { $h .= '<small><strong>Empfehlung (von Amazons Alternativen):</strong> <code>' . esc_html($ce[0]) . '</code> ' . esc_html($ce[1]) . '</small><br>'; }
             $h .= '<div style="display:flex;flex-wrap:wrap;gap:10px;margin:8px 0">';
