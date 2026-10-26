@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.83.2
+ * Version: 0.84.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.83.2';
+    const VERSION = '0.84.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3173,6 +3173,24 @@ final class SAB {
         return '';
     }
 
+    /** Kontrollliste nach einem Tausch: Stellen zum Ansehen im Frontend (Sprung per ?sab_zeige), bei ein bis zwei Stellen mit dem Satz; „Bestätigt“ blendet aus. */
+    private static function kontrolle_html(string $tab): string {
+        $kk = (array) get_option('sab_kontrolle', []); if (!$kk) { return ''; }
+        $h = '<div class="notice notice-success" style="padding:10px 14px"><p><strong>Getauscht, bitte kontrollieren:</strong> Klick auf „Stelle ansehen“ öffnet den Artikel und springt zum Link (rot markiert). Fehlt dort der Link, meldet die Seite oben „Im sichtbaren Text steht … nicht“.</p>';
+        foreach (array_reverse($kk, true) as $id => $e) {
+            $st = (array) ($e['stellen'] ?? []); $neu = (string) $e['neu'];
+            $h .= '<div style="border-top:1px solid #c3e6cb;padding:8px 0"><strong><code>' . esc_html($e['alt']) . '</code> &rarr; <code>' . esc_html($neu) . '</code></strong> <small>(' . count($st) . ' Artikel, ' . esc_html(wp_date('d.m. H:i', (int) $e['ts'])) . ')</small>';
+            foreach (array_slice($st, 0, 12) as $x) {
+                $url = add_query_arg('sab_zeige', $neu, (string) get_permalink((int) $x['pid']));
+                $h .= '<div style="margin:6px 0 0">' . ($x['satz'] !== '' && count($st) <= 2 ? '<div style="background:#fff;border:1px solid #c3e6cb;border-radius:6px;padding:6px 10px;margin:0 0 4px;max-width:760px">' . esc_html($x['satz']) . '<br><small style="color:#555">【…】 = Link mit diesem Text</small></div>' : '')
+                    . esc_html($x['titel']) . ' <small>(' . (int) $x['n'] . '×)</small> <a class="button button-small" href="' . esc_url($url) . '" target="_blank" rel="noopener">Stelle ansehen ↗</a></div>';
+            }
+            if (count($st) > 12) { $h .= '<p class="description">… und ' . (count($st) - 12) . ' weitere Artikel.</p>'; }
+            $h .= '<form method="post" style="margin:8px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="' . esc_attr($tab) . '"><input type="hidden" name="sab_form" value="kontrolle_ok"><input type="hidden" name="sab_id" value="' . esc_attr((string) $id) . '"><button class="button button-primary">Kontrolliert, in Ordnung</button></form></div>';
+        }
+        return $h . '</div>';
+    }
+
     /** Prüft nach einer Satzänderung, ob alle Links noch heil sind. Leer = in Ordnung, sonst der Grund. */
     public static function link_pruefung(string $vorher, string $nachher, string $alt, string $neu): string {
         $b = fn($t) => [substr_count($t, '<a '), substr_count($t, '</a>'), substr_count($t, '[amz_link'), substr_count($t, '[/amz_link]')];
@@ -3193,7 +3211,7 @@ final class SAB {
         global $wpdb;
         if (!isset($wpdb) || strlen($alt) !== 10 || strlen($neu) !== 10 || $alt === $neu) { return [0, 0, 'Ungültige Angabe.', [], []]; }
         $rows = $wpdb->get_results($wpdb->prepare("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A);
-        $log = (array) get_option('sab_tausch_log', []); $id = (string) (time()) . substr(md5($alt . $neu), 0, 4); $posts = []; $kurz = 0; $doppel = []; $hinweise = [];
+        $log = (array) get_option('sab_tausch_log', []); $id = (string) (time()) . substr(md5($alt . $neu), 0, 4); $posts = []; $stellen = []; $kurz = 0; $doppel = []; $hinweise = [];
         foreach ((array) $rows as $r) {
             $pid = (int) $r['ID']; $c = (string) $r['post_content'];
             $c_arb = $c; $hw0 = [];
@@ -3212,11 +3230,13 @@ final class SAB {
             update_post_meta($pid, '_sab_tausch_' . $id, wp_slash($c));
             wp_update_post(['ID' => $pid, 'post_content' => wp_slash($neu_c)]);
             $posts[$pid] = md5($neu_c);
+            $sj0 = self::satz_mit_link($neu_c, $neu); $stellen[] = ['pid' => $pid, 'titel' => (string) ($r['post_title'] ?? ('Beitrag ' . $pid)), 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => substr_count($neu_c, $neu)];
             foreach ($hw as $w) { $hinweise[] = ($r['post_title'] ?? ('Beitrag ' . $pid)) . ': ' . $w; }
             if ($hw0 && ($sj = self::satz_mit_link($neu_c, $neu))) { $hinweise[] = 'Satz jetzt: ' . mb_substr(str_replace('【LINK】', '[Link „' . $sj['linktext'] . '“]', $sj['maske']), 0, 260); }
             $kurz += preg_match_all('#amzn\.to|amzn\.eu|a\.co/|link\.amazon/#i', $neu_c);
         }
         if ($neuer_name !== '' && !isset(self::produkte()[$neu])) { update_option('sab_produkte', trim((string) get_option('sab_produkte', '')) . "\n" . $neu . ' | ' . $neuer_name, false); }
+        if ($stellen) { $kk = (array) get_option('sab_kontrolle', []); $kk[$id] = ['ts' => time(), 'alt' => $alt, 'neu' => $neu, 'stellen' => $stellen]; update_option('sab_kontrolle', array_slice($kk, -20, null, true), false); }
         $log[$id] = ['ts' => time(), 'alt' => $alt, 'neu' => $neu, 'name' => $neuer_name, 'posts' => $posts, 'hinweise' => array_slice($hinweise, 0, 6)];
         update_option('sab_tausch_log', array_slice($log, -50, null, true), false);
         delete_transient('sab_alle_asins'); delete_transient('sab_luecke_' . self::land(''));   // die neue ASIN beim nächsten Aufruf der Übersicht neu abfragen
@@ -5629,7 +5649,9 @@ JS;
         }
         if (!empty($_POST['sab_form']) && check_admin_referer('sab_speichern')) {
             $form = sanitize_key((string) $_POST['sab_form']);
-            if ($form === 'produkte') {
+            if ($form === 'kontrolle_ok') {
+                $kk = (array) get_option('sab_kontrolle', []); unset($kk[(string) ($_POST['sab_id'] ?? '')]); update_option('sab_kontrolle', $kk, false); $meldung = 'Kontrolle bestätigt.';
+            } elseif ($form === 'produkte') {
                 update_option('sab_produkte', sanitize_textarea_field(wp_unslash($_POST['sab_produkte'] ?? '')), false);
                 update_option('sab_slots', sanitize_textarea_field(wp_unslash($_POST['sab_slots'] ?? '')), false);
                 update_option('sab_tausch', sanitize_textarea_field(wp_unslash($_POST['sab_tausch'] ?? '')), false);
@@ -5869,6 +5891,7 @@ JS;
         echo '<style>' . self::ADMIN_MOBIL_CSS . '</style><script>document.addEventListener("DOMContentLoaded",function(){document.querySelectorAll(".sab-admin table").forEach(function(t){var h=[];t.querySelectorAll("thead th").forEach(function(x){h.push(x.textContent.trim())});if(!h.length)return;t.querySelectorAll("tbody tr").forEach(function(r){var c=r.children;if(c.length!==h.length)return;for(var i=0;i<c.length;i++){if(h[i]&&!c[i].hasAttribute("data-l"))c[i].setAttribute("data-l",h[i])}})})});</script>';
         echo '<div class="wrap sab-admin"><h1>' . esc_html(self::NAME) . ' <small style="font-size:12px;color:#666">Version ' . esc_html(self::VERSION) . '</small></h1>';
         if ($meldung) { echo '<div class="notice notice-success"><p>' . esc_html($meldung) . '</p></div>'; }
+        echo self::kontrolle_html($tab);
         echo '<h2 class="nav-tab-wrapper">';
         foreach ($tabs as $k => $name) {
             if ($k === 'produkte' && $tab !== 'produkte') { continue; }

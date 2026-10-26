@@ -1309,4 +1309,9 @@ foreach (['<a href="https://www.amazon.de/dp/B0AKKUALT1?tag=x" rel="sponsored no
     ok($o1, 'Satz bearbeiten + Tausch: Link bleibt heil (Variante ' . $li . '): ' . $r1);
 }
 ok(SAB::link_pruefung('<p>Text (<a href="https://www.amazon.de/dp/B0AKKUALT1">Angebot bei Amazon</a>).</p>', '<p>Text (<a>Angebot bei Amazon</a>).</p>', 'B0AKKUALT1', 'B0AKKUNEU1') !== '' && SAB::link_pruefung('<p>Text (<a href="https://www.amazon.de/dp/B0AKKUALT1">Angebot bei Amazon</a>).</p>', '<p>Text (Angebot bei Amazon).</p>', 'B0AKKUALT1', 'B0AKKUNEU1') !== '', 'Linkprüfung erkennt fehlenden Link und Link ohne Adresse');
+if (!function_exists('get_permalink')) { function get_permalink($i) { return 'https://example.test/artikel-' . $i . '/'; } }
+$GLOBALS['opt']['sab_kontrolle'] = ['1' => ['ts' => time(), 'alt' => 'B0AKKUALT1', 'neu' => 'B0AKKUNEU1', 'stellen' => [['pid' => 7, 'titel' => 'Elektrozaun', 'satz' => 'Außerdem betreibt Kay den Zaun mit Akku (【Angebot bei Amazon】).', 'n' => 1]]]];
+$mKo = new ReflectionMethod('SAB', 'kontrolle_html'); $mKo->setAccessible(true); $ko = $mKo->invoke(null, 'austausch');
+ok(strpos($ko, 'sab_zeige=B0AKKUNEU1') !== false && strpos($ko, 'Außerdem betreibt Kay') !== false && strpos($ko, 'kontrolle_ok') !== false, 'Kontrollliste: Sprunglink, Satz und Bestätigen');
+unset($GLOBALS['opt']['sab_kontrolle']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
