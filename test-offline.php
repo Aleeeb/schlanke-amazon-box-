@@ -19,8 +19,11 @@ function wp_remote_post($u, $a) {
     if (strpos($u, 'auth') !== false) return ['code' => 200, 'body' => json_encode(['access_token' => 't', 'expires_in' => 3600])];
     $ids = json_decode($a['body'], true)['itemIds']; $items = [];
     foreach ($ids as $id) { if (($GLOBALS['bad'] ?? '') === $id) { return ['code' => 400, 'body' => 'ungueltig']; } }
+    foreach ($ids as $id) { if (($GLOBALS['drossel'] ?? '') === $id) { return ['code' => 429, 'body' => 'TooManyRequests']; } }
     foreach ($ids as $id) { $items[] = $GLOBALS['http'][$id] ?? null; }
-    return ['code' => 200, 'body' => json_encode(['itemsResult' => ['items' => array_values(array_filter($items))]])];
+    $antwort = ['itemsResult' => ['items' => array_values(array_filter($items))]];
+    if (!empty($GLOBALS['fehler200'])) { $antwort['errors'] = $GLOBALS['fehler200']; }
+    return ['code' => 200, 'body' => json_encode($antwort)];
 }
 function wp_remote_get($u, $a) {
     if (strpos($u, 'update.json') !== false) return ['code' => 200, 'body' => json_encode($GLOBALS['upd'] ?? [])]; return ['code' => 200, 'body' => 'JPG', 'ct' => 'image/jpeg']; }
@@ -896,7 +899,7 @@ ok(strpos($mOl->invoke(null, 'Link zeigt auf B0TOT00002', 5), 'sab_zeige=B0TOT00
 // ---- 0.59.0: Reiter Austausch, Amazons Alternativen, Automatik ----
 $GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
 unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_claude_empf'], $GLOBALS['opt']['sab_marken'], $GLOBALS['opt']['sab_trotz'], $GLOBALS['opt']['sab_manuell']);
-$GLOBALS['opt']['sab_produkte'] = "B0DEAD0001 | Kupferband alt\nB0ALT00001 | Kupferband neu"; $GLOBALS['opt']['sab_amz_alt'] = "B0DEAD0001 | B0ALT00001, B0ALT00002 | 2026-10-25";
+$GLOBALS['opt']['sab_ungueltige_asins'] = ['B0DEAD0001']; $GLOBALS['opt']['sab_produkte'] = "B0DEAD0001 | Kupferband alt\nB0ALT00001 | Kupferband neu"; $GLOBALS['opt']['sab_amz_alt'] = "B0DEAD0001 | B0ALT00001, B0ALT00002 | 2026-10-25";
 $GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0ALT00001' => ['titel' => 'Cinta de cobre 50 mm', 'preis' => '9,99 €', 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => 150, 'kategorie' => 'Jardín']], 'ts' => time()];
 $GLOBALS['tr']['sab_uebersicht_es'] = $GLOBALS['opt']['sab_uebersicht_stand_es']; $GLOBALS['tr']['sab_luecke_es'] = 1; unset($GLOBALS['tr']['sab_alle_asins']);
 $wpdb_x = $GLOBALS['wpdb'] ?? null;
@@ -1156,4 +1159,29 @@ ok($nv === '99.1.0' && isset($GLOBALS['str']['update_plugins']->response['schlan
 $GLOBALS['upd'] = ['version' => '99.2.0', 'zip' => $zipok]; $GLOBALS['tr'] = [];
 ok(SAB::update_nachsehen(false) === '' && ($GLOBALS['str']['update_plugins']->response['schlanke-amazon-box/schlanke-amazon-box.php']->new_version ?? '') === '99.1.0', 'Update-Prüfung: vor Ablauf des Abstands wird nicht erneut bei GitHub gefragt');
 unset($GLOBALS['opt']['sab_upd_stat'], $GLOBALS['opt']['sab_upd_naechste'], $GLOBALS['upd'], $GLOBALS['str']);
+
+// ---- 0.75.43: Abruffehler und leere Antworten gelten nie als „Amazon kennt das Produkt nicht“ ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+$GLOBALS['opt']['sab_produkte'] = "B0GUT00001 | Gut 1\nB0DROSSEL1 | Gedrosselt\nB0GUT00002 | Gut 2\nB0UNGUELT1 | Ungueltig"; unset($GLOBALS['tr']['sab_alle_asins'], $GLOBALS['opt']['sab_ungueltige_asins'], $GLOBALS['opt']['sab_unsicher_asins'], $GLOBALS['opt']['sab_uebersicht_teilfehler']);
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0DROSSEL1' => ['titel' => 'Alt bekannt', 'bilder' => ['https://img.test/x.jpg'], 'lieferbar' => true, 'preis' => '9 €']], 'ts' => time() - 7200];
+$wpdb_v = $GLOBALS['wpdb'] ?? null; $GLOBALS['wpdb'] = null;
+// A: die ganze Anfrage wird gedrosselt (429 auch nach Wiederholungen): nichts davon ist „unbekannt“
+$GLOBALS['drossel'] = 'B0DROSSEL1';
+$uv = SAB::uebersicht_holen('es');
+$GLOBALS['drossel'] = '';
+$ung = (array) get_option('sab_ungueltige_asins', []); $uns = (array) get_option('sab_unsicher_asins', []);
+$vier = ['B0GUT00001', 'B0DROSSEL1', 'B0GUT00002', 'B0UNGUELT1'];
+ok(!array_intersect($vier, $ung) && count(array_intersect($vier, $uns)) === 4, 'Abruf: gedrosselte Anfrage (429) macht keine Produkte „ungültig“, alle vier der Anfrage sind „unsicher“');
+// B: Antwort 200 mit Fehlerliste: nur eindeutig Abgewiesenes ist ungültig, Drosselung nicht
+foreach (['B0GUT00001', 'B0GUT00002'] as $g) { $GLOBALS['http'][$g] = ['asin' => $g, 'detailPageURL' => 'https://www.amazon.es/dp/' . $g, 'itemInfo' => ['title' => ['displayValue' => 'Titel ' . $g]], 'offersV2' => ['listings' => [['availability' => ['type' => 'IN_STOCK'], 'isBuyBoxWinner' => true, 'price' => ['money' => ['amount' => 9, 'currency' => 'EUR', 'displayAmount' => '9 €']]]]], 'images' => ['primary' => ['large' => ['url' => 'https://img.test/x.jpg']]]]; }
+$GLOBALS['fehler200'] = [['code' => 'InvalidParameterValue', 'message' => 'The ItemIds B0UNGUELT1 provided in the request is invalid.'], ['code' => 'TooManyRequests', 'message' => 'Throttled B0DROSSEL1']];
+$uv = SAB::uebersicht_holen('es');
+$GLOBALS['fehler200'] = []; $GLOBALS['wpdb'] = $wpdb_v;
+$ung = (array) get_option('sab_ungueltige_asins', []); $uns = (array) get_option('sab_unsicher_asins', []);
+ok(in_array('B0UNGUELT1', $ung, true) && !in_array('B0DROSSEL1', $ung, true) && in_array('B0DROSSEL1', $uns, true) && !in_array('B0UNGUELT1', $uns, true) && !in_array('B0GUT00001', $uns, true), 'Abruf: in einer 200er-Antwort ist nur „ungültig/nicht zugänglich“ eindeutig, „zu viele Anfragen“ ist unsicher');
+ok(isset($uv['items']['B0DROSSEL1']) && !empty($uv['items']['B0DROSSEL1']['veraltet']) && isset($uv['items']['B0GUT00001']) && get_option('sab_uebersicht_teilfehler', '') !== '', 'Abruf: für unsichere Produkte bleibt der letzte bekannte Stand, der Teilfehler wird gemerkt');
+$mTf = new ReflectionMethod('SAB', 'tausch_faelle'); $mTf->setAccessible(true);
+$tf = $mTf->invoke(null, ['items' => []], []);
+ok(isset($tf['B0UNGUELT1']) && !isset($tf['B0DROSSEL1']) && !isset($tf['B0GUT00001']), 'Austausch: nur eindeutig abgewiesene Produkte gelten als „Amazon kennt das Produkt nicht“');
+unset($GLOBALS['http']['B0GUT00001'], $GLOBALS['http']['B0GUT00002'], $GLOBALS['opt']['sab_uebersicht_stand_es'], $GLOBALS['opt']['sab_ungueltige_asins'], $GLOBALS['opt']['sab_unsicher_asins'], $GLOBALS['opt']['sab_uebersicht_teilfehler'], $GLOBALS['opt']['sab_produkte']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.42
+ * Version: 0.75.43
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.42';
+    const VERSION = '0.75.43';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -394,13 +394,14 @@ final class SAB {
     /** Amazon erlaubt anfangs 1 Abfrage pro Sekunde (sonst 429): Mindestabstand einhalten und bei 429 einmal nach kurzer Pause wiederholen. */
     private static function api_post(array $args) {
         static $zuletzt = 0.0;
-        for ($versuch = 0; $versuch < 2; $versuch++) {
+        for ($versuch = 0; $versuch < 4; $versuch++) {
             $warte = 1.1 - (microtime(true) - $zuletzt);
             if ($warte > 0 && !defined('SAB_SYNC')) { usleep((int) ($warte * 1000000)); }
             $r = wp_remote_post(self::API, $args);
             $zuletzt = microtime(true);
-            if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 429) { break; }
-            if (!defined('SAB_SYNC')) { usleep(2000000); }
+            $c = is_wp_error($r) ? 0 : (int) wp_remote_retrieve_response_code($r);
+            if ($c !== 0 && $c !== 429 && $c < 500) { break; }   // Erfolg oder eindeutige Ablehnung: fertig; Drosselung, Serverfehler und Netzfehler wiederholen
+            if (!defined('SAB_SYNC')) { usleep((2 << $versuch) * 1000000); }   // 2, 4, 8 Sekunden
         }
         return $r;
     }
@@ -968,8 +969,8 @@ final class SAB {
     }
 
     /** Aus dem frischen Amazon-Stand: Produkte, die Amazon nicht kennt oder ohne Bild, soweit sie in Artikeln stehen, kommen sofort in die Warnliste (auch ohne Besucheraufruf). */
-    private static function bildfehler_aus_stand(array $items): void {
-        $asins = array_values(array_filter(self::alle_asins(), fn($a) => !isset($items[$a]) || empty($items[$a]['bilder'])));
+    private static function bildfehler_aus_stand(array $items, array $ungueltig = []): void {
+        $asins = array_values(array_filter(self::alle_asins(), fn($a) => (!isset($items[$a]) && in_array((string) $a, $ungueltig, true)) || (isset($items[$a]) && empty($items[$a]['bilder']) && empty($items[$a]['veraltet']))));   // nur eindeutig Abgelehnte oder Produkte ohne Bild; ein gescheiterter Abruf zählt nie
         if (!$asins) { return; }
         $fund = self::fundstellen($asins); $l = (array) get_option('sab_bildfehler', []); $neu = false;
         foreach ($asins as $a) {
@@ -2106,6 +2107,7 @@ final class SAB {
         if (!isset(self::LAENDER[$land])) { return ['fehler' => 'Land unbekannt.', 'items' => []]; }
         $key = "sab_uebersicht_{$land}";
         delete_transient($key);
+        if (function_exists('set_time_limit') && !defined('SAB_SYNC')) { @set_time_limit(300); }   // 380 Produkte = 38 Anfragen im Sekundentakt: das braucht länger als die üblichen 30 Sekunden
         $token = self::token($land); $tag = self::tag($land);
         if (!$token || !$tag) { return ['fehler' => self::zugang_fehler($land, (bool) $token) ?: 'Zugangsdaten oder Partner-ID fehlen.', 'items' => []]; }
         $mp = self::LAENDER[$land][0]; $items = []; $fehler = '';
@@ -2120,25 +2122,27 @@ final class SAB {
                 'body'    => wp_json_encode(['itemIds' => array_map('strval', $paket), 'itemIdType' => 'ASIN', 'marketplace' => $mp, 'partnerTag' => $tag, 'resources' => $ressourcen]),
             ]);
         };
-        $ok_pakete = 0; $ungueltig = [];
+        $ok_pakete = 0; $ungueltig = []; $unsicher = [];   // ungültig = Amazon weist die ASIN eindeutig ab; unsicher = Abruf gescheitert oder ohne Antwort (nie als „Amazon kennt es nicht“ werten)
+        $alt_stand = get_option("sab_uebersicht_stand_{$land}"); $alt_items = is_array($alt_stand) ? (array) ($alt_stand['items'] ?? []) : [];
+        $code_von = fn($r) => is_wp_error($r) ? 0 : (int) wp_remote_retrieve_response_code($r);
         foreach (array_chunk(self::alle_asins(), 10) as $paket) {
-            $r = $abfrage($paket);
+            $r = $abfrage($paket); $code = $code_von($r);
             $antworten = [];
-            if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 200) {
+            if ($code === 200) { $antworten[] = json_decode(wp_remote_retrieve_body($r), true); }
+            elseif (count($paket) > 1 && in_array($code, [400, 404, 422], true)) {
                 // ein ungültiger Eintrag lässt das ganze Paket scheitern: einzeln nachfragen, damit der Rest nicht verloren geht
-                if (count($paket) > 1 && !is_wp_error($r) && in_array(wp_remote_retrieve_response_code($r), [400, 404, 422], true)) {
-                    foreach ($paket as $einzeln) {
-                        $r1 = $abfrage([$einzeln]);
-                        if (is_wp_error($r1) || wp_remote_retrieve_response_code($r1) !== 200) { $ungueltig[] = $einzeln; continue; }
-                        $antworten[] = json_decode(wp_remote_retrieve_body($r1), true);
-                    }
-                    if (!$antworten) { continue; }
-                } else {
-                    $fehler = 'Amazon-Abfrage fehlgeschlagen (Code ' . (is_wp_error($r) ? 'Netz' : wp_remote_retrieve_response_code($r))
-                            . '): ' . (is_wp_error($r) ? '' : mb_substr((string) wp_remote_retrieve_body($r), 0, 900));
-                    continue;
+                foreach ($paket as $einzeln) {
+                    $r1 = $abfrage([$einzeln]); $c1 = $code_von($r1);
+                    if ($c1 === 200) { $antworten[] = json_decode(wp_remote_retrieve_body($r1), true); }
+                    elseif (in_array($c1, [400, 404, 422], true)) { $ungueltig[] = (string) $einzeln; }
+                    else { $unsicher[] = (string) $einzeln; $fehler = 'Amazon-Abfrage fehlgeschlagen (Code ' . ($c1 ?: 'Netz') . ')'; }
                 }
-            } else { $antworten[] = json_decode(wp_remote_retrieve_body($r), true); }
+                if (!$antworten) { continue; }
+            } else {
+                foreach ($paket as $a_) { $unsicher[] = (string) $a_; }
+                $fehler = 'Amazon-Abfrage fehlgeschlagen (Code ' . ($code ?: 'Netz') . '): ' . (is_wp_error($r) ? $r->get_error_message() : mb_substr((string) wp_remote_retrieve_body($r), 0, 900));
+                continue;
+            }
             $ok_pakete++;
             foreach ($antworten as $j) {
             foreach ((array) ($j['itemsResult']['items'] ?? []) as $it) {
@@ -2162,16 +2166,30 @@ final class SAB {
                     'roh'      => mb_substr((string) wp_json_encode($it['offersV2'] ?? null), 0, 1800),
                 ];
             }
+            // Fehlermeldungen innerhalb einer 200er-Antwort: nur „ungültig/nicht zugänglich“ gilt als eindeutig, alles andere (Drosselung, Störung) als unsicher
+            foreach ((array) ($j['errors'] ?? []) as $er) {
+                $ec = (string) ($er['code'] ?? '');
+                if (preg_match_all('/\b[0-9A-Z]{10}\b/', (string) ($er['message'] ?? ''), $am)) {
+                    foreach ($am[0] as $a_) { if (in_array($a_, array_map('strval', $paket), true) && !isset($items[$a_])) { if (preg_match('/Invalid|NotAccessible|NoResults|NotFound|NotExist/i', $ec)) { $ungueltig[] = $a_; } else { $unsicher[] = $a_; } } }
+                }
             }
+            }
+            foreach ($paket as $a_) { $a_ = (string) $a_; if (!isset($items[$a_]) && !in_array($a_, $ungueltig, true) && !in_array($a_, $unsicher, true)) { $unsicher[] = $a_; } }   // keine Antwort zu diesem Produkt: unsicher, nicht „unbekannt“
         }
-        if ($ungueltig && !$fehler) { $fehler = ''; }   // einzelne ungültige ASINs sind kein Grund, den ganzen Stand zu verwerfen
-        update_option('sab_ungueltige_asins', array_values(array_unique($ungueltig)), false);
-        if ($fehler !== '' && $ok_pakete > 0) { update_option('sab_uebersicht_teilfehler', $fehler, false); $fehler = ''; } else { delete_option('sab_uebersicht_teilfehler'); }
+        $unsicher = array_values(array_unique($unsicher)); $ungueltig = array_values(array_unique($ungueltig));
+        foreach ($unsicher as $a_) { if (isset($alt_items[$a_])) { $items[$a_] = $alt_items[$a_]; $items[$a_]['veraltet'] = (int) ($alt_stand['ts'] ?? 0); } }   // letzten bekannten Stand behalten
+        update_option('sab_ungueltige_asins', $ungueltig, false);
+        update_option('sab_unsicher_asins', $unsicher, false);
+        $teil = '';
+        if ($fehler !== '' && $ok_pakete > 0) { $teil = $fehler; $fehler = ''; }
+        if ($unsicher && $teil === '' && $ok_pakete > 0) { $teil = count($unsicher) . ' Produkt(e) lieferte Amazon beim letzten Abruf keine Antwort (Drosselung oder Störung). Der letzte bekannte Stand bleibt stehen.'; }
+        if ($teil !== '') { update_option('sab_uebersicht_teilfehler', $teil . ($unsicher ? ' Neuer Versuch in 5 Minuten.' : ''), false); } else { delete_option('sab_uebersicht_teilfehler'); }
+        if ($unsicher && function_exists('wp_schedule_single_event') && !wp_next_scheduled('sab_uebersicht_holen', [$land])) { wp_schedule_single_event(time() + 300, 'sab_uebersicht_holen', [$land]); }
         // Bewertungen liefert diese Schnittstelle nicht (Antwort immer ohne Werte): keine Abfrage mehr, das spart Abfragen (Limit 1 pro Sekunde)
         $bew = ['fehler' => '', 'werte' => []];
         $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
         $out['ts'] = time();
-        if (!$fehler) { self::bildfehler_aus_stand($items); set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); self::mit_verlauf(self::mit_preisindex(self::mit_kat_schaetzung(self::mit_manuell($out))), true); }
+        if (!$fehler) { self::bildfehler_aus_stand($items, $ungueltig); set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); self::mit_verlauf(self::mit_preisindex(self::mit_kat_schaetzung(self::mit_manuell($out))), true); }
         return $out;
     }
 
@@ -3176,6 +3194,7 @@ final class SAB {
         $h .= self::stand_hinweis($d);
         if ($d['fehler']) { $h .= '<div class="notice notice-warning inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         if ($d['fehler']) { return $h; }
+        if (get_option('sab_uebersicht_teilfehler', '') !== '') { $h .= '<div class="notice notice-warning inline"><p><strong>Abruf bei Amazon unvollständig:</strong> ' . esc_html((string) get_option('sab_uebersicht_teilfehler', '')) . '</p></div>'; }
         $kz = self::klickzahlen(); $fund = self::fundstellen(self::alle_asins()); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
         $h .= self::uebersicht_css() . '<!--SABPAGER-->';
         $h .= self::uebersicht_kopf(true);
@@ -3183,6 +3202,10 @@ final class SAB {
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null; $ns = count($fund[$asin] ?? []);
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
+            if (!$x && !self::amazon_unbekannt((string) $asin, (array) $d)) {   // Abruf gescheitert oder noch nicht abgefragt: nicht als „unbekannt“ melden
+                $zl[] = ['asin' => $asin, 'prio' => 0, 'dr' => 0, 'sc' => -1, 'v' => ['score' => null, 'preis' => null, 'prov' => null, 'rang' => null, 'seiten' => $ns, 'prio' => 0], 'h' => '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><em>Amazon hat noch nicht geantwortet (Abruf wird wiederholt)</em></td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'];
+                continue;
+            }
             if (!$x) {
                 if ($ns === 0) { $unbenutzt[] = $asin; continue; }   // Amazon kennt es nicht und es steht auf keiner Seite: kein Handlungsbedarf, nicht ganz oben anzeigen
                 $m_ = self::manuell_daten()[$asin] ?? null;
@@ -3912,11 +3935,16 @@ final class SAB {
     }
 
     /** Welche Produkte getauscht werden müssen: weg (Amazon kennt es nicht), kein Preis/Rang, nicht lieferbar, unklar. @return array<string,string> ASIN => Grund */
+    /** Amazon hat die ASIN beim letzten Abruf eindeutig abgewiesen (ungültig/nicht zugänglich). Fehlende Daten durch gescheiterte Abrufe zählen nicht. */
+    private static function amazon_unbekannt(string $asin, array $d): bool {
+        return !isset($d['items'][$asin]) && in_array($asin, array_map('strval', (array) get_option('sab_ungueltige_asins', [])), true);
+    }
+
     private static function tausch_faelle(array $d, array $trotz): array {
         $out = [];
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
-            if (!$x) { $out[$asin] = 'Amazon kennt das Produkt nicht mehr'; continue; }
+            if (!$x) { if (self::amazon_unbekannt((string) $asin, $d)) { $out[$asin] = 'Amazon kennt das Produkt nicht mehr'; } continue; }
             if (isset($trotz[$asin])) { continue; }
             if (($x['preis'] ?? '') === '' && (($x['rang'] ?? null) === null || $x['rang'] > 300000)) { $out[$asin] = 'kein Preis, kein brauchbarer Rang'; continue; }
             if (!self::unklar($x) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK')) { $out[$asin] = 'nicht lieferbar'; }
@@ -4203,7 +4231,7 @@ final class SAB {
         foreach (self::alle_asins() as $a0) {
             $x0 = $d['items'][$a0] ?? null;
             if (self::toetend_asin((string) $a0, (array) $d)) { $dring[$a0] = 100; if (!isset($faelle[$a0])) { $faelle[$a0] = 'Tierschutz'; } continue; }
-            if (!$x0) { $dring[$a0] = 100; continue; }
+            if (!$x0) { if (self::amazon_unbekannt((string) $a0, (array) $d)) { $dring[$a0] = 100; } continue; }
             $x0['trotz'] = isset($trotz[$a0]);
             $sc0 = self::score($x0)[0]; $dr0 = self::tausch_dringlichkeit($x0, $sc0);
             if (($marken[$a0] ?? '') === 'ers') { $dr0 = max($dr0, 100); }
