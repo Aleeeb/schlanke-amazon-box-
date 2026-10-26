@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.76.7
+ * Version: 0.76.8
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.76.7';
+    const VERSION = '0.76.8';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3989,6 +3989,15 @@ final class SAB {
             'B008BI50OY | B07PRJFSWC, B07F89JFH6, B001QC34LS | 2026-10-26',
             'B00F0LVLUM | B08DDF49L6, B06VW88X76 | 2026-10-26',
             'B0983557BB | B0DBHR1XK3, B001EJOHYG | 2026-10-26',
+        ]],
+        '2026-10-26-such-kand-feder-2' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [
+            'B08KJ9WTDN | B085CX8W6B, B073T9SM39 | 2026-10-26',
+            'B0031HDYFM | B0001IP95C, B0001IP95M | 2026-10-26',
+        ]],
+        '2026-10-26-such-kand-zecken-2' => ['host' => 'zeckenhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [
+            'B01E7I39GW | B07DLVKMT3, B07LG6W18Y, B07SJ6TXYG | 2026-10-26',
+            'B00EF3X028 | B01CWAP0F0, B07DJD9DJM, B09W5V82K6 | 2026-10-26',
+            'B01CXA3OW0 | B0B5H15521, B093LR5P62, B0F9FV7GKX | 2026-10-26',
         ]],
         '2026-10-26-kurznamen-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
             'B0F3P51Q4M | Nistkasten   2er-Set, 32 mm',
