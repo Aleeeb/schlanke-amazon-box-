@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.85.4
+ * Version: 0.85.5
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.85.4';
+    const VERSION = '0.85.5';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4518,6 +4518,26 @@ final class SAB {
         ]],
         '2026-10-26-kurznamen-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
             'B0F3P51Q4M | Nistkasten   2er-Set, 32 mm',
+        ]],
+        '2026-10-26-kurznamen-feder-2' => ['host' => 'federhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
+            'B07QHYTSXZ | Mehlschwalbennest   Einzelnest, Holzbeton',
+            'B0CJJV2HDF | Vogeltränke   Flussstein, frostsicher',
+            'B095RBG5SH | Nistkasten   Spechtschutz, nesträubersicher',
+            'B0DXLK5NR6 | Vogelfutter   Paprika, eichhörnchenresistent',
+            'B0H1WZ5VT1 | Vogeltränke   Granit, rund 27 cm',
+            'B0078KSZW0 | Kotbrett   für Mehlschwalbennest',
+            'B0BP2HZ72F | Nistkasten   Holzbeton, Kohlmeise',
+            'B0CGLQC4CD | Vogeltränke   Granit, frostsicher',
+            'B0037YHTMS | Schwalbennest   Esschert',
+            'B0DJJL5LYD | Rauchschwalbennest   Nisthilfe',
+            'B0DWT2FLMC | Vogelbad   Naturstein, grau',
+            'B0D2L4613K | Vogelfutter   Beeren und Früchte, 1 kg',
+            'B07MQV13LW | Nistkasten   Holzbeton, grün',
+            'B07CHTXRFV | Vogelschreck   Rabe, Kunststoff',
+            'B0CR9S4W6B | Eichhörnchenabweiser   für Vogelhaus',
+            'B0B4DLTZ1V | Katzenabwehr   Stachelmatten, 12 Stück',
+            'B0D8Q8MDRN | Nistkasten   Stare, Metalldach',
+            'B0FNKHSCDL | Nisthilfe   Waldkauzröhre, 83 cm',
         ]],
         '2026-10-26-kurznamen-maulwurf' => ['host' => 'maulwurfhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
             'B0H4R83YBT | Maulwurfschreck   Solar, 2er-Set',
