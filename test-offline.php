@@ -1250,4 +1250,7 @@ $GLOBALS['opt']['sab_ungueltige_asins'] = ['B0XXXXXXX1'];
 $mAu = new ReflectionMethod('SAB', 'amazon_unbekannt'); $mAu->setAccessible(true);
 ok(!$mAu->invoke(null, 'B0FRISCH01', ['items' => []]) && $mAu->invoke(null, 'B0XXXXXXX1', ['items' => []]), 'Frisch getauschtes Produkt (nur nicht im Zwischenspeicher) gilt nicht als „Amazon kennt es nicht“');
 unset($GLOBALS['opt']['sab_ungueltige_asins']);
+$mP = new ReflectionMethod('SAB', 'ersatz_prompt_html'); $mP->setAccessible(true);
+$ph = $mP->invoke(null, [['B0PROMPT01', 'Mehlschwalben Einzelnest Holzbeton', 'Für Mehlschwalben eignet sich ein Einzelnest.', 'Garten', 0, 'Schwegler Mehlschwalbennest', 3]]);
+ok(strpos($ph, 'B0PROMPT01') !== false && strpos($ph, 'Einzelnest') !== false && strpos($ph, 'mindestens 8') !== false && strpos($ph, 'ALTE-ASIN | NEU1') !== false && strpos($ph, 'sab-kopieren') !== false && $mP->invoke(null, []) === '', 'Ersatz-Prompt: Produkt, Kontext, Regeln, Format und Kopierknopf');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
