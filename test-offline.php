@@ -1115,4 +1115,26 @@ unset($GLOBALS['opt']['sab_bildfehler']);
 // ---- 0.75.39: Titel aus Karte und Linktext ----
 ok(SAB::kontext_titel('<p>x</p>[amz_karten][amz_karte asin="B0KTITEL01" land="es" titel="Valla pequeña | Swissinno"][/amz_karten]', 'B0KTITEL01') === 'Valla pequeña | Swissinno', 'Titel aus dem Artikel: Karte mit titel-Angabe');
 ok(SAB::kontext_titel('<p>x</p>[amz_link asin="B0KTITEL02" land="es"]Cinta de cobre 50 mm[/amz_link]', 'B0KTITEL02') === 'Cinta de cobre 50 mm', 'Titel aus dem Artikel: Linktext als Ausweg');
+
+// ---- 0.75.40: Handdaten mit leerem Prime-Feld und Datum gelten als gelesen (kein Prime), Listing ohne Bewertung ist nicht „fehlend“ ----
+$GLOBALS['opt']['sab_manuell'] = "B0HDATEN01 | 4,2 | 14 |  | Berlin 3 | 2026-10-26 | 3\nB0HDATEN02 |  |  |  | Berlin 5 | 2026-10-26 | 3\nB0HDATEN03 | 4,0 | 9 |  |  |  | ";
+$mMd = new ReflectionMethod('SAB', 'manuell_daten'); $mMd->setAccessible(true); $md2 = $mMd->invoke(null);
+ok($md2['B0HDATEN01']['prime'] === false && $md2['B0HDATEN02']['ohne_bewertung'] === true && $md2['B0HDATEN03']['prime'] === null, 'Handdaten: leeres Prime-Feld mit Datum und Lieferzeit = kein Prime; neues Listing ohne Bewertung; ohne Datum bleibt unklar');
+unset($GLOBALS['opt']['sab_manuell']);
+
+// ---- 0.75.40: Übersicht sortiert die ganze Liste nach Spalte (Score), unbekannte Produkte am Ende ----
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+$GLOBALS['opt']['sab_produkte'] = "B0SORT0001 | Eins\nB0SORT0002 | Zwei\nB0SORT0003 | Drei\nB0SORT0004 | Unbekannt";
+$mk = fn($rang, $preis) => ['titel' => 'T', 'preis' => $preis, 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => $rang, 'kategorie' => 'Jardín'];
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0SORT0001' => $mk(50, '9 €'), 'B0SORT0002' => $mk(900000, '9 €'), 'B0SORT0003' => $mk(5000, '9 €')], 'ts' => time()];
+$GLOBALS['tr']['sab_uebersicht_es'] = $GLOBALS['opt']['sab_uebersicht_stand_es']; $GLOBALS['tr']['sab_luecke_es'] = 1; unset($GLOBALS['tr']['sab_alle_asins']);
+$wpdb_s = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 30, 'post_title' => 'S', 'post_content' => '<p>[amz_bild asin="B0SORT0001"] [amz_bild asin="B0SORT0002"] [amz_bild asin="B0SORT0003"] [amz_bild asin="B0SORT0004"]</p>']]; } function get_col($q) { return []; } function get_var($q) { return 0; } function prepare($q, ...$a) { return $q; } };
+$mUh = new ReflectionMethod('SAB', 'uebersicht_html'); $mUh->setAccessible(true);
+$_GET['sab_sort'] = 'score'; $_GET['sab_dir'] = 'desc'; $u1 = (string) $mUh->invoke(null);
+$_GET['sab_dir'] = 'asc'; $u2 = (string) $mUh->invoke(null);
+$pos = fn($h, $a) => strpos($h, $a);
+ok($pos($u1, 'B0SORT0001') < $pos($u1, 'B0SORT0003') && $pos($u1, 'B0SORT0003') < $pos($u1, 'B0SORT0002') && $pos($u2, 'B0SORT0002') < $pos($u2, 'B0SORT0003') && $pos($u2, 'B0SORT0003') < $pos($u2, 'B0SORT0001'), 'Übersicht: Klick auf Score sortiert die ganze Liste auf- und absteigend');
+ok($pos($u1, 'B0SORT0004') > $pos($u1, 'B0SORT0002') && $pos($u2, 'B0SORT0004') > $pos($u2, 'B0SORT0001') && strpos($u1, 'data-sort="score"') !== false, 'Übersicht: Produkte ohne Score stehen bei jeder Sortierung am Ende, Spaltenkopf trägt data-sort');
+unset($_GET['sab_sort'], $_GET['sab_dir']); $GLOBALS['wpdb'] = $wpdb_s; unset($GLOBALS['tr']['sab_uebersicht_es'], $GLOBALS['opt']['sab_uebersicht_stand_es'], $GLOBALS['opt']['sab_produkte']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

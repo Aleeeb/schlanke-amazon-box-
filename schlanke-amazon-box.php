@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.39
+ * Version: 0.75.40
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.39';
+    const VERSION = '0.75.40';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -529,7 +529,7 @@ final class SAB {
             elseif (time() - $t > 30 * DAY_IN_SECONDS) { $out[$a] = 'Stand ' . $st . ', älter als 30 Tage'; }
             else {
                 $fehlt = [];
-                if ($m[$a]['sterne'] === null) { $fehlt[] = 'Sterne'; }
+                if ($m[$a]['sterne'] === null && empty($m[$a]['ohne_bewertung'])) { $fehlt[] = 'Sterne'; }
                 if ($m[$a]['liefertage'] === null) { $fehlt[] = 'Lieferzeit'; }
                 if ($fehlt) { $out[$a] = 'es fehlen: ' . implode(', ', $fehlt); }
             }
@@ -628,7 +628,9 @@ final class SAB {
             $p = mb_strtolower($t[3] ?? '');
             $out[$a] = [
                 'sterne' => $zahl($t[1] ?? ''), 'anzahl' => isset($t[2]) && $t[2] !== '' ? (int) preg_replace('/\D/', '', $t[2]) : null,
-                'prime' => $p === '' || in_array($p, ['-', '?', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true) ? null : in_array($p, ['ja', 'yes', 'j', '1', 'prime'], true), 'gelesen_weg' => in_array($p, ['-', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true), 'liefertage' => $tage,
+                'prime' => ($p === '' && !(trim((string) ($t[5] ?? '')) !== '' && trim((string) ($t[4] ?? '')) !== '')) || in_array($p, ['-', '?', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true) ? null : in_array($p, ['ja', 'yes', 'j', '1', 'prime'], true),
+                'ohne_bewertung' => trim((string) ($t[1] ?? '')) === '' && trim((string) ($t[2] ?? '')) === '' && trim((string) ($t[5] ?? '')) !== '',
+                'gelesen_weg' => in_array($p, ['-', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true), 'liefertage' => $tage,
                 'liefertext' => $t[4] ?? '', 'manuell_stand' => $t[5] ?? '', 'provision' => isset($t[6]) && preg_match('/\\d/', $t[6]) ? (float) str_replace(',', '.', preg_replace('/[^\\d,.]/', '', $t[6])) : null,
             ];
         }
@@ -802,8 +804,8 @@ final class SAB {
     /** Sortieren per Klick auf die Überschrift und feststehende Kopfzeile für alle Tabellen mit der Klasse „sab-sort2“. */
     private static function tabellenhilfe(): string {
         return '<style>table.sab-sort2 thead th{position:sticky;top:32px;z-index:3;background:#f6f7f7;cursor:pointer;box-shadow:0 1px 0 #c3c4c7}table.sab-sort2 thead th.sab-auf:after{content:" \\25B2"}table.sab-sort2 thead th.sab-ab:after{content:" \\25BC"}</style>'
-             . '<script>(function(){function v(c){if(!c)return "";var d=c.getAttribute("data-v");if(d!==null)return d===""?"":parseFloat(d);var i=c.querySelector("input[type=checkbox]");if(i)return i.checked?1:0;var t=c.textContent.trim().toLowerCase();var n=parseFloat(t.replace(/\\./g,"").replace(",",".").replace(/[^0-9.\\-]/g,""));return isNaN(n)||!/^[^a-z]*[0-9]/.test(t)?t:n}'
-             . 'document.querySelectorAll("table.sab-sort2").forEach(function(T){var H=T.tHead&&T.tHead.rows[0];if(!H)return;T.sabK=[];[].forEach.call(H.cells,function(th,i){th.addEventListener("click",function(){var b=T.tBodies[0],r=[].slice.call(b.rows),d;'
+             . '<script>(function(){var sp=new URLSearchParams(location.search),sk=sp.get("sab_sort"),sd=sp.get("sab_dir")||"desc";function v(c){if(!c)return "";var d=c.getAttribute("data-v");if(d!==null)return d===""?"":parseFloat(d);var i=c.querySelector("input[type=checkbox]");if(i)return i.checked?1:0;var t=c.textContent.trim().toLowerCase();var n=parseFloat(t.replace(/\\./g,"").replace(",",".").replace(/[^0-9.\\-]/g,""));return isNaN(n)||!/^[^a-z]*[0-9]/.test(t)?t:n}'
+             . 'document.querySelectorAll("table.sab-sort2").forEach(function(T){var H=T.tHead&&T.tHead.rows[0];if(!H)return;T.sabK=[];[].forEach.call(H.cells,function(th,i){if(sk&&th.getAttribute("data-sort")===sk){th.classList.add(sd==="asc"?"sab-auf":"sab-ab")}th.addEventListener("click",function(){if(th.getAttribute("data-sort")){var u=new URL(location.href),nd=(u.searchParams.get("sab_sort")===th.getAttribute("data-sort"))?(sd==="desc"?"asc":"desc"):"desc";u.searchParams.set("sab_sort",th.getAttribute("data-sort"));u.searchParams.set("sab_dir",nd);u.searchParams.set("sab_s","1");location.href=u.toString();return}var b=T.tBodies[0],r=[].slice.call(b.rows),d;'
              . 'var num=r.some(function(e){var x=v(e.cells[i]);return typeof x==="number"});var alt=T.sabK.filter(function(k){return k.i===i})[0];d=alt?-alt.d:(num?-1:1);'
              . '[].forEach.call(H.cells,function(x){x.classList.remove("sab-auf","sab-ab")});th.classList.add(d===1?"sab-auf":"sab-ab");'
              . 'T.sabK=[{i:i,d:d}].concat(T.sabK.filter(function(k){return k.i!==i}));'   // frühere Sortierungen bleiben als Zweit- und Drittordnung erhalten
@@ -3057,6 +3059,7 @@ final class SAB {
     /** Kopf der Produkttabelle; ohne Markierungsspalten (Fav., Ers., Trotzdem) in den Produktgruppen. */
     private static function uebersicht_kopf(bool $marken): string {
         $k = '<table class="widefat striped sab-sort2 sab-uebers"><thead><tr><th>Produkt</th><th title="0 bis 100, gewichtet nach den Einstellungen im Reiter Score">Score</th><th>Status</th><th class="sab-zahl">Preis</th><th class="sab-zahl" title="Provision laut Kategorie (Tabelle im Reiter Score) und geschätzter Betrag pro Verkauf">Prov.</th><th class="sab-zahl">Rang</th><th class="sab-zahl" title="Auf wie vielen Seiten das Produkt verlinkt ist, wie oft insgesamt (Bild und Button zählen je einmal) und das Maximum auf einer Seite. Kurzlinks ohne ASIN werden nicht erkannt. „allgemein“ = auf mehr als 10 Seiten.">Seiten</th><th class="sab-zahl" title="Priorität zum Tauschen = Dringlichkeit mal Seiten. Dringlichkeit 100: nicht lieferbar, kein Preis oder Prime-Status unklar. Sonst nur bei schwachem Score (unter 35), sehr langer Lieferzeit (über 14 Tage) oder unter 3,5 Sternen. Gute Produkte haben Priorität 0, egal wie oft sie vorkommen.">Prio.</th><th class="sab-zahl" title="Potenzial zum Ausbauen: guter Score (ab 60), lieferbar, Prime geklärt, Lieferzeit höchstens 7 Tage und noch auf wenigen Seiten. Favoriten zählen anderthalbfach. Hohe Zahl = Kandidat, öfter einzubauen.">Potenzial</th><th class="sab-zahl" title="Klicks insgesamt (Bild/Text), wie viele kamen zurück">Klicks</th><th title="Favorit: in Ersatzlisten bevorzugt">Fav.</th><th title="Ersetzen: rutscht ans Ende der Ersatzlisten">Ers.</th><th title="Du hast auf Amazon geprüft: lieferbar, obwohl die Schnittstelle etwas anderes meldet">Trotzdem</th><th title="Fester Bonus (oder Malus) in Punkten, wird zum Score addiert. Für Produkte, die du bewusst nach vorn stellen willst.">Bonus</th><th>Mehr</th></tr></thead><tbody>';
+        $k = preg_replace_callback('#<th([^>]*)>(Score|Preis|Prov\.|Rang|Seiten|Prio\.)</th>#u', function ($m) { $key = ['Score' => 'score', 'Preis' => 'preis', 'Prov.' => 'prov', 'Rang' => 'rang', 'Seiten' => 'seiten', 'Prio.' => 'prio'][$m[2]]; return '<th' . $m[1] . ' data-sort="' . $key . '">' . $m[2] . '</th>'; }, $k);   // Klick auf diese Spaltenköpfe sortiert die ganze Liste (nicht nur die sichtbare Seite)
         return $marken ? $k : preg_replace('#<th title="Favorit.*?</th><th title="Ersetzen.*?</th><th title="Du hast.*?</th><th title="Fester Bonus.*?</th>#s', '', $k);
     }
 
@@ -3080,7 +3083,7 @@ final class SAB {
                    . (isset($x['sterne']) && $x['sterne'] !== null ? '<span class="sab-chip" title="von Hand gepflegt' . (!empty($x['manuell_stand']) ? ', Stand ' . esc_attr($x['manuell_stand']) : '') . '">★ ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')</span>' : '')
                    . '<span class="sab-chip" style="padding:0;background:none">' . self::prime_zeichen(isset($x['prime']) ? $x['prime'] : null) . '</span>'
                    . (isset($x['liefertage']) && $x['liefertage'] !== null ? '<span class="sab-chip ' . ($x['liefertage'] <= 3 ? 'ok' : ($x['liefertage'] >= 7 ? 'bad' : 'warn')) . '" title="Lieferzeit Ø in Tagen: ' . esc_attr((string) ($x['liefertext'] ?? '')) . '">&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T</span>' : '');
-            if ((!isset($x['sterne']) || $x['sterne'] === null || !isset($x['prime']) || $x['prime'] === null || !isset($x['liefertage']) || $x['liefertage'] === null) && !(!empty($x['manuell_stand']) && ($lief[0] === 'bad' || !empty($x['gelesen_weg'])))) { $chips .= '<span class="sab-chip warn" title="Sterne, Prime oder Lieferzeit fehlen (Reiter Score, Handdaten)">Handdaten fehlen</span>'; }
+            if (((!isset($x['sterne']) || $x['sterne'] === null) && empty($x['ohne_bewertung']) || !isset($x['prime']) || $x['prime'] === null || !isset($x['liefertage']) || $x['liefertage'] === null) && !(!empty($x['manuell_stand']) && ($lief[0] === 'bad' || !empty($x['gelesen_weg'])))) { $chips .= '<span class="sab-chip warn" title="Sterne, Prime oder Lieferzeit fehlen (Reiter Score, Handdaten)">Handdaten fehlen</span>'; }
             $sp = (array) ($x['spar'] ?? []);
             $preis = ($x['preis'] ?? '') !== '' ? '<strong>' . esc_html($x['preis']) . '</strong>' . (!empty($sp['streich']) ? '<br><small><s>' . esc_html($sp['streich']) . '</s>' . (isset($sp['prozent']) ? ' &minus;' . (int) $sp['prozent'] . ' %' : '') . '</small>' : '') : '–';
             $rang = isset($x['rang']) && $x['rang'] !== null ? '<span title="' . esc_attr((string) ($x['kategorie'] ?? '')) . '">' . number_format((int) $x['rang'], 0, ',', '.') . '</span>' : '–';
@@ -3126,13 +3129,27 @@ final class SAB {
             if ($x) { $x['trotz'] = isset(((array) get_option('sab_trotz', []))[$asin]); }
             if (!$x) {
                 if ($ns === 0) { $unbenutzt[] = $asin; continue; }   // Amazon kennt es nicht und es steht auf keiner Seite: kein Handlungsbedarf, nicht ganz oben anzeigen
-                $zl[] = ['asin' => $asin, 'prio' => 100 * $ns, 'dr' => 100, 'sc' => -1, 'h' => '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong><br><small>Steht noch auf ' . $ns . ' Seite(n), muss dort ersetzt werden (Reiter Austausch).</small>' . self::fundstellen_links($asin, $fund[$asin] ?? []) . '</td><td colspan="7"></td>' . self::markenzellen($asin) . '<td></td></tr>'];
+                $m_ = self::manuell_daten()[$asin] ?? null;
+                $hd = $m_ ? '<span class="sab-chip" title="von Hand gepflegt">Handdaten: ' . ($m_['sterne'] !== null ? '★ ' . esc_html(str_replace('.', ',', (string) $m_['sterne'])) . ($m_['anzahl'] !== null ? ' (' . (int) $m_['anzahl'] . ')' : '') : 'keine Sterne') . ($m_['prime'] ? ' · Prime' : '') . ($m_['liefertext'] !== '' ? ' · ' . esc_html($m_['liefertext']) : ' · nicht lieferbar') . ($m_['provision'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $m_['provision'])) . ' %' : '') . '</span>' : '';
+                $zl[] = ['asin' => $asin, 'prio' => 100 * $ns, 'dr' => 100, 'sc' => -1, 'v' => ['score' => null, 'preis' => null, 'prov' => $m_['provision'] ?? null, 'rang' => null, 'seiten' => $ns, 'prio' => 100 * $ns], 'h' => '<tr><td><code>' . esc_html($asin) . '</code> ' . esc_html($namen[$asin] ?? '') . '</td><td colspan="2"><strong style="color:#a00">Amazon kennt das Produkt nicht (mehr)</strong> <small>· steht auf ' . $ns . ' Seite(n), im Reiter Austausch ersetzen</small><details><summary style="cursor:pointer;color:#2271b1">Seiten anzeigen</summary>' . self::fundstellen_links($asin, $fund[$asin] ?? []) . '</details></td><td colspan="7">' . $hd . '</td>' . self::markenzellen($asin) . '<td></td></tr>'];
                 continue;
             }
             $sc = self::score($x)[0];
-            $zl[] = ['asin' => $asin, 'prio' => $ns > 0 ? self::tausch_dringlichkeit($x, $sc) * $ns : ($sc >= 60 ? $sc - 50 : -1), 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
+            $pr_ = $ns > 0 ? self::tausch_dringlichkeit($x, $sc) * $ns : ($sc >= 60 ? $sc - 50 : -1);
+            $zl[] = ['asin' => $asin, 'v' => ['score' => $sc, 'preis' => self::preiszahl((string) ($x['preis'] ?? '')) ?: null, 'prov' => self::provision_satz($x), 'rang' => isset($x['rang']) && $x['rang'] !== null ? (int) $x['rang'] : null, 'seiten' => $ns, 'prio' => $pr_], 'prio' => $ns > 0 ? self::tausch_dringlichkeit($x, $sc) * $ns : ($sc >= 60 ? $sc - 50 : -1), 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
         }
         usort($zl, fn($a, $b) => [(int) ($b['dr'] >= 100 && $b['prio'] > 0), $b['prio'], $b['dr'], $a['sc']] <=> [(int) ($a['dr'] >= 100 && $a['prio'] > 0), $a['prio'], $a['dr'], $b['sc']]);   // wichtigste zuerst, dann dringlichste, dann schwächster Score
+        $sk = (string) ($_GET['sab_sort'] ?? ''); $sdir = ($_GET['sab_dir'] ?? 'desc') === 'asc' ? 1 : -1;
+        if (in_array($sk, ['score', 'preis', 'prov', 'rang', 'seiten', 'prio'], true)) {   // Klick auf den Spaltenkopf: ganze Liste danach sortieren, Produkte ohne Wert immer ans Ende
+            $zl = array_map(null, array_keys($zl), $zl);
+            usort($zl, function ($a, $b) use ($sk, $sdir) {
+                $x = $a[1]['v'][$sk] ?? null; $y = $b[1]['v'][$sk] ?? null;
+                if ($x === null && $y === null) { return $a[0] <=> $b[0]; }
+                if ($x === null) { return 1; } if ($y === null) { return -1; }
+                return ($x <=> $y) * $sdir ?: ($a[0] <=> $b[0]);
+            });
+            $zl = array_map(fn($p) => $p[1], $zl);
+        }
         $gesamt = count($zl);
         $pp = isset($_GET['sab_pp']) ? (string) $_GET['sab_pp'] : '25'; $pp = $pp === 'alle' ? max(1, $gesamt) : (in_array((int) $pp, [10, 25, 50, 100], true) ? (int) $pp : 25);
         $seiten_n = max(1, (int) ceil($gesamt / $pp)); $sn = max(1, min($seiten_n, (int) ($_GET['sab_s'] ?? 1)));
