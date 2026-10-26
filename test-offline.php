@@ -1103,4 +1103,11 @@ if ($ok1 < 100 && $ok2 === 100 && $ok3 === 100) { echo "ok  Dringlichkeit: liefe
 $k1 = SAB::kurzname_aus_titel('Pflanzenhut Schneckenschutz 24er Set aus Kunststoff, Haube für Beete');
 $k2 = SAB::kurzname_aus_titel('Gartenvlies Frostschutz Winterschutz Pflanzen weiß');
 if (preg_match('/24/', $k1) && stripos($k1, 'Pflanzenhut') !== false) { echo "ok  Kurzname behält Zahl: $k1 / $k2\n"; } else { $fail = true; echo "FEHLER Kurzname $k1\n"; }
+
+// ---- 0.75.38: Warnung im WordPress-Dashboard und Admin-Hinweis bei fehlenden Produktbildern ----
+if (!function_exists('get_post_status')) { function get_post_status($i) { return 'publish'; } }
+$GLOBALS['opt']['sab_bildfehler'] = ['B0BILDFEH1|5' => ['asin' => 'B0BILDFEH1', 'post' => 5, 'ts' => 1, 'art' => 'Bild'], 'B0BILDFEH1|6' => ['asin' => 'B0BILDFEH1', 'post' => 6, 'ts' => 1, 'art' => 'Bild']];
+ok(SAB::bildfehler_zaehlen() === [1, 2], 'Bildwarnung: ein Produkt auf zwei Stellen gezählt (ohne Absturz bei fehlendem Zwischenspeicher)');
+ok(method_exists('SAB', 'dashboard_widget') && method_exists('SAB', 'bild_hinweis') && method_exists('SAB', 'dashboard_inhalt'), 'Bildwarnung: Dashboard-Kasten und Admin-Hinweis vorhanden');
+unset($GLOBALS['opt']['sab_bildfehler']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

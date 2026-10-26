@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.37
+ * Version: 0.75.38
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.37';
+    const VERSION = '0.75.38';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -87,6 +87,8 @@ final class SAB {
         add_action('sab_uebersicht_holen', [__CLASS__, 'uebersicht_holen'], 10, 1);
         add_action('sab_bild_holen', [__CLASS__, 'bild_holen'], 10, 3);
         add_action('admin_menu',     [__CLASS__, 'menue']);
+        add_action('wp_dashboard_setup', [__CLASS__, 'dashboard_widget']);
+        add_action('admin_notices',  [__CLASS__, 'bild_hinweis']);
         add_action('init',           [__CLASS__, 'block_registrieren']);
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), [__CLASS__, 'aktionslinks']);
         add_action('rest_api_init',  [__CLASS__, 'rest']);
@@ -932,7 +934,7 @@ final class SAB {
         $l = (array) get_option('sab_bildfehler', []); if (!$l) { return ''; }
         $land = self::land(''); $rest = []; $nach = [];
         foreach ($l as $k => $e) {
-            $p = get_transient("sab_{$land}_" . $e['asin']);
+            $p = get_transient("sab_{$land}_" . $e['asin']); if (!is_array($p)) { $p = null; }   // get_transient liefert false, wenn nichts da ist
             if (self::hat_bild($p)) { continue; }   // Bild ist inzwischen da
             if ((int) $e['post'] <= 0 || get_post_status((int) $e['post']) !== 'publish') { continue; }   // Vorschau außerhalb eines Artikels oder Artikel nicht mehr veröffentlicht: keine Warnung
             $rest[$k] = $e; $nach[$e['asin']][] = (int) $e['post'];
@@ -947,6 +949,53 @@ final class SAB {
             $zeilen[] = '<li><code>' . esc_html($asin) . '</code> auf ' . count($posts) . ' Seite(n): ' . implode(', ', $links) . (count($posts) > 4 ? ' …' : '') . '</li>';
         }
         return '<div class="notice notice-error" style="border-left-width:8px"><p><strong>Produktbilder fehlen (' . count($nach) . ' Produkte):</strong> An diesen Stellen bekommen Besucher kein Bild. Das hat Vorrang vor allem anderen: Produkt ersetzen oder Bild bei Amazon prüfen.</p><ul style="margin-left:18px;list-style:disc">' . implode('', $zeilen) . '</ul></div>';
+    }
+
+    /** Fehlende Produktbilder zählen (nur Artikel, die noch veröffentlicht sind und deren Bild noch fehlt): [Produkte, Stellen]. */
+    public static function bildfehler_zaehlen(): array {
+        $l = (array) get_option('sab_bildfehler', []); if (!$l) { return [0, 0]; }
+        $land = self::land(''); $asins = []; $stellen = 0;
+        foreach ($l as $e) {
+            $p = get_transient("sab_{$land}_" . $e['asin']); if (self::hat_bild(is_array($p) ? $p : null)) { continue; }
+            if ((int) $e['post'] <= 0 || get_post_status((int) $e['post']) !== 'publish') { continue; }
+            $asins[$e['asin']] = 1; $stellen++;
+        }
+        return [count($asins), $stellen];
+    }
+
+    /** Aus dem frischen Amazon-Stand: Produkte, die Amazon nicht kennt oder ohne Bild, soweit sie in Artikeln stehen, kommen sofort in die Warnliste (auch ohne Besucheraufruf). */
+    private static function bildfehler_aus_stand(array $items): void {
+        $asins = array_values(array_filter(self::alle_asins(), fn($a) => !isset($items[$a]) || empty($items[$a]['bilder'])));
+        if (!$asins) { return; }
+        $fund = self::fundstellen($asins); $l = (array) get_option('sab_bildfehler', []); $neu = false;
+        foreach ($asins as $a) {
+            foreach (array_keys($fund[$a] ?? []) as $pid) {
+                $k = $a . '|' . (int) $pid;
+                if (!isset($l[$k]) && count($l) < 300) { $l[$k] = ['asin' => $a, 'post' => (int) $pid, 'ts' => time(), 'art' => 'Prüfung']; $neu = true; }
+            }
+        }
+        if ($neu) { update_option('sab_bildfehler', $l, false); }
+    }
+
+    /** Dashboard-Kasten in WordPress: fehlende Produktbilder auf einen Blick. */
+    public static function dashboard_widget(): void {
+        if (!current_user_can('edit_posts')) { return; }
+        wp_add_dashboard_widget('sab_bilder', self::NAME . ': Produktbilder', [__CLASS__, 'dashboard_inhalt']);
+    }
+
+    public static function dashboard_inhalt(): void {
+        $h = self::bildfehler_html();
+        echo $h !== '' ? $h : '<p style="color:#1a7f37"><strong>Alle Produktbilder sind da.</strong></p>';
+        echo '<p><a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Zum Austausch</a> · <a href="' . esc_url(admin_url('admin.php?page=sab')) . '">Zur Übersicht</a></p>';
+    }
+
+    /** Roter Hinweis in jedem Admin-Bildschirm, solange irgendwo ein Produktbild fehlt (im Plugin selbst und im Dashboard steht die ausführliche Warnung). */
+    public static function bild_hinweis(): void {
+        if (!current_user_can('edit_posts')) { return; }
+        $s = function_exists('get_current_screen') ? get_current_screen() : null;
+        if ($s && (strpos((string) $s->id, 'sab') !== false || $s->id === 'dashboard')) { return; }
+        [$pr, $st] = self::bildfehler_zaehlen(); if ($pr === 0) { return; }
+        echo '<div class="notice notice-error"><p><strong>' . esc_html(self::NAME) . ':</strong> ' . (int) $pr . ' Produkt(e) ohne Bild auf ' . (int) $st . ' Stelle(n) in Artikeln. <a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Jetzt ansehen</a></p></div>';
     }
 
     /** Merkt sich ein fehlendes Produktbild (ASIN, Artikel) für die Warnliste; Besucher sehen nichts, angemeldete Redakteure einen roten Hinweis. */
@@ -2064,7 +2113,7 @@ final class SAB {
         $bew = ['fehler' => '', 'werte' => []];
         $out = ['fehler' => $fehler, 'items' => $items, 'bewertungen' => $bew];
         $out['ts'] = time();
-        if (!$fehler) { set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); self::mit_verlauf(self::mit_preisindex(self::mit_kat_schaetzung(self::mit_manuell($out))), true); }
+        if (!$fehler) { self::bildfehler_aus_stand($items); set_transient($key, $out, HOUR_IN_SECONDS); update_option("sab_uebersicht_stand_{$land}", $out, false); self::mit_verlauf(self::mit_preisindex(self::mit_kat_schaetzung(self::mit_manuell($out))), true); }
         return $out;
     }
 
