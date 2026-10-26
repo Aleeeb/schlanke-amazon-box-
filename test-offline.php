@@ -374,7 +374,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 13 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und elf Untermenüs');
+ok(count($GLOBALS['menu']) === 14 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und zwölf Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -1328,5 +1328,6 @@ $fh = (function () { $x = new ReflectionMethod('SAB', 'satz_feld_html'); $x->set
 $eb = SAB::ebay_hinter_textlink($c2s, 'B0AKKUALT1', 'Akku 12V', 'www.ebay.de');
 ok($eb !== null && substr_count($eb, '[amz_ebay') === 2 && strpos($eb, 'oder bei eBay') !== false, 'eBay-Ausweichlink hinter jedem Textlink');
 ok(SAB::ebay_hinter_textlink($eb, 'B0AKKUALT1', 'Akku 12V', 'www.ebay.de') === null, 'eBay-Ausweichlink nicht doppelt');
+ok(isset(SAB::TABS['helfer']), 'Reiter Helferaufgaben vorhanden');
 ok(SAB::ebay_host('de') === 'www.ebay.de' && SAB::ebay_host('uk') !== '', 'eBay-Host je Land');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
