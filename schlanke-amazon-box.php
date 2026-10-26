@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.85.0
+ * Version: 0.85.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.85.0';
+    const VERSION = '0.85.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1785,6 +1785,9 @@ final class SAB {
         update_post_meta($post->ID, '_sab_stelle_backup', wp_slash($b));
         wp_update_post(['ID' => $post->ID, 'post_content' => wp_slash($c2)]);
         delete_transient('sab_alle_asins');
+        $sj0 = self::satz_mit_link($c2, $neu); $kk = (array) get_option('sab_kontrolle', []);   // auch Tausch an einer Stelle im Frontend kommt in die Kontrollliste
+        $kk[(string) time() . substr(md5($asin . $neu), 0, 4)] = ['ts' => time(), 'alt' => $asin, 'neu' => $neu, 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => substr_count($c2, $neu)]]];
+        update_option('sab_kontrolle', array_slice($kk, -20, null, true), false);
         wp_send_json_success(['n' => $n]);
     }
 
@@ -5146,7 +5149,7 @@ final class SAB {
         if (count($k['liste']) < 4) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f']), (string) ($xalt['kategorie'] ?? ''), count($k['liste']), (string) ($xalt['titel'] ?? ''), (int) $z['seiten']]; }
         $suchtitel = self::suchtext_aus_satz((string) $z['name'], (string) $alt, self::text_vor_stelle((string) $alt, (array) $z['f']));
         if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
-        $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div>' . self::satz_feld_html((string) $alt, (array) $z['f']) . '<div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off" value="' . esc_attr(implode(' ', $sb)) . '"></label> <button type="button" class="button sab-ps-go">Suchen</button>' . ($sb ? '<div style="margin:4px 0"><small>Suchbegriffe aus dem Satz: ' . implode(' ', array_map(fn($w) => '<a href="#" class="sab-ps-chip" data-q="' . esc_attr($w) . '" style="display:inline-block;padding:1px 8px;margin:0 3px 3px 0;border-radius:10px;background:#f0f6fc;border:1px solid #c5d9ed;text-decoration:none">' . esc_html($w) . '</a>', $sb)) . '</small></div>' : '') . '<div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
+        $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button>' . (self::$tk_sammeln ? (isset(((array) get_option('sab_austausch_hinten', []))[$alt]) ? '<button class="button" name="sab_vorn" value="' . esc_attr($alt) . '" title="Wieder an die ursprüngliche Stelle der Liste">Wieder nach vorn</button>' : '<button class="button" name="sab_hinten" value="' . esc_attr($alt) . '" title="Stellt das Produkt ans Ende der Liste, damit es beim Durchgehen nicht stört">Ans Ende</button>') : '') . '<a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div>' . self::satz_feld_html((string) $alt, (array) $z['f']) . '<div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off" value="' . esc_attr(implode(' ', $sb)) . '"></label> <button type="button" class="button sab-ps-go">Suchen</button>' . ($sb ? '<div style="margin:4px 0"><small>Suchbegriffe aus dem Satz: ' . implode(' ', array_map(fn($w) => '<a href="#" class="sab-ps-chip" data-q="' . esc_attr($w) . '" style="display:inline-block;padding:1px 8px;margin:0 3px 3px 0;border-radius:10px;background:#f0f6fc;border:1px solid #c5d9ed;text-decoration:none">' . esc_html($w) . '</a>', $sb)) . '</small></div>' : '') . '<div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
             . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
         return $h;
     }
@@ -5191,7 +5194,10 @@ final class SAB {
             if ($z_['bl']) { $zb[] = $z_; } else { $zr[] = $z_; }
         }
         usort($zb, fn($a, $b) => [$b['seiten'], $b['n']] <=> [$a['seiten'], $a['n']]);
-        $zeilen = array_merge($zb, $zr); $nb = count($zb);
+        $hinten = (array) get_option('sab_austausch_hinten', []);   // vom Nutzer ans Ende geschoben
+        $zh = array_values(array_filter(array_merge($zb, $zr), fn($z_) => isset($hinten[(string) $z_['alt']])));
+        $zb = array_values(array_filter($zb, fn($z_) => !isset($hinten[(string) $z_['alt']]))); $zr = array_values(array_filter($zr, fn($z_) => !isset($hinten[(string) $z_['alt']])));
+        $zeilen = array_merge($zb, $zr, $zh); $nb = count($zb); $nvorn = count($zb) + count($zr);
         $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = min(60, $nb + 10);
         $h .= self::austausch_skript($d, $trotz, $namen, $land);
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
@@ -5203,7 +5209,8 @@ final class SAB {
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
             if ($nb > 0 && $zaehler === 0) { $h .= '<h3 style="margin:18px 0 6px;color:#8a1f1f">Dringend tauschen: Produkte ohne Bild (' . (int) $nb . '), zuerst die auf den meisten Seiten</h3><p class="description">Hier bekommen Besucher kein Bild. Oben stehen die Produkte, die auf vielen Seiten vorkommen.</p>'; }
-            if ($nb > 0 && $zaehler === $nb) { $h .= '<h3 style="margin:22px 0 6px">Weitere Produkte zu tauschen</h3>'; }
+            if ($nb > 0 && $zaehler === $nb && $nvorn > $nb) { $h .= '<h3 style="margin:22px 0 6px">Weitere Produkte zu tauschen</h3>'; }
+            if ($zh && $zaehler === $nvorn) { $h .= '<h3 style="margin:22px 0 6px;color:#555">Ans Ende geschoben (' . count($zh) . ')</h3><p class="description">Diese Produkte hast du zurückgestellt. Mit „Wieder nach vorn“ stehen sie wieder in der Reihenfolge oben.</p>'; }
             if (++$zaehler > $ladeLimit) { $h .= '<p class="description">… und ' . (count($zeilen) - $ladeLimit) . ' weitere (erst diese erledigen).</p>'; break; }
             self::$tk_sammeln = true; $kh = self::austausch_karte_html($z, $d, $trotz, $namen, $land, $fund, $lq, $ohneVorschlag); self::$tk_sammeln = false;
             if ($kh === '') { $zaehler--; } else { $h .= $kh; }
@@ -5724,6 +5731,12 @@ JS;
                 update_option('sab_such_anfrage', gmdate('Y-m-d H:i'), false);
                 $meldung = 'Angefordert. Die Mac-Sitzung sucht vor der nächsten Austauschrunde bei Amazon und trägt die Treffer hier ein.';
             } elseif ($form === 'austausch_viele') {
+                $hv = self::asin((string) ($_POST['sab_hinten'] ?? '')); $vo = self::asin((string) ($_POST['sab_vorn'] ?? ''));
+                if ($hv !== '' || $vo !== '') {
+                    $hl = (array) get_option('sab_austausch_hinten', []);
+                    if ($hv !== '') { $hl[$hv] = time(); $meldung = $hv . ' steht jetzt am Ende der Liste.'; } else { unset($hl[$vo]); $meldung = $vo . ' steht wieder in der normalen Reihenfolge.'; }
+                    update_option('sab_austausch_hinten', $hl, false);
+                } else {
                 $m = []; $n = 0;
                 $wahl = (array) ($_POST['sab_a'] ?? []); $eigen = (array) ($_POST['sab_eigen'] ?? []); $enamen = (array) ($_POST['sab_eigen_name'] ?? []);
                 $nur_alt = self::asin((string) ($_POST['sab_einzeln'] ?? ''));   // „Jetzt tauschen“ an einer Karte: nur dieses Produkt
@@ -5746,6 +5759,7 @@ JS;
                     $m[] = self::tausch_ausfuehren($alt, $neu, mb_substr($kn, 0, 60));
                 }
                 $meldung = $m ? implode(' ', $m) : 'Nichts angehakt.';
+                }
             } elseif ($form === 'entzerren_los') {
                 $pid = (int) ($_POST['sab_id'] ?? 0); $post = $pid ? get_post($pid) : null;
                 if (!$post || md5((string) $post->post_content) !== (string) ($_POST['sab_hash'] ?? '')) { $meldung = 'Der Artikel hat sich inzwischen geändert, bitte die Vorschau neu öffnen.'; }
