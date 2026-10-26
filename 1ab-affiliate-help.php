@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.76.0
+ * Version: 0.76.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.76.0';
+    const VERSION = '0.76.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1305,6 +1305,10 @@ final class SAB {
     }
 
     // ---------- Ausgabe ----------
+
+    /** Gemeinsames Handy-CSS für alle Admin-Reiter: Tabellen werden zu gestapelten Karten, große Knöpfe, kein seitliches Scrollen. */
+    const ADMIN_MOBIL_CSS = '@media(max-width:782px){.sab-admin{overflow-x:hidden}.sab-admin table,.sab-admin thead,.sab-admin tbody,.sab-admin tr,.sab-admin td,.sab-admin th{display:block;width:auto!important;max-width:100%!important;min-width:0!important;box-sizing:border-box}.sab-admin thead{display:none}.sab-admin tr{border:1px solid #c3c4c7;border-radius:8px;margin:0 0 10px;padding:6px 10px;background:#fff}.sab-admin td{border:0!important;padding:4px 0!important;overflow-wrap:anywhere}.sab-admin td[data-l]::before{content:attr(data-l);display:block;font-size:11px;font-weight:600;color:#666}.sab-admin .nav-tab-wrapper{display:flex;flex-wrap:wrap;gap:4px}.sab-admin .nav-tab{flex:1 1 auto;text-align:center;margin:0;padding:10px 8px}.sab-admin .button,.sab-admin .button-primary{min-height:44px;line-height:42px;padding:0 16px;white-space:normal}.sab-admin .button-small{min-height:40px;line-height:38px}.sab-admin input[type=text],.sab-admin input[type=number],.sab-admin input[type=url],.sab-admin textarea,.sab-admin select{width:100%!important;max-width:100%!important;box-sizing:border-box;font-size:16px;min-height:40px}.sab-admin pre,.sab-admin code{white-space:pre-wrap;overflow-wrap:anywhere}.sab-admin img,.sab-admin svg{max-width:100%;height:auto}.sab-admin [style*="min-width"],.sab-admin [style*="max-width"]{min-width:0!important;max-width:100%!important}.sab-admin form,.sab-admin p,.sab-admin div{max-width:100%}.sab-admin div[style*="display:flex"]{flex-wrap:wrap}}';
+
 
     private static $genutzt = false;
     private static $links = 0;
@@ -5069,7 +5073,8 @@ JS;
             }
         }
 
-        echo '<div class="wrap"><h1>' . esc_html(self::NAME) . ' <small style="font-size:12px;color:#666">Version ' . esc_html(self::VERSION) . '</small></h1>';
+        echo '<style>' . self::ADMIN_MOBIL_CSS . '</style><script>document.addEventListener("DOMContentLoaded",function(){document.querySelectorAll(".sab-admin table").forEach(function(t){var h=[];t.querySelectorAll("thead th").forEach(function(x){h.push(x.textContent.trim())});if(!h.length)return;t.querySelectorAll("tbody tr").forEach(function(r){var c=r.children;if(c.length!==h.length)return;for(var i=0;i<c.length;i++){if(h[i]&&!c[i].hasAttribute("data-l"))c[i].setAttribute("data-l",h[i])}})})});</script>';
+        echo '<div class="wrap sab-admin"><h1>' . esc_html(self::NAME) . ' <small style="font-size:12px;color:#666">Version ' . esc_html(self::VERSION) . '</small></h1>';
         if ($meldung) { echo '<div class="notice notice-success"><p>' . esc_html($meldung) . '</p></div>'; }
         echo '<h2 class="nav-tab-wrapper">';
         foreach ($tabs as $k => $name) {
