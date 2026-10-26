@@ -1195,4 +1195,7 @@ $GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results(
 $mOd = new ReflectionMethod('SAB', 'ohne_doppel_kandidaten'); $mOd->setAccessible(true);
 $od = $mOd->invoke(null, 'B0ALTDOP01', [['asin' => 'B0NAHDOP01'], ['asin' => 'B0FERNDOP1']]);
 ok(count($od) === 1 && $od[0]['asin'] === 'B0FERNDOP1', 'Austausch-Vorschläge: Kandidaten, die der Austausch wegen Doppelung ablehnen würde, werden vorab entfernt');
+$nt = SAB::nur_textlink_neben_bild('<p>[amz_bild asin="B0BILDGUT1" land="es"][/amz_bild]</p><p>[amz_link asin="B0TEXTTOT1" land="es"]Zaun[/amz_link]</p>');
+$nt2 = SAB::nur_textlink_neben_bild('<p>[amz_bild asin="B0BILDGUT1"][/amz_bild]</p><hr><p>[amz_link asin="B0TEXTTOT1"]x[/amz_link]</p>');
+ok($nt === ['B0TEXTTOT1'] && $nt2 === [], 'Textlink direkt unter einem funktionierenden Bild eines anderen Produkts löst keinen Austausch aus (anderer Abschnitt schon)');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
