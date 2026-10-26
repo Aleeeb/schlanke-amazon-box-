@@ -1270,7 +1270,7 @@ $sb = SAB::schluesselbegriffe('Möchte man eine Blumenwiese anlegen, empfehlen s
 ok($sb === ['blumenwiese', 'saatmischung'], 'Suchbegriffe aus dem Satz: Blumenwiese, Saatmischung (ohne Marke Rieger Hoffmann): ' . implode(',', $sb));
 $cx = '<p>Erster Satz. Möchte man eine Blumenwiese anlegen, empfehlen sich Saatmischungen von Rieger-Hoffmann <a href="https://www.amazon.de/dp/B0SATZTEST?tag=x" rel="sponsored">Angebot bei Amazon</a> und mehr. Nächster Satz.</p>';
 $sm = SAB::satz_mit_link($cx, 'B0SATZTEST');
-ok($sm && strpos($sm['maske'], '{{LINK}}') !== false && strpos($sm['maske'], 'Rieger-Hoffmann {{LINK}} und mehr.') !== false && strpos($sm['maske'], 'Erster') === false && strpos($sm['maske'], 'Nächster') === false, 'Satz mit Textlink: Maske mit {{LINK}}, nur dieser Satz');
+ok($sm && strpos($sm['maske'], '【LINK】') !== false && strpos($sm['maske'], 'Rieger-Hoffmann 【LINK】 und mehr.') !== false && strpos($sm['maske'], '<') === false && strpos($sm['maske'], 'Erster') === false && strpos($sm['maske'], 'Nächster') === false, 'Satz mit Textlink: Maske mit {{LINK}}, nur dieser Satz');
 [$tc, $tn] = SAB::tausch_text($cx, 'B0SATZTEST', 'B0NEUTEST1', ['Angebot bei Amazon', 'Saatmischungen von Rieger-Hoffmann'], 'Wildblumen Saat Kurzname');
 ok(strpos($tc, '>Angebot bei Amazon</a>') !== false && strpos($tc, 'B0NEUTEST1') !== false && strpos($tc, 'Wildblumen Saat Kurzname') !== false && strpos($tc, 'Rieger-Hoffmann') === false, 'Tausch: Linktext bleibt, Name im Fließtext wird ersetzt');
 ok(SAB::satz_mit_link('<p>Nur ein Bild <a href="https://www.amazon.de/dp/B0SATZTEST"><img src="x"></a> hier.</p>', 'B0SATZTEST') === null, 'Satz: Bildlinks werden nicht angeboten');
@@ -1287,4 +1287,11 @@ $kA = $mK->invoke(null, 'B0AKKUALT1', 'Angebot bei Amazon', $ddA, [], ['B0AKKUAL
 $aA = array_column($kA['liste'], 'asin');
 ok(($aA[0] ?? '') === 'B0AKKUGUT1', 'Akku-Fall: 12V/10Ah-Akku steht im Bestand auf Platz 1 trotz Name „Angebot bei Amazon“: ' . implode(',', $aA));
 unset($GLOBALS['pc']);
+$cy = '<p>Davor. Außerdem betreibt <strong>Kay</strong> den Zaun mit einem 12-Volt-10-Ah-Akku (<a href="https://www.amazon.de/dp/B0AKKUALT1?tag=x">Angebot bei Amazon</a>).</p>';
+$smy = SAB::satz_mit_link($cy, 'B0AKKUALT1');
+ok($smy && strpos($smy['maske'], '<') === false && strpos($smy['maske'], '⟦1⟧Kay⟦2⟧') !== false && strpos($smy['maske'], '(【LINK】)') !== false, 'Satz im Textfeld: Klartext, Tags als ⟦n⟧, Link als 【LINK】: ' . ($smy['maske'] ?? '-'));
+$roh = SAB::satz_roh(str_replace('12-Volt-10-Ah-Akku', 'Akku 12 V', $smy['maske']), $smy);
+ok($roh !== null && strpos($roh, '<strong>Kay</strong>') !== false && strpos($roh, '>Angebot bei Amazon</a>') !== false && strpos($roh, 'Akku 12 V') !== false, 'Satz zurück in Rohtext: Link und Formatierung bleiben');
+ok(SAB::satz_roh('ohne Link', $smy) === null && SAB::satz_roh('⟦9⟧ 【LINK】', $smy) === null, 'Satz: ohne Link oder mit fremdem Platzhalter wird abgelehnt');
+ok(SAB::suchtext_aus_satz('Angebot bei Amazon', 'B0AKKUALT1', 'Außerdem betreibt Kay den Zaun mit einem 12-Volt-10-Ah-Akku') === 'Akku 12V 10Ah' && SAB::suchtext_aus_satz('Kupferband 10 m', 'B0X', 'egal') === 'Kupferband 10 m', 'Suchtext: Satz-Begriffe statt „Angebot bei Amazon“/ASIN');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
