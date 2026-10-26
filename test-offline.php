@@ -1320,4 +1320,13 @@ ok(strpos($stj, 'bearbeiten') !== false && strpos($stj, 'Im Bestand suchen') !==
 $GLOBALS['opt']['sab_kontrolle'] = ['2' => ['ts' => time(), 'alt' => 'B0A', 'neu' => 'B0AKKUNEU1', 'stellen' => [['pid' => 7, 'titel' => 'Zaun', 'satz' => '', 'n' => 2]]]];
 $ko2 = $mKo->invoke(null, 'austausch'); unset($GLOBALS['opt']['sab_kontrolle']);
 ok(strpos($ko2, 'Stelle 1 ansehen') !== false && strpos($ko2, 'Stelle 2 bearbeiten') !== false && strpos($ko2, 'sab_nr=2') !== false, 'Kontrollliste: zwei Stellen im Artikel, je Stelle ansehen und bearbeiten');
+// 0.86.0: zwei Stellen, eBay-Ausweichlink
+$c2s = '<p>Eins (<a href="https://www.amazon.de/dp/B0AKKUALT1?tag=x">Angebot bei Amazon</a>).</p><p>Zwei [amz_link asin="B0AKKUALT1"]Angebot bei Amazon[/amz_link] ende.</p>';
+$st = SAB::satz_stellen($c2s, 'B0AKKUALT1');
+ok(count($st) === 2 && ($st[0]['ord'] ?? -1) !== ($st[1]['ord'] ?? -1), 'Zwei Textlink-Stellen im Artikel erkannt');
+$fh = (function () { $x = new ReflectionMethod('SAB', 'satz_feld_html'); $x->setAccessible(true); return $x; })()->invoke(null, 'B0AKKUALT1', ['c' => $c2s, 'pid' => 7], 'Test');
+$eb = SAB::ebay_hinter_textlink($c2s, 'B0AKKUALT1', 'Akku 12V', 'www.ebay.de');
+ok($eb !== null && substr_count($eb, '[amz_ebay') === 2 && strpos($eb, 'oder bei eBay') !== false, 'eBay-Ausweichlink hinter jedem Textlink');
+ok(SAB::ebay_hinter_textlink($eb, 'B0AKKUALT1', 'Akku 12V', 'www.ebay.de') === null, 'eBay-Ausweichlink nicht doppelt');
+ok(SAB::ebay_host('de') === 'www.ebay.de' && SAB::ebay_host('uk') !== '', 'eBay-Host je Land');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

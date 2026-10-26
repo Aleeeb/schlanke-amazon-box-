@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.85.5
+ * Version: 0.86.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.85.5';
+    const VERSION = '0.86.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3148,8 +3148,8 @@ final class SAB {
 
     /** Schreibt den Austausch in alle Artikel (jeweils mit Sicherung). @return array{0:int,1:int,2:string,3:array} [Artikel, Kurzlinks ohne ASIN, Fehler, wegen Doppelung übersprungene Artikel] */
     /** Satz, in dem ein reiner Textlink (ohne Bild) steht: Grenzen im Rohtext, der Satz mit {{LINK}} statt des Links (zum Bearbeiten) und der Link selbst. Null, wenn nicht eindeutig. */
-    public static function satz_mit_link(string $c, string $asin): ?array {
-        $i = strpos($c, $asin); if ($i === false) { return null; }
+    public static function satz_mit_link(string $c, string $asin, int $ab = 0): ?array {
+        $i = strpos($c, $asin, $ab); if ($i === false) { return null; }
         $kopf = substr($c, 0, $i); $a1 = strrpos($kopf, '[amz_link'); $a2 = strrpos($kopf, '<a ');
         if ($a2 !== false && ($a1 === false || $a2 > $a1)) { $e = stripos($c, '</a>', $i); if ($e === false) { return null; } $s = $a2; $e += 4; }
         elseif ($a1 !== false) { $cl = strpos($c, ']', $a1); if ($cl === false) { return null; } $e = $cl + 1; $zu = strpos($c, '[/amz_link]', $e); if ($zu !== false && $zu === strpos($c, '[', $e)) { $e = $zu + 11; } $s = $a1; }
@@ -3167,7 +3167,7 @@ final class SAB {
         if (preg_match('/<a\s|\[amz_|\[aawp/i', $vorn . $hinten) || trim(strip_tags($vorn . $hinten)) === '') { return null; }
         $tags = [];   // alle anderen Tags/Shortcodes im Satz werden zu ⟦1⟧, ⟦2⟧ …, damit im Textfeld nur Klartext steht
         $mask = function ($t) use (&$tags) { return preg_replace_callback('/<[^>]+>|\[[^\]]+\]/u', function ($m) use (&$tags) { $tags[] = $m[0]; return '⟦' . count($tags) . '⟧'; }, $t); };
-        return ['start' => $v0 + $von, 'ende' => $e + $bis, 'link' => $link, 'maske' => $mask($vorn) . '【LINK】' . $mask($hinten), 'tags' => $tags, 'linktext' => $link[0] === '[' ? trim(strip_tags(preg_match('/\](.*)\[\/amz_link\]$/s', $link, $lt) ? $lt[1] : (preg_match('/\btext\s*=\s*["\']([^"\']*)["\']/i', $link, $lt) ? $lt[1] : ''))) : trim(strip_tags($link))];
+        return ['start' => $v0 + $von, 'ende' => $e + $bis, 'link' => $link, 'maske' => $mask($vorn) . '【LINK】' . $mask($hinten), 'ord' => substr_count(substr($c, 0, $s), $asin) + 1, 'linkende' => $e, 'tags' => $tags, 'linktext' => $link[0] === '[' ? trim(strip_tags(preg_match('/\](.*)\[\/amz_link\]$/s', $link, $lt) ? $lt[1] : (preg_match('/\btext\s*=\s*["\']([^"\']*)["\']/i', $link, $lt) ? $lt[1] : ''))) : trim(strip_tags($link))];
     }
 
     /** Textfeld-Inhalt zurück in Rohtext: 【LINK】 => Link, ⟦n⟧ => ursprüngliches Tag; sonst nichts Fremdes (Eingetipptes < > wird entfernt). Null bei unbekanntem Platzhalter oder wenn der Link nicht genau einmal vorkommt. */
@@ -3182,15 +3182,75 @@ final class SAB {
         return $o;
     }
 
+    /** Alle Textlink-Stellen eines Produkts in einem Artikel (höchstens 8), jede mit Satz. @return array<int,array> */
+    public static function satz_stellen(string $c, string $asin): array {
+        $out = []; $ab = 0;
+        while (count($out) < 8 && ($i = strpos($c, $asin, $ab)) !== false) {
+            $sm = self::satz_mit_link($c, $asin, $ab);
+            if ($sm && $sm['linkende'] > $i) { $out[] = $sm; $ab = $sm['linkende']; } else { $ab = $i + 1; }
+        }
+        return $out;
+    }
+
+    /** eBay-Suchlink als Ausweichlink hinter jeden Textlink des Produkts setzen (nur dort, wo noch keiner steht). Null, wenn nichts zu tun ist. */
+    public static function ebay_hinter_textlink(string $c, string $alt, string $term, string $host): ?string {
+        $term = trim(str_replace(['"', '[', ']'], '', $term)); if ($term === '') { return null; }
+        $ins = ' [amz_ebay asin="' . $alt . '" suche="' . $term . '" host="' . $host . '"]oder bei eBay[/amz_ebay]';
+        $st = self::satz_stellen($c, $alt); $n = 0;
+        for ($k = count($st) - 1; $k >= 0; $k--) {
+            $e = $st[$k]['linkende'];
+            if (preg_match('/^\s*\[amz_ebay\b/', substr($c, $e, 40))) { continue; }
+            $c = substr($c, 0, $e) . $ins . substr($c, $e); $n++;
+        }
+        return $n ? $c : null;
+    }
+
+    /** eBay-Host passend zum Amazon-Land dieser Webseite. */
+    public static function ebay_host(string $land): string {
+        return ['de' => 'www.ebay.de', 'fr' => 'www.ebay.fr', 'es' => 'www.ebay.es', 'it' => 'www.ebay.it', 'co.uk' => 'www.ebay.co.uk', 'com' => 'www.ebay.com'][$land] ?? 'www.ebay.de';
+    }
+
     /** Bearbeitbarer Satz auf der Austausch-Karte (nur bei Textlinks). */
-    private static function satz_feld_html(string $alt, array $f): string {
+    private static function satz_feld_html(string $alt, array $f, string $name = ''): string {
+        $felder = ''; $j = 0; $land = self::land(''); $erster = null;
         foreach (array_slice(array_keys($f), 0, 3, true) as $pid) {
             $post = get_post((int) $pid); if (!$post) { continue; }
-            $sm = self::satz_mit_link((string) $post->post_content, $alt); if (!$sm) { continue; }
-            return '<div style="margin:10px 0 0;max-width:760px;padding:8px 10px;border:1px solid #c5d9ed;border-radius:6px;background:#f6fafe"><label style="display:block"><strong>Satz im Artikel anpassen</strong> (Link: „' . esc_html($sm['linktext']) . '“)<br><small>Der Satz steht hier als Klartext. <strong>【LINK】</strong> ist der Link (Text bleibt „' . esc_html($sm['linktext']) . '“) und muss genau einmal drinbleiben; ⟦1⟧ … sind Formatierungen, die du stehen lassen oder löschen kannst. Geändert wird nur dieser Satz, vorher wird der Artikel gesichert (Rückgängig).</small></label>'
-                . '<textarea name="sab_satz[' . esc_attr($alt) . ']" rows="3" style="width:100%;margin-top:4px;font-size:15px;line-height:1.5;background:#fff">' . esc_textarea($sm['maske']) . '</textarea><input type="hidden" name="sab_satz_alt[' . esc_attr($alt) . ']" value="' . esc_attr($sm['maske']) . '"><small>Aus: ' . esc_html(get_the_title($post)) . '</small></div>';
+            $st = self::satz_stellen((string) $post->post_content, $alt); if (!$st) { continue; }
+            $erster = $erster ?? $st[0];
+            foreach ($st as $k => $sm) {
+                if (++$j > 6) { break 2; }
+                $v = add_query_arg(['sab_zeige' => $alt, 'sab_nr' => $sm['ord']], (string) get_permalink((int) $post->ID));
+                $e = admin_url('post.php?post=' . (int) $post->ID . '&action=edit&sab_zeige=' . rawurlencode($alt) . '&sab_nr=' . (int) $sm['ord']);
+                $felder .= '<div style="margin:8px 0 0"><strong>' . (count($st) > 1 || count($f) > 1 ? 'Stelle ' . ($k + 1) . ' von ' . count($st) . ' in „' . esc_html(get_the_title($post)) . '“' : 'Satz im Artikel „' . esc_html(get_the_title($post)) . '“') . '</strong> (Link: „' . esc_html($sm['linktext']) . '“) '
+                    . '<a class="button button-small" href="' . esc_url($v) . '" target="_blank" rel="noopener">ansehen ↗</a> <a class="button button-small" href="' . esc_url($e) . '" target="_blank" rel="noopener">im Editor bearbeiten ↗</a>'
+                    . '<textarea name="sab_satz[' . esc_attr($alt) . '][' . $j . ']" rows="3" style="width:100%;margin-top:4px;font-size:15px;line-height:1.5;background:#fff">' . esc_textarea($sm['maske']) . '</textarea><input type="hidden" name="sab_satz_alt[' . esc_attr($alt) . '][' . $j . ']" value="' . esc_attr($sm['maske']) . '"></div>';
+            }
         }
-        return '';
+        if ($felder === '') { return ''; }
+        $term = self::suchtext_aus_satz($name, $alt, self::text_vor_stelle($alt, $f));
+        return '<div style="margin:10px 0 0;max-width:760px;padding:8px 10px;border:1px solid #c5d9ed;border-radius:6px;background:#f6fafe"><strong>Textlink: Satz anpassen</strong><br><small>Der Satz steht hier als Klartext. <strong>【LINK】</strong> ist der Link (sein Text bleibt, wie er ist) und muss genau einmal drinbleiben; ⟦1⟧ … sind Formatierungen, die du stehen lassen oder löschen kannst. Geändert wird nur dieser Satz, vorher wird der Artikel gesichert (Rückgängig).</small>' . $felder
+            . '<div style="margin:10px 0 0;padding-top:8px;border-top:1px solid #c5d9ed"><label><strong>eBay als Ausweichlink:</strong> Suchbegriff <input type="text" name="sab_ebay_term[' . esc_attr($alt) . ']" value="' . esc_attr($term) . '" size="30"></label> '
+            . '<button class="button" name="sab_ebay_ein" value="' . esc_attr($alt) . '" title="Setzt hinter jeden Textlink dieses Produkts „oder bei eBay“ (eBay-Suche mit Partner-ID); der Artikel wird vorher gesichert">„oder bei eBay“ dahinter einfügen</button> <a class="button" href="' . esc_url('https://' . self::ebay_host($land) . '/sch/i.html?_nkw=' . rawurlencode($term)) . '" target="_blank" rel="noopener">Bei eBay ansehen ↗</a></div></div>';
+    }
+
+    /** „oder bei eBay“ hinter die Textlinks des Produkts setzen (mit Sicherung, Rückgängig und Kontrollliste). */
+    private static function ebay_einfuegen(string $alt, string $term): string {
+        global $wpdb;
+        if (!isset($wpdb) || strlen($alt) !== 10 || $term === '') { return 'eBay-Link nicht eingefügt: Suchbegriff fehlt.'; }
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A);
+        $log = (array) get_option('sab_tausch_log', []); $id = (string) time() . substr(md5($alt . 'ebay'), 0, 4); $posts = []; $stellen = []; $host = self::ebay_host(self::land(''));
+        foreach ((array) $rows as $r) {
+            $pid = (int) $r['ID']; $c = (string) $r['post_content']; $nc = self::ebay_hinter_textlink($c, $alt, $term, $host);
+            if ($nc === null) { continue; }
+            update_post_meta($pid, '_sab_tausch_' . $id, wp_slash($c));
+            wp_update_post(['ID' => $pid, 'post_content' => wp_slash($nc)]);
+            $posts[$pid] = md5($nc); $stellen[] = ['pid' => $pid, 'titel' => (string) $r['post_title'], 'satz' => '', 'n' => substr_count($nc, '[amz_ebay asin="' . $alt . '"')];
+        }
+        if (!$posts) { return 'Kein eBay-Link eingefügt: keine Textlinks gefunden oder dort steht schon einer.'; }
+        $log[$id] = ['ts' => time(), 'alt' => $alt, 'neu' => $alt, 'name' => 'eBay-Link', 'posts' => $posts, 'hinweise' => []];
+        update_option('sab_tausch_log', array_slice($log, -50, null, true), false);
+        $kk = (array) get_option('sab_kontrolle', []); $kk[$id] = ['ts' => time(), 'alt' => $alt, 'neu' => $alt, 'stellen' => $stellen]; update_option('sab_kontrolle', array_slice($kk, -20, null, true), false);
+        return '„oder bei eBay“ in ' . count($posts) . ' Artikel(n) eingefügt (Suche: ' . $term . '). Siehe Kontrollliste oben.';
     }
 
     /** Kontrollliste nach einem Tausch: Stellen zum Ansehen im Frontend (Sprung per ?sab_zeige), bei ein bis zwei Stellen mit dem Satz; „Bestätigt“ blendet aus. */
@@ -3222,12 +3282,15 @@ final class SAB {
         $b = fn($t) => [substr_count($t, '<a '), substr_count($t, '</a>'), substr_count($t, '[amz_link'), substr_count($t, '[/amz_link]')];
         if ($b($vorher) !== $b($nachher)) { return 'Zahl der Links hat sich geändert'; }
         if (substr_count($nachher, $neu) < substr_count($vorher, $alt)) { return 'neue ASIN steht seltener im Artikel als die alte'; }
-        $sm = self::satz_mit_link($nachher, $neu); $so = self::satz_mit_link($vorher, $alt);
-        if (!$sm) { return 'im Satz ist kein Textlink mehr zu erkennen'; }
-        if ($so && $sm['linktext'] !== $so['linktext']) { return 'der Linktext hat sich geändert'; }
+        $sms = self::satz_stellen($nachher, $neu); $sos = self::satz_stellen($vorher, $alt);
+        if (count($sms) < count($sos)) { return 'im Satz ist kein Textlink mehr zu erkennen'; }
+        foreach ($sos as $k => $so) { if (($sms[$k]['linktext'] ?? null) !== $so['linktext']) { return 'der Linktext hat sich geändert'; } }
+        foreach ($sms as $sm) {
         $l = $sm['link'];
         $ok = stripos($l, '<a ') === 0 ? (bool) preg_match('#^<a\b[^>]*\bhref\s*=\s*["\']https?://[^"\']+["\'][^>]*>.*</a>$#is', $l) : (bool) preg_match('#^\[amz_link\b[^\]]*\basin\s*=\s*["\']?' . preg_quote($neu, '#') . '#i', $l);
-        return $ok ? '' : 'der Link hat keine gültige Adresse';
+        if (!$ok) { return 'der Link hat keine gültige Adresse'; }
+        }
+        return '';
     }
 
     /** Geänderter Satz für den nächsten Tausch: [Satz vorher mit {{LINK}}, Satz nachher]. */
@@ -3241,10 +3304,18 @@ final class SAB {
         foreach ((array) $rows as $r) {
             $pid = (int) $r['ID']; $c = (string) $r['post_content'];
             $c_arb = $c; $hw0 = [];
-            if (self::$satz_aend) {   // Satz anpassen: nur wenn er im Artikel noch genau so steht wie angezeigt
-                $sm = self::satz_mit_link($c, $alt);
-                $roh = $sm && $sm['maske'] === self::$satz_aend[0] ? self::satz_roh(self::$satz_aend[1], $sm) : null;
-                if ($roh !== null) { $c_arb = substr($c, 0, $sm['start']) . $roh . substr($c, $sm['ende']); $hw0[] = 'Satz angepasst'; }
+            if (self::$satz_aend) {   // Sätze anpassen: nur wenn sie im Artikel noch genau so stehen wie angezeigt
+                $ers = []; $benutzt = [];
+                foreach (self::satz_stellen($c, $alt) as $sm) {
+                    foreach (self::$satz_aend as $pi => $paar) {
+                        if (isset($benutzt[$pi]) || $sm['maske'] !== $paar[0]) { continue; }
+                        $roh = self::satz_roh($paar[1], $sm);
+                        if ($roh !== null) { $ers[] = [$sm, $roh]; $benutzt[$pi] = 1; }
+                        break;
+                    }
+                }
+                usort($ers, fn($p1, $p2) => $p2[0]['start'] <=> $p1[0]['start']);
+                foreach ($ers as [$sm, $roh]) { $c_arb = substr($c_arb, 0, $sm['start']) . $roh . substr($c_arb, $sm['ende']); $hw0[] = 'Satz angepasst'; }
             }
             [$c1, $nk1, $hw] = self::tausch_kurzlinks($c_arb, $alt, $neu, $neuer_name); $hw = array_merge($hw0, $hw);   // Kurzlinks derselben Spalte mitnehmen, sonst zeigt der Textlink aufs alte Produkt
             [$neu_c, $n] = self::tausch_text($c1, $alt, $neu, $alte_namen, $neuer_name); $n += $nk1;
@@ -3258,7 +3329,7 @@ final class SAB {
             $posts[$pid] = md5($neu_c);
             $sj0 = self::satz_mit_link($neu_c, $neu); $stellen[] = ['pid' => $pid, 'titel' => (string) ($r['post_title'] ?? ('Beitrag ' . $pid)), 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => substr_count($neu_c, $neu)];
             foreach ($hw as $w) { $hinweise[] = ($r['post_title'] ?? ('Beitrag ' . $pid)) . ': ' . $w; }
-            if ($hw0 && ($sj = self::satz_mit_link($neu_c, $neu))) { $hinweise[] = 'Satz jetzt: ' . mb_substr(str_replace('【LINK】', '[Link „' . $sj['linktext'] . '“]', $sj['maske']), 0, 260); }
+            if ($hw0) { foreach (self::satz_stellen($neu_c, $neu) as $sj) { $hinweise[] = 'Satz jetzt: ' . mb_substr(str_replace('【LINK】', '[Link „' . $sj['linktext'] . '“]', $sj['maske']), 0, 260); } }
             $kurz += preg_match_all('#amzn\.to|amzn\.eu|a\.co/|link\.amazon/#i', $neu_c);
         }
         if ($neuer_name !== '' && !isset(self::produkte()[$neu])) { update_option('sab_produkte', trim((string) get_option('sab_produkte', '')) . "\n" . $neu . ' | ' . $neuer_name, false); }
@@ -5167,7 +5238,7 @@ final class SAB {
         if (!isset($d['items'][$alt])) { $extra .= '<br><strong style="color:#a00">Amazon liefert für dieses Produkt weder Titel noch Bild.</strong>' . ($z['name'] !== '' ? ' Der Name stammt aus dem Artikel.' : ' Auch im Artikel ist kein Name zu finden: bitte ASIN bei Amazon suchen.'); }
         elseif ((self::produkte()[$alt] ?? '') === '' && empty($d['items'][$alt]['titel']) && $z['name'] !== '') { $extra .= '<br><small>Name aus dem Artikel.</small>'; }
         $tv = self::text_vor_stelle((string) $alt, (array) $z['f']); $sb = self::schluesselbegriffe($tv); if ($tv !== '') { $extra .= '<br><small style="color:#444"><strong>Text davor im Artikel:</strong> „' . esc_html($tv) . '“</small>'; }
-        $extra .= '<br><a class="button button-small" href="' . esc_url(self::such_link(self::suchtext_aus_satz((string) $z['name'], (string) $alt, self::text_vor_stelle((string) $alt, (array) $z['f'])))) . '" target="_blank" rel="noopener">' . (self::generischer_linktext((string) $z['name']) || $z['name'] === '' ? 'Bei Amazon nach dem Satz-Begriff suchen' : 'Bei Amazon nach dem Titel suchen') . '</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a>';
+        $extra .= '<br><a class="button button-small" href="' . esc_url(self::such_link(self::suchtext_aus_satz((string) $z['name'], (string) $alt, self::text_vor_stelle((string) $alt, (array) $z['f'])))) . '" target="_blank" rel="noopener">' . (self::generischer_linktext((string) $z['name']) || $z['name'] === '' ? 'Bei Amazon nach dem Satz-Begriff suchen' : 'Bei Amazon nach dem Titel suchen') . '</a> <a class="button button-small" href="' . esc_url('https://' . self::ebay_host($land) . '/sch/i.html?_nkw=' . rawurlencode(self::suchtext_aus_satz((string) $z['name'], (string) $alt, self::text_vor_stelle((string) $alt, (array) $z['f'])))) . '" target="_blank" rel="noopener">Bei eBay nach dem Titel suchen</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a>';
         $h .= '<div class="sab-tk" style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div class="sab-tk-kopf" style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
             . '<div><strong>Zu tauschen:</strong>' . $badge . ' <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><span style="color:#a00;font-size:16px;font-weight:700">' . esc_html($z['grund']) . '</span><br><small style="color:#555" title="Reihenfolge der Liste: Dringlichkeit (0 bis 100) mal Zahl der Seiten">Priorität ' . (int) $z['prio'] . ' = Dringlichkeit ' . (int) $z['dr'] . ' &times; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . '</small><br>' . $wo . $extra . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
             . '<div style="display:flex;flex-wrap:wrap;gap:10px">';
@@ -5184,7 +5255,7 @@ final class SAB {
         if (count($k['liste']) < 4) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f']), (string) ($xalt['kategorie'] ?? ''), count($k['liste']), (string) ($xalt['titel'] ?? ''), (int) $z['seiten']]; }
         $suchtitel = self::suchtext_aus_satz((string) $z['name'], (string) $alt, self::text_vor_stelle((string) $alt, (array) $z['f']));
         if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
-        $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button>' . (self::$tk_sammeln ? (isset(((array) get_option('sab_austausch_hinten', []))[$alt]) ? '<button class="button" name="sab_vorn" value="' . esc_attr($alt) . '" title="Wieder an die ursprüngliche Stelle der Liste">Wieder nach vorn</button>' : '<button class="button" name="sab_hinten" value="' . esc_attr($alt) . '" title="Stellt das Produkt ans Ende der Liste, damit es beim Durchgehen nicht stört">Ans Ende</button>') : '') . '<a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div>' . self::satz_feld_html((string) $alt, (array) $z['f']) . '<div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off" value="' . esc_attr(implode(' ', $sb)) . '"></label> <button type="button" class="button sab-ps-go">Suchen</button>' . ($sb ? '<div style="margin:4px 0"><small>Suchbegriffe aus dem Satz: ' . implode(' ', array_map(fn($w) => '<a href="#" class="sab-ps-chip" data-q="' . esc_attr($w) . '" style="display:inline-block;padding:1px 8px;margin:0 3px 3px 0;border-radius:10px;background:#f0f6fc;border:1px solid #c5d9ed;text-decoration:none">' . esc_html($w) . '</a>', $sb)) . '</small></div>' : '') . '<div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
+        $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button>' . (self::$tk_sammeln ? (isset(((array) get_option('sab_austausch_hinten', []))[$alt]) ? '<button class="button" name="sab_vorn" value="' . esc_attr($alt) . '" title="Wieder an die ursprüngliche Stelle der Liste">Wieder nach vorn</button>' : '<button class="button" name="sab_hinten" value="' . esc_attr($alt) . '" title="Stellt das Produkt ans Ende der Liste, damit es beim Durchgehen nicht stört">Ans Ende</button>') : '') . '<a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div>' . self::satz_feld_html((string) $alt, (array) $z['f'], (string) $z['name']) . '<div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off" value="' . esc_attr(implode(' ', $sb)) . '"></label> <button type="button" class="button sab-ps-go">Suchen</button>' . ($sb ? '<div style="margin:4px 0"><small>Suchbegriffe aus dem Satz: ' . implode(' ', array_map(fn($w) => '<a href="#" class="sab-ps-chip" data-q="' . esc_attr($w) . '" style="display:inline-block;padding:1px 8px;margin:0 3px 3px 0;border-radius:10px;background:#f0f6fc;border:1px solid #c5d9ed;text-decoration:none">' . esc_html($w) . '</a>', $sb)) . '</small></div>' : '') . '<div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
             . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
         return $h;
     }
@@ -5781,8 +5852,10 @@ JS;
                 update_option('sab_such_anfrage', gmdate('Y-m-d H:i'), false);
                 $meldung = 'Angefordert. Die Mac-Sitzung sucht vor der nächsten Austauschrunde bei Amazon und trägt die Treffer hier ein.';
             } elseif ($form === 'austausch_viele') {
-                $hv = self::asin((string) ($_POST['sab_hinten'] ?? '')); $vo = self::asin((string) ($_POST['sab_vorn'] ?? ''));
-                if ($hv !== '' || $vo !== '') {
+                $hv = self::asin((string) ($_POST['sab_hinten'] ?? '')); $vo = self::asin((string) ($_POST['sab_vorn'] ?? '')); $eb = self::asin((string) ($_POST['sab_ebay_ein'] ?? ''));
+                if ($eb !== '') {
+                    $meldung = self::ebay_einfuegen($eb, trim(sanitize_text_field(wp_unslash((string) ($_POST['sab_ebay_term'][$eb] ?? '')))));
+                } elseif ($hv !== '' || $vo !== '') {
                     $hl = (array) get_option('sab_austausch_hinten', []);
                     if ($hv !== '') { $hl[$hv] = time(); $meldung = $hv . ' steht jetzt am Ende der Liste.'; } else { unset($hl[$vo]); $meldung = $vo . ' steht wieder in der normalen Reihenfolge.'; }
                     update_option('sab_austausch_hinten', $hl, false);
@@ -5801,11 +5874,14 @@ JS;
                     if (!$eigenWahl) { $kw = $_POST['sab_kn'][$alt0][$neu] ?? ($_POST['sab_kn'][$alt][$neu] ?? ''); if (is_string($kw)) { $kn = trim(sanitize_text_field(wp_unslash($kw))); } }   // gewählter Kurzname-Vorschlag
                     self::lernen_merken($alt, $neu);
                     self::$satz_aend = null;
-                    $sa = (string) wp_unslash($_POST['sab_satz_alt'][$alt0] ?? ''); $sn = (string) wp_unslash($_POST['sab_satz'][$alt0] ?? '');
-                    if ($sa !== '' && $sn !== '' && $sn !== $sa) {
-                        if (substr_count($sn, '【LINK】') === 1 && mb_strlen($sn) <= 1500) { self::$satz_aend = [$sa, $sn]; }
+                    $san = (array) ($_POST['sab_satz_alt'][$alt0] ?? []); $snn = (array) ($_POST['sab_satz'][$alt0] ?? []); $paare = [];
+                    foreach ($san as $ki => $sa0) {
+                        $sa = (string) wp_unslash($sa0); $sn = (string) wp_unslash($snn[$ki] ?? '');
+                        if ($sa === '' || $sn === '' || $sn === $sa) { continue; }
+                        if (substr_count($sn, '【LINK】') === 1 && mb_strlen($sn) <= 1500) { $paare[] = [$sa, $sn]; }
                         else { $m[] = 'Satz NICHT geändert: 【LINK】 muss genau einmal vorkommen.'; }
                     }
+                    self::$satz_aend = $paare ?: null;
                     $m[] = self::tausch_ausfuehren($alt, $neu, mb_substr($kn, 0, 60));
                 }
                 $meldung = $m ? implode(' ', $m) : 'Nichts angehakt.';
