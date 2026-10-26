@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.80.0
+ * Version: 0.80.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.80.0';
+    const VERSION = '0.80.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4179,6 +4179,24 @@ final class SAB {
             'B01E7I39GW | B07DLVKMT3, B07LG6W18Y, B07SJ6TXYG | 2026-10-26',
             'B00EF3X028 | B01CWAP0F0, B07DJD9DJM, B09W5V82K6 | 2026-10-26',
             'B01CXA3OW0 | B0B5H15521, B093LR5P62, B0F9FV7GKX | 2026-10-26',
+        ]],
+        '2026-10-26-such-kand-schnecken-3' => ['host' => 'schneckenhilfe.de', 'option' => 'sab_such_kand', 'zusammen' => true, 'zeilen' => [   // PC-Sitzung: bis 8 Kandidaten, neue vor die vorhandenen
+            'B00D1VO916 | B07ST2P369, B0CDH4R958, B0944BTD7P, B09419LZSW, B07PRX8YHY, B0872JB5HX, B0C5XYJ9RR, B08L5JYG5B | 2026-10-26',
+            'B0167513IO | B08JGX3NYM, B08D6RGB1H, B07HKJZCVL, B08RNM1D5H, B06XDQW7BF, B00VFYMPCQ, B00I4XWO7C, B07HKD8LWQ | 2026-10-26',
+        ]],
+        '2026-10-26-such-kand-zecken-3' => ['host' => 'zeckenhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [   // PC-Sitzung: automatisch nach Name (ab 40 %), ungeprüft; Bauart prüft der Austausch beim Anzeigen; nur Produkte ohne bisherige Kandidaten
+            'B00EB0SPQG | B008ALWD24, B0F7LDDGNS, B0D4R348MW, B0CP6581P5, B0058WXMSW | 2026-10-26',
+            'B00UFMDYP6 | B00U7BTLZM, B09JYZLD6X, B07VRBMWJ9, B01A8D0GSO, B077HXRKJ3 | 2026-10-26',
+            'B0061WFSIK | B0CXDTVM3C | 2026-10-26',
+            'B00LOCJZCW | B0827XBBVK, B008ALWD24, B00PE5VBAY, B0FC56TKWB | 2026-10-26',
+            'B00I227TP2 | B00LAY9ZME, B00LAYA4P6, B01D01RBAC, B01D01QX9W, B01F24W42U | 2026-10-26',
+            'B00GYZXS18 | B004EF3SH4, B00GULCCFY | 2026-10-26',
+            'B015FPEG2W | B0FBS9C2G2, B01MF5TXQJ, B008ALWD24, B0FC56TKWB | 2026-10-26',
+            'B08594YVZ9 | B00JDQQMXQ, B08641NGH6, B0F4QTWRZX, B00JDQT2O2, B08X4TWLL1 | 2026-10-26',
+            'B07F86MB3H | B0CD8DQ22Y | 2026-10-26',
+            'B00EX6H42E | B00E67W1IM, B09HKSCVQG, B07PRJFSWC, B07F89JFH6, B07CR8FXDY | 2026-10-26',
+            'B00UVIDN7S | B07FTRT8WN, B0BVG1CX5H, B0F9PQL5RX, B0CBBS6FQ9 | 2026-10-26',
+            'B0831H9G94 | B07DLVKMT3, B07LG6W18Y, B07SJ6TXYG | 2026-10-26',
         ]],
         '2026-10-26-korrektur-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [], 'ersetzen' => [   // nur wenn die Zeile noch genau so dasteht (von Hand Geändertes bleibt)
             'B01MU8UQ64 | B004WO8ZIE, B000WFLAMA, B091TXGPP9 | 2026-10-26' => 'B01MU8UQ64 | B0CXJFT8VK, B0CX6GF8HN, B0F3P51Q4M | 2026-10-26',
