@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.85.1
+ * Version: 0.85.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.85.1';
+    const VERSION = '0.85.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1786,7 +1786,7 @@ final class SAB {
         wp_update_post(['ID' => $post->ID, 'post_content' => wp_slash($c2)]);
         delete_transient('sab_alle_asins');
         $sj0 = self::satz_mit_link($c2, $neu); $kk = (array) get_option('sab_kontrolle', []);   // auch Tausch an einer Stelle im Frontend kommt in die Kontrollliste
-        $kk[(string) time() . substr(md5($asin . $neu), 0, 4)] = ['ts' => time(), 'alt' => $asin, 'neu' => $neu, 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => substr_count($c2, $neu)]]];
+        $kk[(string) time() . substr(md5($asin . $neu), 0, 4)] = ['ts' => time(), 'art' => 'stelle', 'pid' => (int) $post->ID, 'alt' => $asin, 'neu' => $neu, 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => substr_count($c2, $neu)]]];
         update_option('sab_kontrolle', array_slice($kk, -20, null, true), false);
         wp_send_json_success(['n' => $n]);
     }
@@ -3197,7 +3197,7 @@ final class SAB {
                     . esc_html($x['titel']) . ' <small>(' . (int) $x['n'] . '×)</small> <a class="button button-small" href="' . esc_url($url) . '" target="_blank" rel="noopener">Stelle ansehen ↗</a> <a class="button button-small" href="' . esc_url(admin_url('post.php?post=' . (int) $x['pid'] . '&action=edit&sab_zeige=' . rawurlencode($neu))) . '" target="_blank" rel="noopener">Im Editor bearbeiten ↗</a></div>';
             }
             if (count($st) > 12) { $h .= '<p class="description">… und ' . (count($st) - 12) . ' weitere Artikel.</p>'; }
-            $h .= '<form method="post" style="margin:8px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="' . esc_attr($tab) . '"><input type="hidden" name="sab_form" value="kontrolle_ok"><input type="hidden" name="sab_id" value="' . esc_attr((string) $id) . '"><button class="button button-primary">Kontrolliert, in Ordnung</button></form></div>';
+            $h .= '<form method="post" style="margin:8px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="' . esc_attr($tab) . '"><input type="hidden" name="sab_form" value="kontrolle_ok"><input type="hidden" name="sab_id" value="' . esc_attr((string) $id) . '"><button class="button button-primary">Kontrolliert, in Ordnung</button> <button class="button" name="sab_form" value="kontrolle_zurueck" style="color:#b32d2e;border-color:#b32d2e" title="Stellt die Artikel auf den Stand vor dem Tausch zurück (nur wenn sie seitdem nicht geändert wurden)">Nicht in Ordnung, rückgängig machen</button></form></div>';
         }
         return $h . '</div>';
     }
@@ -5664,7 +5664,20 @@ JS;
         }
         if (!empty($_POST['sab_form']) && check_admin_referer('sab_speichern')) {
             $form = sanitize_key((string) $_POST['sab_form']);
-            if ($form === 'kontrolle_ok') {
+            if ($form === 'kontrolle_zurueck') {
+                $kid = (string) ($_POST['sab_id'] ?? ''); $kk = (array) get_option('sab_kontrolle', []); $e = $kk[$kid] ?? null;
+                if (!$e) { $meldung = 'Eintrag nicht gefunden.'; }
+                elseif (($e['art'] ?? '') === 'stelle') {   // Tausch an einer Stelle im Frontend: Sicherung des Artikels
+                    $pid = (int) ($e['pid'] ?? 0); $b = (array) get_post_meta($pid, '_sab_stelle_backup', true); $post = get_post($pid); $l = end($b);
+                    if (!$post || !$l) { $meldung = 'Keine Sicherung gefunden. Bitte im Artikel unter „Versionen“ die Version vor dem Tausch laden.'; }
+                    elseif (md5((string) $post->post_content) !== ($l['hash'] ?? '')) { $meldung = 'Der Artikel wurde seitdem geändert; Rückgängig ist zu riskant. Bitte im Artikel unter „Versionen“ die Version vor dem Tausch laden.'; }
+                    else { wp_update_post(['ID' => $pid, 'post_content' => wp_slash((string) $l['vorher'])]); array_pop($b); update_post_meta($pid, '_sab_stelle_backup', wp_slash($b)); unset($kk[$kid]); update_option('sab_kontrolle', $kk, false); $meldung = 'Rückgängig gemacht: ' . $e['alt'] . ' steht wieder im Artikel.'; }
+                } else {
+                    [$ok, $skip] = self::tausch_zurueck($kid);
+                    if ($ok > 0) { unset($kk[$kid]); update_option('sab_kontrolle', $kk, false); }
+                    $meldung = $ok > 0 ? 'Rückgängig gemacht in ' . $ok . ' Artikel(n)' . ($skip ? ', ' . $skip . ' übersprungen, weil sie seitdem von Hand geändert wurden (dort bitte unter „Versionen“ zurückgehen).' : '.') : 'Nichts zurückgesetzt: ' . ($skip ? 'die Artikel wurden seitdem geändert (bitte unter „Versionen“ die Version vor dem Tausch laden).' : 'keine Sicherung gefunden.');
+                }
+            } elseif ($form === 'kontrolle_ok') {
                 $kk = (array) get_option('sab_kontrolle', []); unset($kk[(string) ($_POST['sab_id'] ?? '')]); update_option('sab_kontrolle', $kk, false); $meldung = 'Kontrolle bestätigt.';
             } elseif ($form === 'produkte') {
                 update_option('sab_produkte', sanitize_textarea_field(wp_unslash($_POST['sab_produkte'] ?? '')), false);
