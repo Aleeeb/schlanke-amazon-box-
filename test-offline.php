@@ -1203,4 +1203,12 @@ $mTv = new ReflectionMethod('SAB', 'text_vor_stelle'); $mTv->setAccessible(true)
 $tv = $mTv->invoke(null, 'B0TVTEST01', [5 => ['titel' => 'T', 'n' => 1]]);
 ok(strpos($tv, 'Kupferband') !== false && strpos($tv, 'Hier kaufen') === false, 'Austausch-Kontext: Sätze vor dem Link werden als Hinweis gelesen');
 unset($GLOBALS['pc']);
+$GLOBALS['opt']['sab_lern'] = [['t' => '2026-10-26', 'a' => 'B0TOTZAUN1', 'n' => 'B0ELEK3PRO', 'p' => 2, 'q' => 'bestand', 'd' => 5, 'ab' => ['B0ELEK5PRO']], ['t' => '2026-10-26', 'a' => 'B0TOTZAUN1', 'n' => 'B0ELEK3PRO', 'p' => 2, 'q' => 'bestand', 'd' => 5, 'ab' => ['B0ELEK5PRO']]];
+$kl = $mK->invoke(null, 'B0TOTZAUN1', 'Valla metálica anticaracoles', $dd3, [], []);
+$al = array_column($kl['liste'], 'asin');
+ok(!in_array('B0ELEK5PRO', $al, true) && ($al[0] ?? '') === 'B0ELEK3PRO', 'Lernen: zweimal übergangener Vorschlag wird für dasselbe Produkt nicht mehr gezeigt');
+$GLOBALS['opt']['sab_lern'] = array_fill(0, 30, ['t' => 'x', 'a' => 'A', 'n' => 'B', 'p' => 1, 'q' => 'bestand', 'd' => 9, 'ab' => []]); $GLOBALS['opt']['sab_lern'][29]['p'] = 2;
+$mQ = new ReflectionMethod('SAB', 'lernen_quote'); $mQ->setAccessible(true); $lq = $mQ->invoke(null);
+ok($lq['n'] === 30 && $lq['eins'] === 29 && $lq['quote'] === 97, 'Lernen: Trefferquote Platz 1 der letzten 30 Tausche');
+unset($GLOBALS['opt']['sab_lern']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

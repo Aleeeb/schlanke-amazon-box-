@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.76.8
+ * Version: 0.77.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.76.8';
+    const VERSION = '0.77.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4118,6 +4118,44 @@ final class SAB {
         return $out;
     }
 
+    // ---------- Lernen aus Entscheidungen (datensparsam: nur ASINs, Platz, Quelle; höchstens 500 Einträge) ----------
+
+    /** Merkt sich einen Tausch: Platz des gewählten Produkts im Ranking, Quelle und die höher gereihten (= abgelehnten) Vorschläge. */
+    private static function lernen_merken(string $alt, string $neu): void {
+        try {
+            $d = (array) self::uebersicht_daten(self::land(''), false); $trotz = (array) get_option('sab_trotz', []); $fund = self::fundstellen([$alt]);
+            $k = self::austausch_kandidaten($alt, self::anzeige_name($alt, $d, $fund), $d, $trotz, $fund);
+            $platz = 0; $q = 'eigene'; $dif = 0; $ab = [];
+            foreach ($k['liste'] as $i => $c) {
+                if ($c['asin'] === $neu) { $platz = $i + 1; $q = strpos((string) $c['quelle'], 'Amazon') === 0 ? 'amazon' : 'bestand'; $dif = (int) ($c['score'] ?? 0) - (int) (self::score(array_merge((array) ($d['items'][$alt] ?? []), ['trotz' => isset($trotz[$alt])]))[0] ?? 0); break; }
+                $ab[] = $c['asin'];
+            }
+            if (!$platz) { $ab = []; }
+            $log = (array) get_option('sab_lern', []);
+            $log[] = ['t' => gmdate('Y-m-d'), 'a' => $alt, 'n' => $neu, 'p' => $platz, 'q' => $q, 'd' => $dif, 'ab' => array_slice($ab, 0, 5)];
+            update_option('sab_lern', array_slice($log, -500), false);
+        } catch (\Throwable $e) { /* Lernen darf den Tausch nie stören */ }
+    }
+
+    /** Vorschläge, die für dieses Produkt schon einmal abgelehnt wurden (ein höher gereihter Vorschlag wurde übergangen). @return array<string,int> ASIN => Anzahl */
+    private static function lernen_abgelehnt(string $alt): array {
+        $o = [];
+        foreach ((array) get_option('sab_lern', []) as $e) { if (($e['a'] ?? '') === $alt) { foreach ((array) ($e['ab'] ?? []) as $a) { $o[$a] = ($o[$a] ?? 0) + 1; } } }
+        return $o;
+    }
+
+    /** Trefferquote: wie oft war Platz 1 die Wahl (letzte 30 Tausche aus dem Ranking). @return array{n:int,eins:int,quote:int} */
+    private static function lernen_quote(): array {
+        $l = array_values(array_filter((array) get_option('sab_lern', []), fn($e) => (int) ($e['p'] ?? 0) > 0));
+        $l = array_slice($l, -30); $eins = count(array_filter($l, fn($e) => (int) $e['p'] === 1));
+        return ['n' => count($l), 'eins' => $eins, 'quote' => $l ? (int) round(100 * $eins / count($l)) : 0];
+    }
+
+    /** Auto-Kandidat (nur Anzeige): Quote der letzten 30 mindestens 90 %, Platz 1 mit Score-Abstand 15, Namens-/Textübereinstimmung. */
+    private static function lernen_auto(array $c, int $alt_score, array $q): bool {
+        return $q['n'] >= 30 && $q['quote'] >= 90 && !empty($c['ok']) && $c['score'] !== null && (int) $c['score'] - $alt_score >= 15 && (int) ($c['aehn'] ?? 0) >= 1 && (int) ($c['passt'] ?? 0) >= 2;
+    }
+
     private static function austausch_kandidaten(string $alt, string $name, array $d, array $trotz, array $fund, int $max = 4): array {
         $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $marken = (array) get_option('sab_marken', []);
         if (!defined('SAB_SYNC') && get_transient('sab_such_pruefung') === false) {   // eingetragene Suchtreffer ohne Amazon-Daten: Abruf im Hintergrund anstoßen (höchstens alle 10 Minuten)
@@ -4155,7 +4193,9 @@ final class SAB {
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
         usort($out, fn($p, $q2) => [(int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
-        $out = self::ohne_doppel_kandidaten($alt, $out);   // nur Produkte vorschlagen, die der Austausch auch annehmen würde (keine Doppelung nebeneinander oder zu nah)
+        $out = self::ohne_doppel_kandidaten($alt, $out);
+        $abl = self::lernen_abgelehnt($alt);   // schon einmal übergangene Vorschläge rutschen nach hinten, zweimal abgelehnte fliegen raus
+        if ($abl) { $out = array_values(array_filter($out, fn($c) => ($abl[$c['asin']] ?? 0) < 2)); foreach ($out as &$c_) { $c_['abgel'] = (int) ($abl[$c_['asin']] ?? 0); } unset($c_); }   // nur Produkte vorschlagen, die der Austausch auch annehmen würde (keine Doppelung nebeneinander oder zu nah)
         $bestand = []; $neu = [];
         foreach ($out as $c) { if (strpos((string) $c['quelle'], 'Amazon-Suche') === 0) { $c['neu'] = true; $neu[] = $c; } else { $bestand[] = $c; } }
         $bestand = array_values(array_filter($bestand, fn($c) => (int) ($c['passt'] ?? 0) >= 2 || ((int) ($c['passt'] ?? 0) === 1 && (int) ($c['aehn'] ?? 0) >= 1)));   // Bestand nur bei echter Namens-/Typ-Übereinstimmung
@@ -4165,7 +4205,7 @@ final class SAB {
             usort($rest, fn($p, $q2) => $q2['score'] <=> $p['score']);
             $liste = array_merge($liste, array_slice($rest, 0, 4 - count($liste)));
         }
-        usort($liste, fn($p, $q2) => [(int) !empty($q2['neu']), (int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) !empty($p['neu']), (int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
+        usort($liste, fn($p, $q2) => [(int) !empty($q2['neu']), -(int) ($q2['abgel'] ?? 0), (int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) !empty($p['neu']), -(int) ($p['abgel'] ?? 0), (int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
         return ['liste' => $liste, 'aussortiert' => $aus];   // hat der Bestand wenig Passendes, füllen Treffer der Amazon-Suche auf (bis zu vier)
     }
 
@@ -4428,7 +4468,8 @@ final class SAB {
         $h .= '<style>@media(max-width:782px){.sab-tk{padding:8px!important;overflow:hidden}.sab-tk,.sab-tk *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.sab-tk-kopf{flex-direction:column;align-items:flex-start!important}.sab-tk-k{flex:1 1 100%!important;max-width:none!important}.sab-tk input[type=text]{width:100%!important;max-width:100%!important;size:auto}.sab-tk .sab-ps-out>div{flex-wrap:wrap}}</style>';
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
             . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
-        $zaehler = 0;
+        $zaehler = 0; $lq = self::lernen_quote();
+        $h .= '<p style="font-size:14px"><strong>Trefferquote der Vorschläge:</strong> ' . ($lq['n'] ? 'Platz 1 gewählt: ' . $lq['eins'] . ' von ' . $lq['n'] . ' (' . $lq['quote'] . ' %)' : 'noch keine Tausche gemerkt') . '. <span class="description">Gemerkt werden nur ASINs und der Platz im Ranking (höchstens 500 Einträge). Übergangene Vorschläge rutschen für dasselbe Produkt nach hinten. ' . ($lq['n'] >= 30 && $lq['quote'] >= 90 ? 'Grün markierte Karten würden bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet).' : 'Eine Auto-Markierung gibt es ab 30 Tauschen mit 90 % Platz 1.') . '</span></p>';
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
             if ($nb > 0 && $zaehler === 0) { $h .= '<h3 style="margin:18px 0 6px;color:#8a1f1f">Dringend tauschen: Produkte ohne Bild (' . (int) $nb . '), zuerst die auf den meisten Seiten</h3><p class="description">Hier bekommen Besucher kein Bild. Oben stehen die Produkte, die auf vielen Seiten vorkommen.</p>'; }
@@ -4454,6 +4495,7 @@ final class SAB {
                 $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
             }
             $badge = !empty($z['bl']) ? ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#fcf0f1;color:#8a1f1f;font-weight:700;font-size:12px">ohne Bild</span>' : '';
+            if ($best && self::lernen_auto($best, (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0], $lq)) { $badge .= ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#e3f4e7;color:#1a7f37;font-weight:700;font-size:12px" title="Würde bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet)">Auto-Kandidat</span>'; }
             $extra = '';
             if (!isset($d['items'][$alt])) { $extra .= '<br><strong style="color:#a00">Amazon liefert für dieses Produkt weder Titel noch Bild.</strong>' . ($z['name'] !== '' ? ' Der Name stammt aus dem Artikel.' : ' Auch im Artikel ist kein Name zu finden: bitte ASIN bei Amazon suchen.'); }
             elseif ((self::produkte()[$alt] ?? '') === '' && empty($d['items'][$alt]['titel']) && $z['name'] !== '') { $extra .= '<br><small>Name aus dem Artikel.</small>'; }
@@ -5006,6 +5048,7 @@ JS;
                     if (strlen($alt) !== 10 || strlen($neu) !== 10 || $alt === $neu) { continue; }
                     if (++$n > 10) { $m[] = 'Weitere beim nächsten Klick.'; break; }
                     $kn = $eigenWahl ? trim(sanitize_text_field(wp_unslash((string) ($enamen[$alt0] ?? '')))) : '';
+                    self::lernen_merken($alt, $neu);
                     $m[] = self::tausch_ausfuehren($alt, $neu, mb_substr($kn, 0, 60));
                 }
                 $meldung = $m ? implode(' ', $m) : 'Nichts angehakt.';
