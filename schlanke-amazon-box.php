@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.78.6
+ * Version: 0.78.7
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.78.6';
+    const VERSION = '0.78.7';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1169,7 +1169,7 @@ final class SAB {
         $st = get_option('sab_uebersicht_stand_' . self::land('')); $nm = self::produkte();
         if (is_array($st) && !empty($st['items'])) {   // auch Produkte, die Amazon gar nicht mehr kennt, stehen hier (nach dem letzten Abruf der Übersicht)
             foreach (self::alle_asins() as $a) {
-                if (!isset($st['items'][$a]) && !isset($liste[$a])) { $liste[$a] = ['name' => ($nm[$a] ?? ''), 'grund' => 'Amazon kennt das Produkt nicht mehr', 'seit' => (int) ($st['ts'] ?? time()), 'ersatz' => '', 'seite' => '']; }
+                if (!isset($st['items'][$a]) && !isset($liste[$a]) && self::amazon_unbekannt((string) $a, $st)) { $liste[$a] = ['name' => ($nm[$a] ?? ''), 'grund' => 'Amazon kennt das Produkt nicht mehr', 'seit' => (int) ($st['ts'] ?? time()), 'ersatz' => '', 'seite' => '']; }
             }
         }
         if (!$liste) { echo '<p>Keine.</p>'; }
@@ -2882,7 +2882,7 @@ final class SAB {
         $weg = []; $nv = []; $uk = []; $wa = []; $trotz = (array) get_option('sab_trotz', []);
         foreach (self::alle_asins() as $asin) {
             $x = $d['items'][$asin] ?? null;
-            if (!$x) { $weg[] = $asin; continue; }
+            if (!$x) { if (self::amazon_unbekannt((string) $asin, (array) $d)) { $weg[] = $asin; } continue; }   // fehlt es nur im Zwischenspeicher (frisch getauscht), ist es nicht „unbekannt“
             if (isset(((array) get_option('sab_trotz', []))[$asin])) { continue; }  // von dir als lieferbar bestätigt
             if (($x['preis'] ?? '') === '' && (($x['rang'] ?? null) === null || $x['rang'] > 300000)) { $wa[] = $asin; continue; }   // kein Preis und kein (oder ein sehr schlechter) Rang: wahrscheinlich nicht mehr kaufbar
             if (self::unklar($x)) { $uk[] = $asin; } elseif (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') { $nv[] = $asin; }
@@ -4046,6 +4046,7 @@ final class SAB {
         $pn = self::produkt($neu, self::land(''), true, true);   // Ersatz sofort bei Amazon holen und Bild speichern, sonst fehlt es nach dem Tausch auf der Seite
         if (!self::hat_bild($pn)) { return 'NICHT getauscht: Für ' . $neu . ' liefert Amazon kein Bild oder keinen Link (Produkt unbekannt oder Abruf fehlgeschlagen). Bitte ein anderes Ersatzprodukt wählen.'; }
         self::bild_url($pn, $neu, self::land(''), 0, true);
+        update_option('sab_ungueltige_asins', array_values(array_diff(array_map('strval', (array) get_option('sab_ungueltige_asins', [])), [$neu])), false);   // Amazon hat das neue Produkt gerade geliefert: nie als „unbekannt“ führen, bis die Übersicht es selbst kennt
         $d0 = self::uebersicht_daten(self::land(''), false); $f0 = self::fundstellen([$alt]); $an = [(string) (self::produkte()[$alt] ?? ''), (string) ($d0['items'][$alt]['titel'] ?? '')];
         if (!$an[1] && !empty($f0[$alt])) { $p0 = get_post((int) array_key_first($f0[$alt])); $an[] = $p0 ? self::kontext_titel((string) $p0->post_content, $alt) : ''; }
         $eigenerName = $name !== '';

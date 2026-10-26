@@ -1246,4 +1246,8 @@ $GLOBALS['opt']['sab_such_kand'] = "B0AAAAAAA1 | B0OLD00001, B0OLD00002 | 2026-1
 SAB::einmal_importe('federhilfe.de', ['m' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zusammen' => true, 'zeilen' => ['B0AAAAAAA1 | B0NEW00001, B0OLD00002 | 2026-10-26', 'B0AAAAAAA2 | B0NEW00002 | 2026-10-26']]]);
 ok(get_option('sab_such_kand') === "B0AAAAAAA1 | B0NEW00001, B0OLD00002, B0OLD00001 | 2026-10-26\nB0AAAAAAA2 | B0NEW00002 | 2026-10-26", 'Einmal-Import zusammen: neue Kandidaten vor die vorhandenen, nichts doppelt, neue Zeilen angehängt');
 unset($GLOBALS['opt']['sab_such_kand'], $GLOBALS['opt']['sab_importe_erledigt']);
+$GLOBALS['opt']['sab_ungueltige_asins'] = ['B0XXXXXXX1'];
+$mAu = new ReflectionMethod('SAB', 'amazon_unbekannt'); $mAu->setAccessible(true);
+ok(!$mAu->invoke(null, 'B0FRISCH01', ['items' => []]) && $mAu->invoke(null, 'B0XXXXXXX1', ['items' => []]), 'Frisch getauschtes Produkt (nur nicht im Zwischenspeicher) gilt nicht als „Amazon kennt es nicht“');
+unset($GLOBALS['opt']['sab_ungueltige_asins']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
