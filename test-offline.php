@@ -1274,4 +1274,17 @@ ok($sm && strpos($sm['maske'], '{{LINK}}') !== false && strpos($sm['maske'], 'Ri
 [$tc, $tn] = SAB::tausch_text($cx, 'B0SATZTEST', 'B0NEUTEST1', ['Angebot bei Amazon', 'Saatmischungen von Rieger-Hoffmann'], 'Wildblumen Saat Kurzname');
 ok(strpos($tc, '>Angebot bei Amazon</a>') !== false && strpos($tc, 'B0NEUTEST1') !== false && strpos($tc, 'Wildblumen Saat Kurzname') !== false && strpos($tc, 'Rieger-Hoffmann') === false, 'Tausch: Linktext bleibt, Name im Fließtext wird ersetzt');
 ok(SAB::satz_mit_link('<p>Nur ein Bild <a href="https://www.amazon.de/dp/B0SATZTEST"><img src="x"></a> hier.</p>', 'B0SATZTEST') === null, 'Satz: Bildlinks werden nicht angeboten');
+$satzA = 'Außerdem betreibt Kay den Zaun mit einem 12-Volt-10-Ah-Akku';
+ok(SAB::technik_begriffe($satzA) === ['12v', '10ah'] && SAB::technik_begriffe('Akku 12V 10Ah wartungsfrei') === ['12v', '10ah'], 'Technik-Begriffe: 12-Volt-10-Ah = 12V 10Ah');
+$sbA = SAB::schluesselbegriffe($satzA);
+ok(in_array('12v', $sbA, true) && in_array('10ah', $sbA, true) && in_array('akku', $sbA, true) && !in_array('volt', $sbA, true), 'Suchbegriffe aus dem Akku-Satz: 12v, 10ah, akku: ' . implode(',', $sbA));
+ok(SAB::generischer_linktext('Angebot bei Amazon') && SAB::generischer_linktext('Zum Angebot') && !SAB::generischer_linktext('Rieger-Hoffmann Saatmischung'), 'Allgemeiner Linktext ist kein Produktname');
+// Akku-Fall: Textlink „Angebot bei Amazon“ nach „12-Volt-10-Ah-Akku“
+$GLOBALS['pc'] = '<p>Außerdem betreibt Kay den Zaun mit einem 12-Volt-10-Ah-Akku (<a href="https://www.amazon.de/dp/B0AKKUALT1?tag=x">Angebot bei Amazon</a>).</p>';
+$GLOBALS['opt']['sab_produkte'] = "B0AKKUGUT1 | Akku 12V 10Ah\nB0AKKUFALS | Akku 6V 4Ah\nB0ZAUNXXX1 | Weidezaun Gerät"; unset($GLOBALS['opt']['sab_such_kand'], $GLOBALS['opt']['sab_amz_alt'], $GLOBALS['opt']['sab_marken'], $GLOBALS['opt']['sab_lern']);
+$ddA = ['items' => ['B0AKKUGUT1' => $it('Blei-Akku 12V 10Ah wartungsfrei', 3.0), 'B0AKKUFALS' => $it('Akku 6V 4Ah', 3.0), 'B0ZAUNXXX1' => $it('Weidezaun Gerät 9V', 3.0)]];
+$kA = $mK->invoke(null, 'B0AKKUALT1', 'Angebot bei Amazon', $ddA, [], ['B0AKKUALT1' => [7 => ['n' => 1, 'titel' => 'x']]]);
+$aA = array_column($kA['liste'], 'asin');
+ok(($aA[0] ?? '') === 'B0AKKUGUT1', 'Akku-Fall: 12V/10Ah-Akku steht im Bestand auf Platz 1 trotz Name „Angebot bei Amazon“: ' . implode(',', $aA));
+unset($GLOBALS['pc']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

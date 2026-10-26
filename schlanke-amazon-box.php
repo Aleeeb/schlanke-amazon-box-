@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.82.1
+ * Version: 0.83.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.82.1';
+    const VERSION = '0.83.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2762,6 +2762,19 @@ final class SAB {
     }
 
     /** Name für die Anzeige: Kurzname, Amazon-Titel, letzter bekannter Titel, Ausfallliste, sonst der Name laut Artikel (Tabellenzeile oder Überschrift). */
+    /** Allgemeine Linktexte („Angebot bei Amazon“, „Zum Angebot“, „hier“) sind kein Produktname. */
+    public static function generischer_linktext(string $n): bool {
+        return (bool) preg_match('/^\s*(?:(?:zum\s+|das\s+)?angebote?(?:\s+(?:bei|auf)\s+amazon)?|(?:bei|auf)\s+amazon(?:\s+ansehen)?|jetzt\s+(?:ansehen|kaufen|bestellen)|hier(?:\s+(?:ansehen|klicken|kaufen))?|mehr\s+erfahren|zum\s+produkt|preis\s+prüfen|preis\s+ansehen|link|amazon)\s*[.:!›»→>]*\s*$/iu', $n);
+    }
+
+    /** Zahlen mit Einheit (12 V, 10 Ah, 20 W, 5 l) in einheitlicher Schreibweise („12v“, „10ah“). Nur Verwaltung. @return string[] */
+    public static function technik_begriffe(string $t): array {
+        $u = ['volt' => 'v', 'v' => 'v', 'ah' => 'ah', 'amperestunde' => 'ah', 'amperestunden' => 'ah', 'mah' => 'mah', 'watt' => 'w', 'w' => 'w', 'liter' => 'l', 'l' => 'l', 'kg' => 'kg', 'ml' => 'ml', 'cm' => 'cm', 'mm' => 'mm'];
+        $o = [];
+        if (preg_match_all('/(\d+(?:[.,]\d+)?)[\s-]*(volt|amperestunden?|ah|mah|watt|liter|kg|ml|cm|mm|v|w|l)(?![\p{L}])/u', mb_strtolower($t), $m, PREG_SET_ORDER)) { foreach ($m as $x) { $o[$x[1] . $u[$x[2]]] = 1; } }
+        return array_keys($o);
+    }
+
     private static function anzeige_name(string $asin, array $d, array $fund): string {
         static $memo = [];
         if (isset($memo[$asin])) { return $memo[$asin]; }
@@ -2774,6 +2787,7 @@ final class SAB {
                 if ($post) { $n = self::kontext_titel((string) $post->post_content, $asin); if ($n !== '') { break; } }
             }
         }
+        if (self::generischer_linktext($n)) { $n = ''; }
         return $memo[$asin] = $n;
     }
 
@@ -4517,11 +4531,12 @@ final class SAB {
     /** Schlüsselnomen aus dem Satz vor einem Link (Produktart, nicht Marken): großgeschriebene Wörter, ohne Satzanfangs-Füllwörter und ohne Namen aus mehreren Großwörtern. Nur Verwaltung. @return string[] */
     public static function schluesselbegriffe(string $text, int $max = 6): array {
         $stop = ['möchte','möchten','wenn','dann','auch','dabei','hier','zudem','außerdem','alternativ','besonders','gerne','allerdings','natürlich','jedoch','daher','deshalb','damit','dafür','bitte','tipp','beispiel','beispielsweise','hinweis','achtung','wichtig','unter','anderem','allem','kann','können','sollte','sollten','wer','wir','sie','man','eine','einen','einem','einer','dieser','diese','dieses','jeder','jede','viele','manche','einige','garten','gärten','jahr','jahre','jahren','zeit','euro','amazon','link','produkt','produkte','produkten','empfehlen','empfehlenswert','empfehlung','empfehlungen','wasser','boden','pflanzen','pflanze','tiere','tier'];
-        $tok = preg_split('/[^\p{L}\p{N}-]+/u', $text, -1, PREG_SPLIT_NO_EMPTY);
-        $gross = fn($w) => (bool) preg_match('/^\p{Lu}[\p{Ll}-]{3,}$/u', $w);
-        $out = [];
+        $tok = preg_split('/[^\p{L}\p{N}]+/u', $text, -1, PREG_SPLIT_NO_EMPTY);
+        $gross = fn($w) => (bool) preg_match('/^\p{Lu}\p{Ll}{3,}$/u', $w);
+        $einheit = ['volt', 'ampere', 'amperestunden', 'amperestunde', 'watt', 'liter', 'meter', 'zentimeter', 'millimeter', 'kilogramm', 'gramm'];
+        $out = []; foreach (array_slice(self::technik_begriffe($text), -3) as $tb) { $out[$tb] = 1; }
         foreach ($tok as $i => $w) {
-            if (!$gross($w) || in_array(mb_strtolower($w), $stop, true)) { continue; }
+            if (!$gross($w) || in_array(mb_strtolower($w), $stop, true) || in_array(mb_strtolower($w), $einheit, true)) { continue; }
             if (($i > 0 && $gross($tok[$i - 1])) || (isset($tok[$i + 1]) && $gross($tok[$i + 1]) && !in_array(mb_strtolower($tok[$i + 1]), $stop, true))) { continue; }   // Namen wie „Rieger Hoffmann“
             $b = mb_strtolower($w);
             if (mb_strlen($b) >= 9 && preg_match('/(ungen|ionen)$/u', $b)) { $b = mb_substr($b, 0, -2); }
@@ -4562,7 +4577,7 @@ final class SAB {
      * @return array{liste:array,aussortiert:array} liste: bis zu $max Kandidaten, bester zuerst
      */
     /** Entfernt Kandidaten, bei denen der Tausch ALT => Kandidat in einem Artikel eine zu nahe Doppelung ergäbe (gleiche Prüfung wie beim Festschreiben). Prüft die ersten 40, mit demselben Weg wie der Tausch (Artikel pro ALT einmal geladen). */
-    private static function ohne_doppel_kandidaten(string $alt, array $liste, array $items = [], array $namen = []): array {
+    private static function ohne_doppel_kandidaten(string $alt, array $liste, array $items = [], array $namen = [], array &$blockiert_liste = []): array {
         global $wpdb; static $cache = [];
         if (!isset($wpdb) || !$liste) { return $liste; }
         if (!isset($cache[$alt])) {
@@ -4578,7 +4593,7 @@ final class SAB {
                 [$t1] = self::tausch_kurzlinks($t, $alt, (string) $c['asin'], ''); [$t2] = self::tausch_text($t1, $alt, (string) $c['asin'], [], '');
                 if (self::doppel_neu($t, $t2, (string) $c['asin']) || self::doppel_neu($t, str_replace($alt, (string) $c['asin'], $t), (string) $c['asin'])) { $blockiert = true; break; }
             } }
-            if (!$blockiert) { $out[] = $c; }
+            if (!$blockiert) { $out[] = $c; } else { $blockiert_liste[] = $c; }
         }
         return $out;
     }
@@ -4679,6 +4694,7 @@ final class SAB {
 
     private static function austausch_kandidaten(string $alt, string $name, array $d, array $trotz, array $fund, int $max = 4): array {
         $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $marken = (array) get_option('sab_marken', []);
+        if (self::generischer_linktext($name)) { $name = ''; }   // „Angebot bei Amazon“ sagt nichts über das Produkt
         if (!defined('SAB_SYNC') && get_transient('sab_such_pruefung') === false) {   // eingetragene Suchtreffer ohne Amazon-Daten: Abruf im Hintergrund anstoßen (höchstens alle 10 Minuten)
             foreach (self::such_kandidaten() as $l_) { foreach ($l_['liste'] as $b_) { if (!isset($items[$b_])) { set_transient('sab_such_pruefung', 1, 10 * MINUTE_IN_SECONDS); foreach (array_keys(self::LAENDER) as $ld_) { delete_transient("sab_uebersicht_{$ld_}"); } break 2; } } }
         }
@@ -4692,6 +4708,8 @@ final class SAB {
         $gruppe = []; foreach (self::gruppen() as $liste) { if (in_array($alt, $liste, true)) { $gruppe = array_merge($gruppe, $liste); } }
         $wn = self::woerter(trim($name . ' ' . (string) ($items[$alt]['titel'] ?? '')));
         $wk = self::woerter(self::text_vor_stelle($alt, $fund[$alt] ?? []));
+        $tvs = self::text_vor_stelle($alt, $fund[$alt] ?? []); $tech = self::technik_begriffe($tvs);   // z. B. „12-Volt-10-Ah-Akku“ => 12v, 10ah
+        $nom = array_values(array_filter(self::schluesselbegriffe($tvs), fn($w) => !preg_match('/^\d/', $w)));   // Nomen direkt vor dem Link (auch kurze wie „Akku“)
         $refm = self::merkmale(trim($name . ' ' . (string) ($items[$alt]['titel'] ?? '') . ' ' . self::text_vor_stelle($alt, $fund[$alt] ?? [])));   // Schlüsselmerkmale aus Name, Titel und Text vor dem Link   // Hinweise aus dem Satz vor dem Link   // nur der Produktname selbst, ohne Artikeltext: Namensähnlichkeit
         $text = $name;   // der Textzusammenhang bringt nur etwas, wenn der Name fast nichts sagt: sonst ziehen Wörter wie „Schnecken“ aus dem Artikel unpassende Produkte heran
         if (count(self::woerter($name)) < 2) { $text .= ' ' . self::stellen_kontext($alt, $fund[$alt] ?? []); }
@@ -4709,14 +4727,18 @@ final class SAB {
             $tk = $wk ? count(array_intersect($wk, self::woerter($tc))) : 0;
             $passt = $ing ? 3 : ($ar >= 1 ? 2 : ($tr >= 3 ? 1 : 0));   // nur zwei gemeinsame Wörter („caracoles“, „protección“) reichen nicht
             $sc = self::score($x)[0]; $pv = self::provision_satz($x);
-            $aehn = count(array_intersect($wn, self::woerter($tc))); if ($tk >= 2) { $aehn++; if ($passt === 0) { $passt = 1; } } $sim = $wn ? min(1.0, count(array_intersect($wn, self::woerter($tc))) / max(1, count($wn))) : 0.0;
+            $tt = $tech ? count(array_intersect($tech, self::technik_begriffe($tc))) : 0; $nb = 0; $tcl = mb_strtolower($tc);
+            foreach ($nom as $w_) { if (mb_strlen($w_) >= 4 && strpos($tcl, $w_) !== false) { $nb++; } }
+            if ($tt >= 1 && $nb >= 1) { $passt = max($passt, 2); } elseif ($tt >= 1 || $nb >= 1) { $passt = max($passt, 1); }
+            $aehn = count(array_intersect($wn, self::woerter($tc))) + min(2, $tt + $nb); if ($tk >= 2) { $aehn++; if ($passt === 0) { $passt = 1; } } $sim = $wn ? min(1.0, count(array_intersect($wn, self::woerter($tc))) / max(1, count($wn))) : 0.0;
             if ($passt === 0 && ($quelle === 'Kunden kauften auch' || strpos($quelle, 'Amazon-Suche') === 0)) { $passt = 2; }   // von Amazon als zugehörig gezeigt beziehungsweise von Hand geprüft   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
             if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; if ($ok && $quelle === 'Katalog') { $rest[] = ['asin' => $a, 'quelle' => 'Bestes im Portfolio (Passung unklar)', 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => 0, 'pv' => $pv, 'rang' => $sc, 'ausgeschlossen' => false]; } continue; }
-            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'sim' => $sim, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + 40 * $sim + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
+            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'sim' => $sim, 'pv' => $pv, 'rang' => $sc + 30 * $tt + 10 * $nb + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + 40 * $sim + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
         usort($out, fn($p, $q2) => [(int) $q2['ok'], (int) floor(4 * (float) ($q2['sim'] ?? 0)) + min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (int) floor(4 * (float) ($p['sim'] ?? 0)) + min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
-        $out = self::ohne_doppel_kandidaten($alt, $out, $items, $namen);
+        $bl_ = []; $out = self::ohne_doppel_kandidaten($alt, $out, $items, $namen, $bl_);
+        foreach ($bl_ as $c_) { $aus[] = ['asin' => $c_['asin'], 'quelle' => $c_['quelle'], 'titel' => (string) ($c_['x']['titel'] ?? ''), 'grund' => 'steht oder passt schon in der Nähe im Artikel (Doppelung)']; }
         $abl = self::lernen_abgelehnt($alt);   // schon einmal übergangene Vorschläge rutschen nach hinten, zweimal abgelehnte fliegen raus
         if ($abl) { $out = array_values(array_filter($out, fn($c) => ($abl[$c['asin']] ?? 0) < 2)); foreach ($out as &$c_) { $c_['abgel'] = (int) ($abl[$c_['asin']] ?? 0); } unset($c_); }   // nur Produkte vorschlagen, die der Austausch auch annehmen würde (keine Doppelung nebeneinander oder zu nah)
         $bestand = []; $neu = [];
@@ -4943,8 +4965,9 @@ final class SAB {
     private static function austausch_skript(array $d, array $trotz, array $namen, string $land): string {
         $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
         $out = '<script>window.SAB_PS=' . wp_json_encode($ps) . ';window.SAB_DP=' . wp_json_encode('https://' . self::LAENDER[$land][0] . '/dp/') . ';'
-            . "function sabRun(w){var t=w.querySelector('.sab-ps-in'),out=w.querySelector('.sab-ps-out'),q=t.value.toLowerCase().trim().split(/\\s+/).filter(Boolean),alt=w.getAttribute('data-alt'),r=[],h='';if(!q.length){out.innerHTML='';return;}"
-            . "for(var i=0;i<window.SAB_PS.length;i++){var p=window.SAB_PS[i],hay=(p[0]+' '+p[1]+' '+p[2]).toLowerCase(),c=0;if(p[0]===alt){continue;}for(var j=0;j<q.length;j++){if(hay.indexOf(q[j])>=0){c++;}}if(c){r.push([c,p]);}}"
+            . "function sabNz(x){return x.toLowerCase().replace(/(\\d+(?:[.,]\\d+)?)[\\s-]*(volt|amperestunden?|ah|mah|watt|liter|kg|ml|cm|mm|v|w|l)(?![a-zäöüß])/g,function(a,n,u){var m={volt:'v',amperestunde:'ah',amperestunden:'ah',watt:'w',liter:'l'};return n+(m[u]||u)});}"
+            . "function sabRun(w){var t=w.querySelector('.sab-ps-in'),out=w.querySelector('.sab-ps-out'),q=sabNz(t.value).trim().split(/\\s+/).filter(Boolean),alt=w.getAttribute('data-alt'),r=[],h='';if(!q.length){out.innerHTML='';return;}"
+            . "for(var i=0;i<window.SAB_PS.length;i++){var p=window.SAB_PS[i],hay=sabNz(p[0]+' '+p[1]+' '+p[2]),c=0;if(p[0]===alt){continue;}for(var j=0;j<q.length;j++){if(hay.indexOf(q[j])>=0){c++;}}if(c){r.push([c,p]);}}"
             . "r.sort(function(a,b){return b[0]-a[0]||b[1][3]-a[1][3]});r=r.slice(0,8);"
             . "r.forEach(function(x){var p=x[1];h+='<div style=\"display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #eee\"><button type=\"button\" class=\"button button-small sab-ps-pick\" data-asin=\"'+p[0]+'\" data-name=\"'+(p[1]||p[2]).replace(/\"/g,'')+'\">wählen</button><span><strong>'+(p[1]||p[2]||'(ohne Name)').replace(/</g,'&lt;')+'</strong> <small>'+(q.length>1?x[0]+' von '+q.length+' Begriffen · ':'')+(p[3]>=0?'Score '+p[3]+' · ':'')+p[0]+'</small></span> <a href=\"'+window.SAB_DP+p[0]+'\" target=\"_blank\" rel=\"noopener\">bei Amazon ansehen ↗</a></div>';});"
             . "out.innerHTML=h||'<em>Kein Treffer im Bestand.</em>';}"
@@ -4969,7 +4992,7 @@ final class SAB {
            . "Ausgabe: je Produkt eine Zeile im Format `ALTE-ASIN | NEU1, NEU2, NEU3, ... | $dat` (nur ASINs). Die Zeilen gehen an den Plugin-Thread zum Einbau in „Treffer der Amazon-Suche“.\n\nProdukte (" . count($liste) . "):\n";
         foreach ($liste as $i => $r) {
             $mk = []; foreach (self::merkmale($r[1] . ' ' . $r[5] . ' ' . $r[2]) as $g => $w) { $mk[] = $g . ': ' . implode('/', $w); }
-            $p .= ($i + 1) . '. ' . $r[0] . ' | Titel/Name: ' . trim(preg_replace('/\s+/', ' ', $r[1])) . ($r[3] !== '' ? ' | Kategorie: ' . $r[3] : '') . ' | Seite: ' . $host . ' (' . (int) $r[6] . ' Artikel) | Text davor: ' . ($r[2] !== '' ? '„' . trim(preg_replace('/\s+/', ' ', $r[2])) . '“' : '–') . (($sbg = self::schluesselbegriffe((string) $r[2])) ? ' | Suchbegriffe aus dem Satz: ' . implode(', ', $sbg) : '') . ($mk ? ' | Merkmale: ' . implode(', ', $mk) : '') . ' | bisher ' . (int) $r[4] . ' Vorschläge' . "\n";
+            $p .= ($i + 1) . '. ' . $r[0] . ' | Titel/Name: ' . (self::generischer_linktext((string) $r[1]) || trim((string) $r[1]) === '' ? '(Textlink ohne Produktnamen: Satz davor beachten)' : trim(preg_replace('/\s+/', ' ', $r[1]))) . ($r[3] !== '' ? ' | Kategorie: ' . $r[3] : '') . ' | Seite: ' . $host . ' (' . (int) $r[6] . ' Artikel) | Text davor: ' . ($r[2] !== '' ? '„' . trim(preg_replace('/\s+/', ' ', $r[2])) . '“' : '–') . (($sbg = self::schluesselbegriffe((string) $r[2])) ? ' | Suchbegriffe aus dem Satz: ' . implode(', ', $sbg) : '') . ($mk ? ' | Merkmale: ' . implode(', ', $mk) : '') . ' | bisher ' . (int) $r[4] . ' Vorschläge' . "\n";
         }
         return '<div class="notice notice-info inline" style="padding:8px 14px"><p><strong>Prompt für die Suche-Sitzung (' . count($liste) . ' Produkte mit weniger als 4 Vorschlägen).</strong> Mit einem Klick kopieren und im Hauptthread einfügen.</p><textarea readonly id="sab-prompt" rows="6" class="large-text code">' . esc_textarea($p) . '</textarea><p><button type="button" class="button button-primary sab-kopieren" data-ziel="sab-prompt">Prompt kopieren</button> <a class="button" download="suchauftrag-' . esc_attr($host) . '-' . esc_attr($dat) . '.txt" href="data:text/plain;charset=utf-8,' . rawurlencode($p) . '">als Datei herunterladen</a> <span class="description sab-kopiert" style="display:none">Kopiert.</span></p></div>';
     }
@@ -4979,7 +5002,7 @@ final class SAB {
         $h = '';
         if (self::$tk_warte) {
             $h .= '<h3 style="margin-top:2em">Wartet auf Amazon-Suche (' . count(self::$tk_warte) . ')</h3><p class="description">Für diese Produkte gibt es noch keinen einzigen Kandidaten. Sie stehen im Suchauftrag unten; sobald die Treffer eingetragen sind, erscheinen sie oben als Karte.</p><ul>';
-            foreach (self::$tk_warte as $z) { $h .= '<li><code>' . esc_html($z['alt']) . '</code> ' . esc_html($z['name'] !== '' ? $z['name'] : 'Name unbekannt') . ' <small>(' . esc_html($z['grund']) . '; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . ')</small> <a href="' . esc_url(self::such_link($z['name'] !== '' ? (string) $z['name'] : $z['alt'])) . '" target="_blank" rel="noopener">bei Amazon suchen ↗</a>';
+            foreach (self::$tk_warte as $z) { $h .= '<li><code>' . esc_html($z['alt']) . '</code> ' . esc_html($z['name'] !== '' ? $z['name'] : 'Name unbekannt') . ' <small>(' . esc_html($z['grund']) . '; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . ')</small>' . (!empty($z['aus']) ? ' <small style="color:#8a5a00">· ' . count($z['aus']) . ' Kandidaten aussortiert' . (!empty($z['aus'][0]['grund']) ? ' (' . esc_html($z['aus'][0]['grund']) . ')' : ' (passen nicht zum Satz/Produkt)') . ', z. B. ' . esc_html(mb_substr((string) $z['aus'][0]['titel'], 0, 50)) . '</small>' : '') . ' <a href="' . esc_url(self::such_link($z['name'] !== '' ? (string) $z['name'] : $z['alt'])) . '" target="_blank" rel="noopener">bei Amazon suchen ↗</a>';
                 $nr = 0; foreach ((array) $z['f'] as $pid => $f) { if (++$nr > 3) { break; } $h .= ' · <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $z['alt'])) . '" target="_blank" rel="noopener">' . esc_html($f['titel'] ?: ('Beitrag ' . $pid)) . '</a>'; }
                 $h .= '</li>'; }
             $h .= '</ul>';
@@ -5012,7 +5035,7 @@ final class SAB {
             if ((int) $z['dr'] >= 1000) { self::$tk_toet[] = $z; return ''; }
             if (!$k['liste']) {
                 if ((int) $z['dr'] >= 100 || !empty($z['bl'])) {
-                    self::$tk_warte[] = $z;
+                    $z['aus'] = (array) $k['aussortiert']; self::$tk_warte[] = $z;
                     $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f']), (string) ($xalt['kategorie'] ?? ''), count($k['liste']), (string) ($xalt['titel'] ?? ''), (int) $z['seiten']];
                 }
                 return '';   // lieferbar und kein besserer Ersatz: keine Karte
