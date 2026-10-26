@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.78.7
+ * Version: 0.78.8
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.78.7';
+    const VERSION = '0.78.8';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4732,6 +4732,29 @@ final class SAB {
     }
 
     /** Eine Austausch-Karte zu einem Produkt (Kandidaten, eigene ASIN, Suchknöpfe); gemeinsam für den Reiter Austausch und den Umbau. */
+    /** Eigene Abschnitte unter der Austauschliste: Produkte ohne Kandidat („Wartet auf Amazon-Suche“) und Tierschädliches („Entscheidung nötig“). */
+    private static function austausch_abschnitte_html(array $d, string $land): string {
+        $h = '';
+        if (self::$tk_warte) {
+            $h .= '<h3 style="margin-top:2em">Wartet auf Amazon-Suche (' . count(self::$tk_warte) . ')</h3><p class="description">Für diese Produkte gibt es noch keinen einzigen Kandidaten. Sie stehen im Suchauftrag unten; sobald die Treffer eingetragen sind, erscheinen sie oben als Karte.</p><ul>';
+            foreach (self::$tk_warte as $z) { $h .= '<li><code>' . esc_html($z['alt']) . '</code> ' . esc_html($z['name'] !== '' ? $z['name'] : 'Name unbekannt') . ' <small>(' . esc_html($z['grund']) . '; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . ')</small> <a href="' . esc_url(self::such_link($z['name'] !== '' ? (string) $z['name'] : $z['alt'])) . '" target="_blank" rel="noopener">bei Amazon suchen ↗</a></li>'; }
+            $h .= '</ul>';
+        }
+        if (self::$tk_toet) {
+            $h .= '<h3 style="margin-top:2em;color:#8a1f1f">Tierschädlich, Entscheidung nötig: ersetzen, löschen oder lassen (' . count(self::$tk_toet) . ')</h3><p class="description">Diese Produkte können Tiere töten oder verletzen. Sie werden nie automatisch ersetzt oder vorgeschlagen; du entscheidest je Produkt.</p><ul>';
+            foreach (self::$tk_toet as $z) {
+                $li = ''; $nr = 0;
+                foreach ((array) $z['f'] as $pid => $f) { if (++$nr > 6) { break; } $li .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $z['alt'])) . '" target="_blank" rel="noopener">' . esc_html($f['titel'] ?: ('Beitrag ' . $pid)) . '</a>'; }
+                $h .= '<li><code>' . esc_html($z['alt']) . '</code> ' . esc_html($z['name'] !== '' ? $z['name'] : 'Name unbekannt') . ' <small>(' . esc_html($z['grund']) . ')</small><br><small>Artikel:' . $li . '</small></li>';
+            }
+            $h .= '</ul>';
+        }
+        self::$tk_warte = []; self::$tk_toet = [];
+        return $h;
+    }
+
+    private static $tk_sammeln = false; private static $tk_warte = []; private static $tk_toet = [];
+
     private static function austausch_karte_html(array $z, array $d, array $trotz, array $namen, string $land, array $fund, array $lq, array &$ohneVorschlag): string {
         $h = '';
         $alt = $z['alt']; $xalt = $d['items'][$alt] ?? [];
@@ -4741,6 +4764,16 @@ final class SAB {
             $k['liste'] = array_values(array_filter($k['liste'], fn($c) => $c['score'] !== null && (int) $c['score'] >= $salt + 10));
         }
         $best = $k['liste'][0] ?? null;
+        if (self::$tk_sammeln) {   // Haupt-Austauschliste: nur entscheidbare Karten; Tierschädliches und Produkte ohne Kandidat kommen in eigene Abschnitte
+            if ((int) $z['dr'] >= 1000) { self::$tk_toet[] = $z; return ''; }
+            if (!$k['liste']) {
+                if ((int) $z['dr'] >= 100 || !empty($z['bl'])) {
+                    self::$tk_warte[] = $z;
+                    $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f'])];
+                }
+                return '';   // lieferbar und kein besserer Ersatz: keine Karte
+            }
+        }
         $voraus = false;   // nie vorwählen: getauscht wird nur, was bewusst angeklickt wurde (Alexander 25.10.)
         $wo = '<strong>' . (int) $z['n'] . '×</strong> auf <strong>' . (int) $z['seiten'] . '</strong> Seite' . ($z['seiten'] === 1 ? '' : 'n');
         if ($z['f']) {
@@ -4834,11 +4867,14 @@ final class SAB {
             if ($nb > 0 && $zaehler === 0) { $h .= '<h3 style="margin:18px 0 6px;color:#8a1f1f">Dringend tauschen: Produkte ohne Bild (' . (int) $nb . '), zuerst die auf den meisten Seiten</h3><p class="description">Hier bekommen Besucher kein Bild. Oben stehen die Produkte, die auf vielen Seiten vorkommen.</p>'; }
             if ($nb > 0 && $zaehler === $nb) { $h .= '<h3 style="margin:22px 0 6px">Weitere Produkte zu tauschen</h3>'; }
             if (++$zaehler > $ladeLimit) { $h .= '<p class="description">… und ' . (count($zeilen) - $ladeLimit) . ' weitere (erst diese erledigen).</p>'; break; }
-            $h .= self::austausch_karte_html($z, $d, $trotz, $namen, $land, $fund, $lq, $ohneVorschlag);
+            self::$tk_sammeln = true; $kh = self::austausch_karte_html($z, $d, $trotz, $namen, $land, $fund, $lq, $ohneVorschlag); self::$tk_sammeln = false;
+            if ($kh === '') { $zaehler--; } else { $h .= $kh; }
         }
+        $h .= self::austausch_abschnitte_html($d, $land);
         if ($ohneVorschlag) {
-            $zl = ''; foreach ($ohneVorschlag as [$a_, $n_, $t_]) { $zl .= $a_ . ' | ' . trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $n_))) . ' | ' . mb_substr(trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $t_))), 0, 200) . "\n"; }
-            $h .= '<div class="notice notice-info inline"><p><strong>Weniger als 4 Vorschläge (' . count($ohneVorschlag) . ' Produkte): Suchbegriffe für die Amazon-Suche.</strong> Format <code>ASIN | Name | Text davor</code>. Die Mac-/PC-Sitzung sucht danach bei Amazon und trägt die Treffer unten bei „Treffer der Amazon-Suche“ ein.</p><textarea readonly rows="' . min(12, count($ohneVorschlag) + 1) . '" class="large-text code">' . esc_textarea($zl) . '</textarea></div>';
+            $host_ = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST))); $dat_ = gmdate('Y-m-d'); $zl = '';
+            foreach ($ohneVorschlag as [$a_, $n_, $t_]) { $zl .= $a_ . ' | ' . $host_ . ' | ' . trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $n_))) . ' | ' . mb_substr(trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $t_))), 0, 200) . ' | ' . $dat_ . "\n"; }
+            $h .= '<div class="notice notice-info inline"><p><strong>Suchauftrag für die Amazon-Suche (' . count($ohneVorschlag) . ' Produkte mit weniger als 4 Vorschlägen).</strong> Format <code>ASIN | Seite | Name | Text davor | Datum</code>. Die Mac-/PC-Sitzung sucht danach bei Amazon und liefert Zeilen für „Treffer der Amazon-Suche“; nach dem Einbau verschwindet das Produkt hier.</p><textarea readonly rows="' . min(12, count($ohneVorschlag) + 1) . '" class="large-text code">' . esc_textarea($zl) . '</textarea><p><a class="button" download="suchauftrag-' . esc_attr($host_) . '-' . esc_attr($dat_) . '.txt" href="data:text/plain;charset=utf-8,' . rawurlencode($zl) . '">Suchauftrag herunterladen</a></p></div>';
         }
         $h .= ($zeilen ? '<p><button class="button button-primary button-hero">Auswahl tauschen (jeweils mit Sicherung)</button> <span class="description">Der Tausch gilt in allen Artikeln, Titel und Textlinks folgen dem neuen Bildprodukt. Bis zu 10 pro Klick.</span></p>' : '<p>Nichts zu tauschen.</p>') . '</form>';
         // Austauschliste: Amazons Alternativen im Überblick
