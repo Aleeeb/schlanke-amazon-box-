@@ -1314,4 +1314,7 @@ $GLOBALS['opt']['sab_kontrolle'] = ['1' => ['ts' => time(), 'alt' => 'B0AKKUALT1
 $mKo = new ReflectionMethod('SAB', 'kontrolle_html'); $mKo->setAccessible(true); $ko = $mKo->invoke(null, 'austausch');
 ok(strpos($ko, 'sab_zeige=B0AKKUNEU1') !== false && strpos($ko, 'Außerdem betreibt Kay') !== false && strpos($ko, 'kontrolle_ok') !== false && strpos($ko, 'post.php?post=7') !== false, 'Kontrollliste: Sprunglink, Satz und Bestätigen');
 unset($GLOBALS['opt']['sab_kontrolle']);
+if (!function_exists('is_singular')) { function is_singular() { return true; } }
+$GLOBALS['admin'] = true; $GLOBALS['loggedin'] = true; ob_start(); SAB::stellen_skript(); $stj = ob_get_clean(); $GLOBALS['admin'] = false; $GLOBALS['loggedin'] = false;
+ok(strpos($stj, 'bearbeiten') !== false && strpos($stj, 'Im Bestand suchen') !== false && strpos($stj, 'action=edit') !== false, 'Frontend-Tauschfenster: Bestandssuche und Bearbeiten-Knopf');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

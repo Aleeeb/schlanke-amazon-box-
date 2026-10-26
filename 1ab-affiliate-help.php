@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.84.2
+ * Version: 0.85.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.84.2';
+    const VERSION = '0.85.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1758,7 +1758,8 @@ final class SAB {
             $img = !empty($x['bilder'][0]) ? (string) $x['bilder'][0] : '';
             $out[] = ['asin' => $c['asin'], 'name' => ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? '')), 'score' => $c['score'], 'preis' => (string) ($x['preis'] ?? ''), 'img' => $img, 'quelle' => $c['quelle'], 'ok' => (bool) $c['ok']];
         }
-        wp_send_json_success(['alt' => $name ?: $asin, 'liste' => $out, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
+        $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
+        wp_send_json_success(['alt' => $name ?: $asin, 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
     }
 
     public static function ajax_stelle_tausch(): void {
@@ -1802,7 +1803,8 @@ final class SAB {
 
     public static function stellen_skript(): void {
         if (!function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts') || !is_singular()) { return; }
-        $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => (int) get_queried_object_id()]);
+        $pid_ = (int) get_queried_object_id();
+        $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $pid_, 'e' => $pid_ && current_user_can('edit_post', $pid_) ? admin_url('post.php?post=' . $pid_ . '&action=edit&sab_zeige=') : '']);
         echo '<script>(function(){var C=' . $cfg . ';var seen={};'
            . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
            . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
@@ -1819,11 +1821,17 @@ final class SAB {
            . 'var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555","Score "+(c.score===null?"?":c.score)+(c.preis?" · "+c.preis:"")+" · "+c.quelle+(c.ok?"":" · nicht lieferbar")));row.appendChild(tx);'
            . 'var bt=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");bt.onclick=function(){tausche(c.asin)};row.appendChild(bt);lst.appendChild(row)});'
            . 'if(!r.data.liste.length){lst.appendChild(el("p","","Keine passenden Vorschläge. Gib unten eine ASIN ein."))}'
+           . 'var sw=el("div","padding-top:10px;margin-top:6px;border-top:1px solid #eee");sw.appendChild(el("strong","","Im Bestand suchen:"));var si=el("input","display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:6px;border:1px solid #bbb;border-radius:6px");si.placeholder="Name, Stichwort oder ASIN, schon ab zwei Buchstaben";si.type="search";var so=el("div","");sw.appendChild(si);sw.appendChild(so);bx.appendChild(sw);'
+           . 'function nz(x){return x.toLowerCase().replace(/(\d+(?:[.,]\d+)?)[\s-]*(volt|amperestunden?|ah|mah|watt|liter|kg|ml|cm|mm|v|w|l)(?![a-zäöüß])/g,function(a,n,u){var m={volt:"v",amperestunde:"ah",amperestunden:"ah",watt:"w",liter:"l"};return n+(m[u]||u)})}'
+           . 'si.oninput=function(){var q=nz(si.value).trim().split(/\s+/).filter(Boolean);so.textContent="";if(!q.length||si.value.trim().length<2){return}var rs=[];(r.data.ps||[]).forEach(function(p){var h=nz(p[0]+" "+p[1]+" "+p[2]),c=0;q.forEach(function(w){if(h.indexOf(w)>=0){c++}});if(c&&p[0]!==asin){rs.push([c,p])}});'
+           . 'rs.sort(function(a,b){return b[0]-a[0]||b[1][3]-a[1][3]});rs.slice(0,8).forEach(function(x){var p=x[1],row=el("div","display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0f0");var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",p[1]||p[2]||p[0]));tx.appendChild(el("div","font-size:12px;color:#555",(p[3]>=0?"Score "+p[3]+" · ":"")+p[0]));row.appendChild(tx);'
+           . 'var bt=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");bt.type="button";bt.onclick=function(){tausche(p[0])};row.appendChild(bt);so.appendChild(row)});if(!rs.length){so.appendChild(el("p","margin:6px 0;color:#555","Kein Treffer im Bestand."))}};'
            . 'var fr=el("div","display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid #eee");var ip=el("input","flex:1;padding:6px;border:1px solid #bbb;border-radius:6px");ip.placeholder="Eigene ASIN, z. B. B0XXXXXXXX";var b2=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");b2.onclick=function(){tausche(ip.value.trim().toUpperCase())};fr.appendChild(ip);fr.appendChild(b2);bx.appendChild(fr);'
            . 'if(r.data.zurueck){var zu=el("a","display:inline-block;margin-top:10px;color:#a00;cursor:pointer;text-decoration:underline","Letzten Tausch in diesem Artikel rückgängig machen");zu.onclick=function(){post("sab_stelle_zurueck",{},function(q){if(q.success){location.reload()}else{inf.textContent=q.data;inf.style.color="#a00"}})};bx.appendChild(zu)}'
            . '});}'
            . 'function mk(e){var o=e.getAttribute("data-sab-ord");if(!o||seen[o]){return}seen[o]=1;var box=e.closest(".sab-karte,.sab-produkt,td")||e.parentNode;if(getComputedStyle(box).position==="static"){box.style.position="relative"}'
-           . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b)}'
+           . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b);'
+           . 'if(C.e){var b3=el("button","position:absolute;top:30px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","✎ bearbeiten");b3.type="button";b3.title="Öffnet den Editor an dieser Stelle (neuer Tab)";b3.onclick=function(ev){ev.preventDefault();ev.stopPropagation();window.open(C.e+encodeURIComponent(e.getAttribute("data-sab-asin")),"_blank")};box.appendChild(b3)}}'
            . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}})();</script>';
     }
 
