@@ -1268,4 +1268,10 @@ ok(strpos($sh, 'sab-bal-info') !== false && strpos($sh, '3 Klicks') !== false &&
 $GLOBALS['wpdb'] = $oldDb;
 $sb = SAB::schluesselbegriffe('Möchte man eine Blumenwiese anlegen, empfehlen sich unter anderem Saatmischungen von Rieger Hoffmann.');
 ok($sb === ['blumenwiese', 'saatmischung'], 'Suchbegriffe aus dem Satz: Blumenwiese, Saatmischung (ohne Marke Rieger Hoffmann): ' . implode(',', $sb));
+$cx = '<p>Erster Satz. Möchte man eine Blumenwiese anlegen, empfehlen sich Saatmischungen von Rieger-Hoffmann <a href="https://www.amazon.de/dp/B0SATZTEST?tag=x" rel="sponsored">Angebot bei Amazon</a> und mehr. Nächster Satz.</p>';
+$sm = SAB::satz_mit_link($cx, 'B0SATZTEST');
+ok($sm && strpos($sm['maske'], '{{LINK}}') !== false && strpos($sm['maske'], 'Rieger-Hoffmann {{LINK}} und mehr.') !== false && strpos($sm['maske'], 'Erster') === false && strpos($sm['maske'], 'Nächster') === false, 'Satz mit Textlink: Maske mit {{LINK}}, nur dieser Satz');
+[$tc, $tn] = SAB::tausch_text($cx, 'B0SATZTEST', 'B0NEUTEST1', ['Angebot bei Amazon', 'Saatmischungen von Rieger-Hoffmann'], 'Wildblumen Saat Kurzname');
+ok(strpos($tc, '>Angebot bei Amazon</a>') !== false && strpos($tc, 'B0NEUTEST1') !== false && strpos($tc, 'Wildblumen Saat Kurzname') !== false && strpos($tc, 'Rieger-Hoffmann') === false, 'Tausch: Linktext bleibt, Name im Fließtext wird ersetzt');
+ok(SAB::satz_mit_link('<p>Nur ein Bild <a href="https://www.amazon.de/dp/B0SATZTEST"><img src="x"></a> hier.</p>', 'B0SATZTEST') === null, 'Satz: Bildlinks werden nicht angeboten');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.81.2
+ * Version: 0.82.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.81.2';
+    const VERSION = '0.82.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3025,9 +3025,16 @@ final class SAB {
         $n = substr_count($c, $alt);
         $c = str_replace($alt, $neu, $c);
         if ($neuer_name !== '') {
+            // Der Text von Textlinks („Angebot bei Amazon“) bleibt, wie er ist; Namen werden nur außerhalb von Links ersetzt (Tabellen, Überschriften, Fließtext).
+            $teile = preg_split('#(<a\b[^>]*>.*?</a>|\[amz_link\b[^\]]*\].*?\[/amz_link\])#is', $c, -1, PREG_SPLIT_DELIM_CAPTURE);
             foreach (array_unique(array_filter(array_map('trim', $alte_namen))) as $name) {
-                if (mb_strlen($name) >= 6 && $name !== $neuer_name && strpos($c, $name) !== false) { $n += substr_count($c, $name); $c = str_replace($name, $neuer_name, $c); }
+                if (mb_strlen($name) < 6 || $name === $neuer_name) { continue; }
+                foreach ($teile as $ti => $tt) {
+                    if ($ti % 2 === 1 || strpos($tt, $name) === false) { continue; }
+                    $n += substr_count($tt, $name); $teile[$ti] = str_replace($name, $neuer_name, $tt);
+                }
             }
+            $c = implode('', $teile);
         }
         return [$c, $n];
     }
@@ -3106,6 +3113,41 @@ final class SAB {
     }
 
     /** Schreibt den Austausch in alle Artikel (jeweils mit Sicherung). @return array{0:int,1:int,2:string,3:array} [Artikel, Kurzlinks ohne ASIN, Fehler, wegen Doppelung übersprungene Artikel] */
+    /** Satz, in dem ein reiner Textlink (ohne Bild) steht: Grenzen im Rohtext, der Satz mit {{LINK}} statt des Links (zum Bearbeiten) und der Link selbst. Null, wenn nicht eindeutig. */
+    public static function satz_mit_link(string $c, string $asin): ?array {
+        $i = strpos($c, $asin); if ($i === false) { return null; }
+        $kopf = substr($c, 0, $i); $a1 = strrpos($kopf, '[amz_link'); $a2 = strrpos($kopf, '<a ');
+        if ($a2 !== false && ($a1 === false || $a2 > $a1)) { $e = stripos($c, '</a>', $i); if ($e === false) { return null; } $s = $a2; $e += 4; }
+        elseif ($a1 !== false) { $cl = strpos($c, ']', $a1); if ($cl === false) { return null; } $e = $cl + 1; $zu = strpos($c, '[/amz_link]', $e); if ($zu !== false && $zu === strpos($c, '[', $e)) { $e = $zu + 11; } $s = $a1; }
+        else { return null; }
+        if ($e < $i || $e - $s > 700) { return null; }
+        $link = substr($c, $s, $e - $s);
+        if (preg_match('/<img|\[amz_(bild|karte|box)/i', $link)) { return null; }
+        $grenze = '/(?:[.!?:]\s+|\n|<\/?(?:p|li|br|h[1-6]|div|td|th|tr|ul|ol)\b[^>]*>)/i';
+        $v0 = max(0, $s - 500); $vor = substr($c, $v0, $s - $v0); $von = 0;
+        if (preg_match_all($grenze, $vor, $m, PREG_OFFSET_CAPTURE)) { $l = end($m[0]); $von = $l[1] + strlen($l[0]); } elseif ($v0 > 0) { return null; }
+        $nach = substr($c, $e, 500);
+        if (!preg_match($grenze, $nach, $m2, PREG_OFFSET_CAPTURE)) { return null; }
+        $bis = $m2[0][1] + (preg_match('/^[.!?:]/', $m2[0][0]) ? 1 : 0);
+        $vorn = substr($vor, $von); $hinten = substr($nach, 0, $bis);
+        if (preg_match('/<a\s|\[amz_|\[aawp/i', $vorn . $hinten) || trim(strip_tags($vorn . $hinten)) === '') { return null; }
+        return ['start' => $v0 + $von, 'ende' => $e + $bis, 'link' => $link, 'maske' => $vorn . '{{LINK}}' . $hinten];
+    }
+
+    /** Bearbeitbarer Satz auf der Austausch-Karte (nur bei Textlinks). */
+    private static function satz_feld_html(string $alt, array $f): string {
+        foreach (array_slice(array_keys($f), 0, 3, true) as $pid) {
+            $post = get_post((int) $pid); if (!$post) { continue; }
+            $sm = self::satz_mit_link((string) $post->post_content, $alt); if (!$sm) { continue; }
+            return '<div style="margin:10px 0 0;max-width:760px"><label><strong>Satz im Artikel (Textlink):</strong> <small>Hier kannst du den Satz anpassen, falls er nach dem Tausch nicht mehr stimmt. <code>{{LINK}}</code> ist der Link und muss genau einmal drinbleiben; der Linktext bleibt, wie er ist. Geändert wird nur dieser Satz, vorher wird der Artikel gesichert (Rückgängig).</small>'
+                . '<textarea name="sab_satz[' . esc_attr($alt) . ']" rows="3" class="large-text">' . esc_textarea($sm['maske']) . '</textarea></label><input type="hidden" name="sab_satz_alt[' . esc_attr($alt) . ']" value="' . esc_attr($sm['maske']) . '"><small>Aus: ' . esc_html(get_the_title($post)) . '</small></div>';
+        }
+        return '';
+    }
+
+    /** Geänderter Satz für den nächsten Tausch: [Satz vorher mit {{LINK}}, Satz nachher]. */
+    private static $satz_aend = null;
+
     private static function tausch_festschreiben(string $alt, string $neu, string $neuer_name, array $alte_namen): array {
         global $wpdb;
         if (!isset($wpdb) || strlen($alt) !== 10 || strlen($neu) !== 10 || $alt === $neu) { return [0, 0, 'Ungültige Angabe.', [], []]; }
@@ -3113,7 +3155,12 @@ final class SAB {
         $log = (array) get_option('sab_tausch_log', []); $id = (string) (time()) . substr(md5($alt . $neu), 0, 4); $posts = []; $kurz = 0; $doppel = []; $hinweise = [];
         foreach ((array) $rows as $r) {
             $pid = (int) $r['ID']; $c = (string) $r['post_content'];
-            [$c1, $nk1, $hw] = self::tausch_kurzlinks($c, $alt, $neu, $neuer_name);   // Kurzlinks derselben Spalte mitnehmen, sonst zeigt der Textlink aufs alte Produkt
+            $c_arb = $c; $hw0 = [];
+            if (self::$satz_aend) {   // Satz anpassen: nur wenn er im Artikel noch genau so steht wie angezeigt
+                $sm = self::satz_mit_link($c, $alt);
+                if ($sm && $sm['maske'] === self::$satz_aend[0]) { $c_arb = substr($c, 0, $sm['start']) . str_replace('{{LINK}}', $sm['link'], self::$satz_aend[1]) . substr($c, $sm['ende']); $hw0[] = 'Satz angepasst'; }
+            }
+            [$c1, $nk1, $hw] = self::tausch_kurzlinks($c_arb, $alt, $neu, $neuer_name); $hw = array_merge($hw0, $hw);   // Kurzlinks derselben Spalte mitnehmen, sonst zeigt der Textlink aufs alte Produkt
             [$neu_c, $n] = self::tausch_text($c1, $alt, $neu, $alte_namen, $neuer_name); $n += $nk1;
             if ($n === 0 || $neu_c === $c) { continue; }
             if (self::doppel_neu($c, $neu_c, $neu)) { $doppel[] = (string) ($r['post_title'] ?? ('Beitrag ' . $pid)); continue; }   // Schutz: kein Produkt doppelt nebeneinander oder zu nah
@@ -5002,7 +5049,7 @@ final class SAB {
         if (count($k['liste']) < 4) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f']), (string) ($xalt['kategorie'] ?? ''), count($k['liste']), (string) ($xalt['titel'] ?? ''), (int) $z['seiten']]; }
         $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
         if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
-        $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div><div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off" value="' . esc_attr(implode(' ', $sb)) . '"></label> <button type="button" class="button sab-ps-go">Suchen</button>' . ($sb ? '<div style="margin:4px 0"><small>Suchbegriffe aus dem Satz: ' . implode(' ', array_map(fn($w) => '<a href="#" class="sab-ps-chip" data-q="' . esc_attr($w) . '" style="display:inline-block;padding:1px 8px;margin:0 3px 3px 0;border-radius:10px;background:#f0f6fc;border:1px solid #c5d9ed;text-decoration:none">' . esc_html($w) . '</a>', $sb)) . '</small></div>' : '') . '<div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
+        $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div>' . self::satz_feld_html((string) $alt, (array) $z['f']) . '<div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off" value="' . esc_attr(implode(' ', $sb)) . '"></label> <button type="button" class="button sab-ps-go">Suchen</button>' . ($sb ? '<div style="margin:4px 0"><small>Suchbegriffe aus dem Satz: ' . implode(' ', array_map(fn($w) => '<a href="#" class="sab-ps-chip" data-q="' . esc_attr($w) . '" style="display:inline-block;padding:1px 8px;margin:0 3px 3px 0;border-radius:10px;background:#f0f6fc;border:1px solid #c5d9ed;text-decoration:none">' . esc_html($w) . '</a>', $sb)) . '</small></div>' : '') . '<div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
             . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
         return $h;
     }
@@ -5591,6 +5638,12 @@ JS;
                     $kn = $eigenWahl ? trim(sanitize_text_field(wp_unslash((string) ($enamen[$alt0] ?? '')))) : '';
                     if (!$eigenWahl) { $kw = $_POST['sab_kn'][$alt0][$neu] ?? ($_POST['sab_kn'][$alt][$neu] ?? ''); if (is_string($kw)) { $kn = trim(sanitize_text_field(wp_unslash($kw))); } }   // gewählter Kurzname-Vorschlag
                     self::lernen_merken($alt, $neu);
+                    self::$satz_aend = null;
+                    $sa = (string) wp_unslash($_POST['sab_satz_alt'][$alt0] ?? ''); $sn = (string) wp_unslash($_POST['sab_satz'][$alt0] ?? '');
+                    if ($sa !== '' && $sn !== '' && $sn !== $sa) {
+                        if (substr_count($sn, '{{LINK}}') === 1 && mb_strlen($sn) <= 1500) { self::$satz_aend = [$sa, wp_kses_post($sn)]; }
+                        else { $m[] = 'Satz NICHT geändert: {{LINK}} muss genau einmal vorkommen.'; }
+                    }
                     $m[] = self::tausch_ausfuehren($alt, $neu, mb_substr($kn, 0, 60));
                 }
                 $meldung = $m ? implode(' ', $m) : 'Nichts angehakt.';
