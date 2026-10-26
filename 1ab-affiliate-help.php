@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.77.1
+ * Version: 0.77.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.77.1';
+    const VERSION = '0.77.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3999,6 +3999,10 @@ final class SAB {
             'B00EF3X028 | B01CWAP0F0, B07DJD9DJM, B09W5V82K6 | 2026-10-26',
             'B01CXA3OW0 | B0B5H15521, B093LR5P62, B0F9FV7GKX | 2026-10-26',
         ]],
+        '2026-10-26-korrektur-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [], 'ersetzen' => [   // nur wenn die Zeile noch genau so dasteht (von Hand Geändertes bleibt)
+            'B01MU8UQ64 | B004WO8ZIE, B000WFLAMA, B091TXGPP9 | 2026-10-26' => 'B01MU8UQ64 | B0CXJFT8VK, B0CX6GF8HN, B0F3P51Q4M | 2026-10-26',
+            'B08VKRJ5D4 | B0037YHTMS | 2026-10-26' => '',
+        ]],
         '2026-10-26-kurznamen-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
             'B0F3P51Q4M | Nistkasten   2er-Set, 32 mm',
         ]],
@@ -4025,6 +4029,10 @@ final class SAB {
             foreach ($j['zeilen'] as $z) {
                 $a = self::asin(explode('|', $z)[0]);
                 if ($a !== '' && !isset($vorhanden[$a])) { $txt .= ($txt === '' ? '' : "\n") . $z; $vorhanden[$a] = true; }
+            }
+            foreach ((array) ($j['ersetzen'] ?? []) as $von => $nach) {
+                $zl = array_map('rtrim', preg_split('/\R/', $txt)); $i = array_search($von, $zl, true);
+                if ($i !== false) { if ($nach === '') { unset($zl[$i]); } else { $zl[$i] = $nach; } $txt = implode("\n", $zl); }
             }
             update_option($j['option'], $txt, false);
             $fertig[] = $id; $neu = true;
