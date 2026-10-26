@@ -1266,4 +1266,6 @@ $mSt = new ReflectionMethod('SAB', 'statistik_html'); $mSt->setAccessible(true);
 $sh = $mSt->invoke(null);
 ok(strpos($sh, 'sab-bal-info') !== false && strpos($sh, '3 Klicks') !== false && strpos($sh, 'B0STATIK01') !== false && strpos($sh, '#ratgeber') !== false && strpos($sh, 'zu wenig Daten') !== false && strpos($sh, '<details') !== false, 'Statistik: Balken mit Klickzahl, Produktkarte, Seiten mit Sprungstelle, ehrliche Rückkehr');
 $GLOBALS['wpdb'] = $oldDb;
+$sb = SAB::schluesselbegriffe('Möchte man eine Blumenwiese anlegen, empfehlen sich unter anderem Saatmischungen von Rieger Hoffmann.');
+ok($sb === ['blumenwiese', 'saatmischung'], 'Suchbegriffe aus dem Satz: Blumenwiese, Saatmischung (ohne Marke Rieger Hoffmann): ' . implode(',', $sb));
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
