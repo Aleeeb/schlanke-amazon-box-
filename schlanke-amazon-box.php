@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.78.4
+ * Version: 0.78.5
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.78.4';
+    const VERSION = '0.78.5';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4746,7 +4746,7 @@ final class SAB {
                 . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . ($x ? '<br>' . self::score_grafik(self::score($x)[2]) . (($sa = (int) (self::score(array_merge($xalt, ['trotz' => isset($trotz[$alt])]))[0] ?? 0)) && $c['score'] !== null ? ' <small style="font-weight:700;color:' . ($c['score'] >= $sa ? '#1a7f37' : '#a00') . '" title="Unterschied zum alten Produkt">' . ($c['score'] - $sa >= 0 ? '+' : '') . ((int) $c['score'] - $sa) . ' gegenüber dem alten</small>' : '') : '') . self::handdaten_hinweis((string) $c['asin']) . self::kurzname_wahl_html($alt, $c, $namen, $x) . '</span></label>';
         }
         if (count($k['liste']) > 4) { $h .= '<p style="flex:1 1 100%;margin:0"><button type="button" class="button sab-weiter" data-n="1">Weitere vier Vorschläge anzeigen</button> <small class="description">(' . count($k['liste']) . ' insgesamt)</small></p>'; }
-        if (!$k['liste']) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f'])]; }
+        if (count($k['liste']) < 4) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f'])]; }
         $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
         if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
         $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="26" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div><div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off"></label><div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
@@ -4800,6 +4800,7 @@ final class SAB {
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
             . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
         $zaehler = 0; $lq = self::lernen_quote(); $ohneVorschlag = [];
+        $h .= '<p style="font-size:14px"><strong>Amazon-Treffer im Plugin:</strong> ' . count(self::such_kandidaten()) . ' Produkte mit Suchtreffern, ' . count((array) get_option('sab_importe_erledigt', [])) . ' Importe eingespielt.</p>';
         $h .= '<p style="font-size:14px"><strong>Trefferquote der Vorschläge:</strong> ' . ($lq['n'] ? 'Platz 1 gewählt: ' . $lq['eins'] . ' von ' . $lq['n'] . ' (' . $lq['quote'] . ' %)' : 'noch keine Tausche gemerkt') . '. <span class="description">Gemerkt werden nur ASINs und der Platz im Ranking (höchstens 500 Einträge). Übergangene Vorschläge rutschen für dasselbe Produkt nach hinten. ' . ($lq['n'] >= 30 && $lq['quote'] >= 90 ? 'Grün markierte Karten würden bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet).' : 'Eine Auto-Markierung gibt es ab 30 Tauschen mit 90 % Platz 1.') . '</span></p>';
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
@@ -4810,7 +4811,7 @@ final class SAB {
         }
         if ($ohneVorschlag) {
             $zl = ''; foreach ($ohneVorschlag as [$a_, $n_, $t_]) { $zl .= $a_ . ' | ' . trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $n_))) . ' | ' . mb_substr(trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $t_))), 0, 200) . "\n"; }
-            $h .= '<div class="notice notice-info inline"><p><strong>Ohne Vorschlag (' . count($ohneVorschlag) . '): Suchbegriffe für die Amazon-Suche.</strong> Format <code>ASIN | Name | Text davor</code>. Die Mac-/PC-Sitzung sucht danach bei Amazon und trägt die Treffer unten bei „Treffer der Amazon-Suche“ ein.</p><textarea readonly rows="' . min(12, count($ohneVorschlag) + 1) . '" class="large-text code">' . esc_textarea($zl) . '</textarea></div>';
+            $h .= '<div class="notice notice-info inline"><p><strong>Weniger als 4 Vorschläge (' . count($ohneVorschlag) . ' Produkte): Suchbegriffe für die Amazon-Suche.</strong> Format <code>ASIN | Name | Text davor</code>. Die Mac-/PC-Sitzung sucht danach bei Amazon und trägt die Treffer unten bei „Treffer der Amazon-Suche“ ein.</p><textarea readonly rows="' . min(12, count($ohneVorschlag) + 1) . '" class="large-text code">' . esc_textarea($zl) . '</textarea></div>';
         }
         $h .= ($zeilen ? '<p><button class="button button-primary button-hero">Auswahl tauschen (jeweils mit Sicherung)</button> <span class="description">Der Tausch gilt in allen Artikeln, Titel und Textlinks folgen dem neuen Bildprodukt. Bis zu 10 pro Klick.</span></p>' : '<p>Nichts zu tauschen.</p>') . '</form>';
         // Austauschliste: Amazons Alternativen im Überblick
