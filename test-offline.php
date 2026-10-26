@@ -1223,4 +1223,6 @@ $mB = new ReflectionMethod('SAB', 'gleiche_bauart_nah'); $mB->setAccessible(true
 $art = ['<p>[amz_bild asin="B0ALTNEST1"][/amz_bild] Text [amz_bild asin="B0NACHBAR1"][/amz_bild]</p>'];
 $nm = ['B0NACHBAR1' => 'Schwalbennest Doppelnest Lehm', 'B0DOPPEL01' => 'Doppelnest Schlamm', 'B0EINZEL01' => 'Einzelnest Holzbeton'];
 ok($mB->invoke(null, 'B0ALTNEST1', 'B0DOPPEL01', $art, [], $nm) && !$mB->invoke(null, 'B0ALTNEST1', 'B0EINZEL01', $art, [], $nm), 'Produktvielfalt: gleiche Bauart in der Nähe wird nicht vorgeschlagen, andere Bauart schon');
+$kv = SAB::kurzname_varianten('Relaxdays Nistkasten Bausatz Vögel, 2er Set, 32 mm Einflugloch');
+ok(count($kv) >= 2 && count($kv) <= 3 && count(array_unique($kv)) === count($kv) && strpos($kv[0], ' | ') === false, 'Kurznamen-Vorschläge: zwei bis drei verschiedene Namen aus dem Titel');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

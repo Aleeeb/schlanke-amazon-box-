@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.77.4
+ * Version: 0.78.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.77.4';
+    const VERSION = '0.78.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3310,6 +3310,19 @@ final class SAB {
         return $ziel;
     }
 
+    /** Zwei bis drei Kurznamen-Vorschläge aus dem Amazon-Titel (lang mit Merkmal, nur Produktart, Anfang des Titels); innen mit drei Leerzeichen wie in der Produktliste. */
+    public static function kurzname_varianten(string $titel): array {
+        $a = self::kurzname_aus_titel($titel); if ($a === '') { return []; }
+        $v = [str_replace(' | ', '   ', $a)];
+        $art = trim(explode(' | ', $a)[0]);
+        if ($art !== '' && $art !== $a) { $v[] = $art; }
+        $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($titel))));
+        $t = trim(preg_split('/\s[-–|]\s|[,(]/u', $t, 2)[0]);
+        $kurz = trim(implode(' ', array_slice(preg_split('/\s+/u', $t), 0, 5)), " -–|,");
+        if ($kurz !== '' && !in_array($kurz, $v, true) && mb_strlen($kurz) <= 45) { $v[] = $kurz; }
+        return array_slice(array_values(array_unique($v)), 0, 3);
+    }
+
     /** Kurzname im Stil „Produktart | Merkmal“: Marke und Beiwerk fallen weg, hinten steht eine aussagekräftige Zahl (Anzahl oder Maß), z. B. „Cuello de caracol | Set de 12“. */
     public static function kurzname_aus_titel(string $t): string {
         $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($t))));
@@ -4215,6 +4228,15 @@ final class SAB {
         return false;
     }
 
+    /** Auswahl von zwei bis drei Kurznamen für einen Kandidaten ohne eigenen Kurznamen; der erste ist vorgewählt. Wird beim Tausch als Name im Artikel genutzt. */
+    private static function kurzname_wahl_html(string $alt, array $c, array $namen, array $x): string {
+        if (($namen[$c['asin']] ?? '') !== '' || empty($x['titel'])) { return ''; }
+        $v = self::kurzname_varianten((string) $x['titel']); if (!$v) { return ''; }
+        $h = '<span class="sab-kn" style="display:block;margin-top:6px;border-top:1px dashed #ccc;padding-top:4px"><small><strong>Name im Artikel:</strong></small>';
+        foreach ($v as $i => $n) { $h .= '<br><label style="display:inline"><input type="radio" name="sab_kn[' . esc_attr($alt) . '][' . esc_attr($c['asin']) . ']" value="' . esc_attr($n) . '"' . ($i === 0 ? ' checked' : '') . '> <small>' . esc_html($n) . '</small></label>'; }
+        return $h . '</span>';
+    }
+
     private static function austausch_kandidaten(string $alt, string $name, array $d, array $trotz, array $fund, int $max = 4): array {
         $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $marken = (array) get_option('sab_marken', []);
         if (!defined('SAB_SYNC') && get_transient('sab_such_pruefung') === false) {   // eingetragene Suchtreffer ohne Amazon-Daten: Abruf im Hintergrund anstoßen (höchstens alle 10 Minuten)
@@ -4247,13 +4269,13 @@ final class SAB {
             $tk = $wk ? count(array_intersect($wk, self::woerter($tc))) : 0;
             $passt = $ing ? 3 : ($ar >= 1 ? 2 : ($tr >= 3 ? 1 : 0));   // nur zwei gemeinsame Wörter („caracoles“, „protección“) reichen nicht
             $sc = self::score($x)[0]; $pv = self::provision_satz($x);
-            $aehn = count(array_intersect($wn, self::woerter($tc))); if ($tk >= 2) { $aehn++; if ($passt === 0) { $passt = 1; } }
+            $aehn = count(array_intersect($wn, self::woerter($tc))); if ($tk >= 2) { $aehn++; if ($passt === 0) { $passt = 1; } } $sim = $wn ? min(1.0, count(array_intersect($wn, self::woerter($tc))) / max(1, count($wn))) : 0.0;
             if ($passt === 0 && ($quelle === 'Kunden kauften auch' || strpos($quelle, 'Amazon-Suche') === 0)) { $passt = 2; }   // von Amazon als zugehörig gezeigt beziehungsweise von Hand geprüft   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
             if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; if ($ok && $quelle === 'Katalog') { $rest[] = ['asin' => $a, 'quelle' => 'Bestes im Portfolio (Passung unklar)', 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => 0, 'pv' => $pv, 'rang' => $sc, 'ausgeschlossen' => false]; } continue; }
-            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
+            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'sim' => $sim, 'pv' => $pv, 'rang' => $sc + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + 40 * $sim + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
-        usort($out, fn($p, $q2) => [(int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
+        usort($out, fn($p, $q2) => [(int) $q2['ok'], (int) floor(4 * (float) ($q2['sim'] ?? 0)) + min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (int) floor(4 * (float) ($p['sim'] ?? 0)) + min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
         $out = self::ohne_doppel_kandidaten($alt, $out, $items, $namen);
         $abl = self::lernen_abgelehnt($alt);   // schon einmal übergangene Vorschläge rutschen nach hinten, zweimal abgelehnte fliegen raus
         if ($abl) { $out = array_values(array_filter($out, fn($c) => ($abl[$c['asin']] ?? 0) < 2)); foreach ($out as &$c_) { $c_['abgel'] = (int) ($abl[$c_['asin']] ?? 0); } unset($c_); }   // nur Produkte vorschlagen, die der Austausch auch annehmen würde (keine Doppelung nebeneinander oder zu nah)
@@ -4261,12 +4283,12 @@ final class SAB {
         foreach ($out as $c) { if (strpos((string) $c['quelle'], 'Amazon-Suche') === 0) { $c['neu'] = true; $neu[] = $c; } else { $bestand[] = $c; } }
         $bestand = array_values(array_filter($bestand, fn($c) => (int) ($c['passt'] ?? 0) >= 2 || ((int) ($c['passt'] ?? 0) === 1 && (int) ($c['aehn'] ?? 0) >= 1)));   // Bestand nur bei echter Namens-/Typ-Übereinstimmung
         $bs = array_slice($bestand, 0, $max);
-        $liste = array_merge($bs, array_slice($neu, 0, max(2, min(4, 6 - count($bs)))));
+        $liste = array_merge($bs, array_slice($neu, 0, $max > 4 ? 6 : max(2, min(4, 6 - count($bs)))));
         if (false && count($liste) < 4 && $rest) {   // nichts Passendes gefunden: wenigstens die stärksten lieferbaren Produkte des Bestands zeigen
             usort($rest, fn($p, $q2) => $q2['score'] <=> $p['score']);
             $liste = array_merge($liste, array_slice($rest, 0, 4 - count($liste)));
         }
-        usort($liste, fn($p, $q2) => [(int) !empty($q2['neu']), -(int) ($q2['abgel'] ?? 0), (int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) !empty($p['neu']), -(int) ($p['abgel'] ?? 0), (int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
+        usort($liste, fn($p, $q2) => [(int) !empty($q2['neu']), -(int) ($q2['abgel'] ?? 0), (int) $q2['ok'], (int) floor(4 * (float) ($q2['sim'] ?? 0)) + min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) !empty($p['neu']), -(int) ($p['abgel'] ?? 0), (int) $p['ok'], (int) floor(4 * (float) ($p['sim'] ?? 0)) + min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
         return ['liste' => $liste, 'aussortiert' => $aus];   // hat der Bestand wenig Passendes, füllen Treffer der Amazon-Suche auf (bis zu vier)
     }
 
@@ -4529,7 +4551,8 @@ final class SAB {
         $h .= '<style>@media(max-width:782px){.sab-tk{padding:8px!important;overflow:hidden}.sab-tk,.sab-tk *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.sab-tk-kopf{flex-direction:column;align-items:flex-start!important}.sab-tk-k{flex:1 1 100%!important;max-width:none!important}.sab-tk input[type=text]{width:100%!important;max-width:100%!important;size:auto}.sab-tk .sab-ps-out>div{flex-wrap:wrap}}</style>';
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
             . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
-        $zaehler = 0; $lq = self::lernen_quote();
+        $zaehler = 0; $lq = self::lernen_quote(); $ohneVorschlag = [];
+        $h .= '<script>document.addEventListener("click",function(e){var t=e.target;if(!t.closest)return;var b=t.closest(".sab-weiter");if(b){var k=+b.getAttribute("data-n"),c=b.closest(".sab-tk");c.querySelectorAll(".sab-g"+k).forEach(function(x){x.style.display="flex"});b.setAttribute("data-n",k+1);if(!c.querySelector(".sab-g"+(k+1)))b.style.display="none";return}var r=t.closest(".sab-kn input");if(r){var l=r.closest(".sab-tk-k");if(l){var a=l.querySelector("input[name^=sab_a]");if(a)a.checked=true}}});</script>';
         $h .= '<p style="font-size:14px"><strong>Trefferquote der Vorschläge:</strong> ' . ($lq['n'] ? 'Platz 1 gewählt: ' . $lq['eins'] . ' von ' . $lq['n'] . ' (' . $lq['quote'] . ' %)' : 'noch keine Tausche gemerkt') . '. <span class="description">Gemerkt werden nur ASINs und der Platz im Ranking (höchstens 500 Einträge). Übergangene Vorschläge rutschen für dasselbe Produkt nach hinten. ' . ($lq['n'] >= 30 && $lq['quote'] >= 90 ? 'Grün markierte Karten würden bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet).' : 'Eine Auto-Markierung gibt es ab 30 Tauschen mit 90 % Platz 1.') . '</span></p>';
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
@@ -4537,7 +4560,7 @@ final class SAB {
             if ($nb > 0 && $zaehler === $nb) { $h .= '<h3 style="margin:22px 0 6px">Weitere Produkte zu tauschen</h3>'; }
             if (++$zaehler > $ladeLimit) { $h .= '<p class="description">… und ' . (count($zeilen) - $ladeLimit) . ' weitere (erst diese erledigen).</p>'; break; }
             $alt = $z['alt']; $xalt = $d['items'][$alt] ?? [];
-            $k = self::austausch_kandidaten($alt, (string) $z['name'], (array) $d, $trotz, $fund);
+            $k = self::austausch_kandidaten($alt, (string) $z['name'], (array) $d, $trotz, $fund, 8);
             if (empty($z['bl']) && $z['dr'] < 100 && $z['dr'] < 1000) {   // Produkt ist lieferbar: Ersatz nur, wenn der Score deutlich höher ist
                 $salt = (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0];
                 $k['liste'] = array_values(array_filter($k['liste'], fn($c) => $c['score'] !== null && (int) $c['score'] >= $salt + 10));
@@ -4568,16 +4591,22 @@ final class SAB {
             foreach ($k['liste'] as $i => $c) {
                 $x = $c['x']; $pv = $c['pv'] ?? null; $nm = ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
                 $pvStil = $pv !== null && $pv >= 5 ? 'background:#e3f4e7;color:#1a7f37' : ($pv !== null && $pv >= 4 ? 'background:#fdf0d8;color:#8a5a00' : 'background:#eef0f0;color:#333');
-                $h .= '<label class="sab-tk-k" style="flex:1 1 300px;max-width:340px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="' . esc_attr($c['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . '>'
+                $h .= '<label class="sab-tk-k' . ($i >= 4 ? ' sab-g' . intdiv($i, 4) : '') . '" style="' . ($i >= 4 ? 'display:none;' : '') . 'flex:1 1 300px;max-width:340px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="' . esc_attr($c['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . '>'
                     . self::mini_bild($c['asin'], $x) . '<span>' . (!empty($c['neu']) ? '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#dbe9ff;color:#0b3d91;font-size:11px;font-weight:700">NEU durch Amazon-Suche</span><br>' : '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#eee;color:#444;font-size:11px">aus dem Bestand</span><br>') . '<strong>' . esc_html($nm !== '' ? $nm : '(noch keine Daten)') . '</strong><br><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($c['asin']) . '</code></a> <small><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener">bei Amazon ansehen ↗</a></small><br>'
                     . '<small>' . esc_html($c['quelle']) . ' · <strong>Score ' . ($c['score'] !== null ? (int) $c['score'] : '?') . '</strong>' . (!empty($x['bonus']) ? ' <span style="color:#6a3fb0;font-weight:700" title="Von Hand vergebener Bonus, im Score enthalten">&#9998; ' . ($x['bonus'] > 0 ? '+' : '') . (int) $x['bonus'] . ' manuell</span>' : '') . ($x && ($x['preis'] ?? '') !== '' ? ' · ' . esc_html((string) $x['preis']) : '') . ($x && isset($x['sterne']) && $x['sterne'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' ★' . (isset($x['anzahl']) && $x['anzahl'] !== null ? ' (' . number_format((int) $x['anzahl'], 0, ',', '.') . ')' : '') : '') . ' · ' . self::prime_zeichen($x && isset($x['prime']) ? $x['prime'] : null) . ($x && isset($x['liefertage']) && $x['liefertage'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : '') . '</small><br>'
                     . ($pv !== null ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;' . $pvStil . '">' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision</span>' : '<span style="color:#a00">Provision unbekannt</span>')
-                    . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . ($x ? '<br>' . self::score_grafik(self::score($x)[2]) . (($sa = (int) (self::score(array_merge($xalt, ['trotz' => isset($trotz[$alt])]))[0] ?? 0)) && $c['score'] !== null ? ' <small style="font-weight:700;color:' . ($c['score'] >= $sa ? '#1a7f37' : '#a00') . '" title="Unterschied zum alten Produkt">' . ($c['score'] - $sa >= 0 ? '+' : '') . ((int) $c['score'] - $sa) . ' gegenüber dem alten</small>' : '') : '') . '</span></label>';
+                    . (!$c['ok'] ? ' <span style="color:#a00">· nicht lieferbar / keine Daten</span>' : '') . ($x ? '<br>' . self::score_grafik(self::score($x)[2]) . (($sa = (int) (self::score(array_merge($xalt, ['trotz' => isset($trotz[$alt])]))[0] ?? 0)) && $c['score'] !== null ? ' <small style="font-weight:700;color:' . ($c['score'] >= $sa ? '#1a7f37' : '#a00') . '" title="Unterschied zum alten Produkt">' . ($c['score'] - $sa >= 0 ? '+' : '') . ((int) $c['score'] - $sa) . ' gegenüber dem alten</small>' : '') : '') . self::kurzname_wahl_html($alt, $c, $namen, $x) . '</span></label>';
             }
+            if (count($k['liste']) > 4) { $h .= '<p style="flex:1 1 100%;margin:0"><button type="button" class="button sab-weiter" data-n="1">Weitere vier Vorschläge anzeigen</button> <small class="description">(' . count($k['liste']) . ' insgesamt)</small></p>'; }
+            if (!$k['liste']) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f'])]; }
             $suchtitel = $z['name'] !== '' ? $z['name'] : $alt;
             if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
             $h .= '</div><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:10px 0 0"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="12" maxlength="10" placeholder="B0…" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button><a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div><div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off"></label><div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
                 . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
+        }
+        if ($ohneVorschlag) {
+            $zl = ''; foreach ($ohneVorschlag as [$a_, $n_, $t_]) { $zl .= $a_ . ' | ' . trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $n_))) . ' | ' . mb_substr(trim(preg_replace('/\s+/', ' ', str_replace('|', ' ', $t_))), 0, 200) . "\n"; }
+            $h .= '<div class="notice notice-info inline"><p><strong>Ohne Vorschlag (' . count($ohneVorschlag) . '): Suchbegriffe für die Amazon-Suche.</strong> Format <code>ASIN | Name | Text davor</code>. Die Mac-/PC-Sitzung sucht danach bei Amazon und trägt die Treffer unten bei „Treffer der Amazon-Suche“ ein.</p><textarea readonly rows="' . min(12, count($ohneVorschlag) + 1) . '" class="large-text code">' . esc_textarea($zl) . '</textarea></div>';
         }
         $h .= ($zeilen ? '<p><button class="button button-primary button-hero">Auswahl tauschen (jeweils mit Sicherung)</button> <span class="description">Der Tausch gilt in allen Artikeln, Titel und Textlinks folgen dem neuen Bildprodukt. Bis zu 10 pro Klick.</span></p>' : '<p>Nichts zu tauschen.</p>') . '</form>';
         // Austauschliste: Amazons Alternativen im Überblick
@@ -5109,6 +5138,7 @@ JS;
                     if (strlen($alt) !== 10 || strlen($neu) !== 10 || $alt === $neu) { continue; }
                     if (++$n > 10) { $m[] = 'Weitere beim nächsten Klick.'; break; }
                     $kn = $eigenWahl ? trim(sanitize_text_field(wp_unslash((string) ($enamen[$alt0] ?? '')))) : '';
+                    if (!$eigenWahl) { $kw = $_POST['sab_kn'][$alt0][$neu] ?? ($_POST['sab_kn'][$alt][$neu] ?? ''); if (is_string($kw)) { $kn = trim(sanitize_text_field(wp_unslash($kw))); } }   // gewählter Kurzname-Vorschlag
                     self::lernen_merken($alt, $neu);
                     $m[] = self::tausch_ausfuehren($alt, $neu, mb_substr($kn, 0, 60));
                 }
