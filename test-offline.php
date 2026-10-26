@@ -69,6 +69,7 @@ class FakeHttp { public $o; function __construct($u) { $this->o = new FakeResp($
 function wp_remote_head($u, $a = []) { $z = $GLOBALS['kurz'][$u] ?? ''; return ['http_response' => new FakeHttp($z)]; }
 $GLOBALS['kurz'] = ['https://amzn.to/abc' => 'https://www.amazon.es/Producto-Largo/dp/B0AAAAAAA1?tag=x', 'https://amzn.to/start' => 'https://www.amazon.es/'];
 $fail = 0;
+if (!function_exists('shortcode_parse_atts')) { function shortcode_parse_atts($t) { $o = []; if (preg_match_all('/([a-z_]+)=["\']([^"\']*)["\']/i', (string) $t, $m, PREG_SET_ORDER)) { foreach ($m as $x) { $o[$x[1]] = $x[2]; } } return $o; } }
 function ok($c, $n) { global $fail; echo ($c ? 'OK   ' : 'FEHLER ') . $n . "\n"; if (!$c) $fail++; }
 function item($asin, $listings) { return ['asin' => $asin, 'detailPageURL' => "https://www.amazon.es/dp/$asin?tag=t-21", 'itemInfo' => ['title' => ['displayValue' => "T$asin"]],
     'images' => ['primary' => ['large' => ['url' => 'https://m.media/x.jpg']]], 'offersV2' => ['listings' => $listings]]; }
@@ -1225,4 +1226,6 @@ $nm = ['B0NACHBAR1' => 'Schwalbennest Doppelnest Lehm', 'B0DOPPEL01' => 'Doppeln
 ok($mB->invoke(null, 'B0ALTNEST1', 'B0DOPPEL01', $art, [], $nm) && !$mB->invoke(null, 'B0ALTNEST1', 'B0EINZEL01', $art, [], $nm), 'Produktvielfalt: gleiche Bauart in der Nähe wird nicht vorgeschlagen, andere Bauart schon');
 $kv = SAB::kurzname_varianten('Relaxdays Nistkasten Bausatz Vögel, 2er Set, 32 mm Einflugloch');
 ok(count($kv) >= 2 && count($kv) <= 3 && count(array_unique($kv)) === count($kv) && strpos($kv[0], ' | ') === false, 'Kurznamen-Vorschläge: zwei bis drei verschiedene Namen aus dem Titel');
+$ar = SAB::aawp_reste('[aawp box="B0AAAAAAA1"] [aawp fields="B0AAAAAAA1" value="thumb"] [aawp fields="B0AAAAAAA1" value="price"] [aawp table="B0AAAAAAA1,B0AAAAAAA2"] [amazon bestseller="garden" items="5"] [aawp link="B0AAAAAAA1"]Text[/aawp]');
+ok(count($ar) === 3 && strpos($ar[0], 'price') !== false && strpos($ar[1], 'table') !== false && strpos($ar[2], 'bestseller') !== false, 'AAWP-Reste: nur nicht ersetzte Shortcodes (Preis, Tabelle, Bestseller) werden gemeldet');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

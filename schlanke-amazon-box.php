@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.78.0
+ * Version: 0.78.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.78.0';
+    const VERSION = '0.78.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3323,6 +3323,41 @@ final class SAB {
         return array_slice(array_values(array_unique($v)), 0, 3);
     }
 
+    /** AAWP-Reste: Bestandteile eines Artikels, die das Plugin NICHT ersetzt (Tabellen, Grids, Bestseller-/Neuheitenlisten, Preis-/Bewertungsfelder, AAWP-Blöcke). Nur lesen. @return string[] */
+    public static function aawp_reste(string $c): array {
+        $o = [];
+        if (preg_match_all('/\[(aawp|amazon)\b([^\]]*)\]/i', $c, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                $a = (array) shortcode_parse_atts(trim($x[2]));
+                $a = array_change_key_case($a, CASE_LOWER);
+                if (!empty($a['box']) || !empty($a['link'])) { continue; }   // Box und Textlink deckt das Plugin ab
+                $v = strtolower(trim((string) ($a['value'] ?? 'thumb')));
+                if (!empty($a['fields']) && in_array($v, ['thumb', 'image', 'thumbnail', 'title', 'button'], true)) { continue; }
+                $o[] = mb_substr($x[0], 0, 120);
+            }
+        }
+        if (preg_match_all('/<!--\s*wp:aawp[^>]*-->/i', $c, $m)) { foreach ($m[0] as $b) { $o[] = 'Block ' . mb_substr($b, 0, 100); } }
+        if (preg_match('/class="[^"]*\baawp-?[a-z-]*/i', $c, $m)) { $o[] = 'AAWP-HTML (' . mb_substr($m[0], 0, 80) . ')'; }
+        return $o;
+    }
+
+    private static function aawp_reste_html(): string {
+        global $wpdb;
+        $h = '<hr style="margin:2em 0"><h3>AAWP-Reste (Voraussetzung zum Abschalten von AAWP)</h3><p class="description">Nur lesen. Zeigt Artikel mit AAWP-Bestandteilen, die dieses Plugin nicht ersetzt. Sind es null, kann AAWP auf dieser Seite abgeschaltet werden (zusätzlich AAWP-Widgets unter Design &rarr; Widgets und in der Seitenleiste prüfen, die stehen nicht im Artikeltext).</p>';
+        if (!isset($wpdb)) { return $h; }
+        $rows = (array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND (post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%wp:aawp%' OR post_content LIKE '%aawp%')", ARRAY_A);
+        $zeilen = ''; $n = 0; $alle = 0;
+        foreach ($rows as $r) {
+            $res = self::aawp_reste((string) $r['post_content']); $alle++;
+            if (!$res) { continue; }
+            $n++;
+            $zeilen .= '<tr><td><a href="' . esc_url(admin_url('post.php?post=' . (int) $r['ID'] . '&action=edit')) . '" target="_blank" rel="noopener">' . esc_html($r['post_title'] ?: ('Beitrag ' . $r['ID'])) . '</a></td><td>' . count($res) . '</td><td><code>' . esc_html(implode(' | ', array_slice($res, 0, 4))) . '</code></td></tr>';
+        }
+        $h .= '<p><strong>' . $alle . ' Artikel mit AAWP-Text geprüft, ' . $n . ' mit nicht ersetzten Bestandteilen.</strong></p>';
+        if ($zeilen !== '') { $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Anzahl</th><th>Beispiele</th></tr></thead><tbody>' . $zeilen . '</tbody></table>'; }
+        return $h;
+    }
+
     /** Kurzname im Stil „Produktart | Merkmal“: Marke und Beiwerk fallen weg, hinten steht eine aussagekräftige Zahl (Anzahl oder Maß), z. B. „Cuello de caracol | Set de 12“. */
     public static function kurzname_aus_titel(string $t): string {
         $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($t))));
@@ -5322,7 +5357,7 @@ JS;
         } elseif ($tab === 'austausch') {
             echo self::austausch_html();
         } elseif ($tab === 'problem') {
-            echo self::ausfall_html() . '<hr style="margin:2em 0">' . self::problem_html() . self::asin_diag_html();
+            echo self::ausfall_html() . '<hr style="margin:2em 0">' . self::problem_html() . self::asin_diag_html() . self::aawp_reste_html();
         } elseif ($tab === 'umbau') {
             $eid = (int) ($_GET['entzerren'] ?? ($_POST['sab_id'] ?? 0));
             if (!empty($_GET['entzerren']) || (isset($_POST['sab_form']) && in_array($_POST['sab_form'], ['entzerren_los', 'entzerren_zurueck'], true))) { echo '<div id="sab-entzerren" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">' . self::entzerren_vorschau_html($eid) . '</div>'; }
