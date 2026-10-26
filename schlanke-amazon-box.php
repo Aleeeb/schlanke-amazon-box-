@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.77.2
+ * Version: 0.77.3
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.77.2';
+    const VERSION = '0.77.3';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4108,7 +4108,7 @@ final class SAB {
      * (gleiche Art, gleiche Gruppe oder gemeinsame Wörter, bei Produkten auf wenigen Seiten auch zur Textstelle), gereiht nach Score und Provision (5 % schlägt 3 %).
      * @return array{liste:array,aussortiert:array} liste: bis zu $max Kandidaten, bester zuerst
      */
-    /** Entfernt Kandidaten, bei denen der Tausch ALT => Kandidat in einem Artikel eine zu nahe Doppelung ergäbe (gleiche Prüfung wie beim Festschreiben). Prüft nur die ersten 20 (Artikel pro ALT einmal geladen). */
+    /** Entfernt Kandidaten, bei denen der Tausch ALT => Kandidat in einem Artikel eine zu nahe Doppelung ergäbe (gleiche Prüfung wie beim Festschreiben). Prüft die ersten 40, mit demselben Weg wie der Tausch (Artikel pro ALT einmal geladen). */
     private static function ohne_doppel_kandidaten(string $alt, array $liste): array {
         global $wpdb; static $cache = [];
         if (!isset($wpdb) || !$liste) { return $liste; }
@@ -4120,7 +4120,10 @@ final class SAB {
         $out = [];
         foreach ($liste as $i => $c) {
             $blockiert = false;
-            if ($i < 20) { foreach ($cache[$alt] as $t) { if (self::doppel_neu($t, str_replace($alt, (string) $c['asin'], $t), (string) $c['asin'])) { $blockiert = true; break; } } }
+            if ($i < 40) { foreach ($cache[$alt] as $t) {   // genau der Weg des Tauschs: Kurzlinks der Spalte mitnehmen, dann Text tauschen, dann Doppelungs-Prüfung
+                [$t1] = self::tausch_kurzlinks($t, $alt, (string) $c['asin'], ''); [$t2] = self::tausch_text($t1, $alt, (string) $c['asin'], [], '');
+                if (self::doppel_neu($t, $t2, (string) $c['asin']) || self::doppel_neu($t, str_replace($alt, (string) $c['asin'], $t), (string) $c['asin'])) { $blockiert = true; break; }
+            } }
             if (!$blockiert) { $out[] = $c; }
         }
         return $out;
