@@ -1219,4 +1219,8 @@ $imp = ['k' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zeilen'
 SAB::einmal_importe('federhilfe.de', $imp);
 ok(get_option('sab_such_kand') === "B0AAAAAAA1 | B0NEW00001 | 2026-10-26\nB0AAAAAAA3 | B0HAND0001 | heute", 'Einmal-Import: Korrektur ersetzt/entfernt nur unveränderte Zeilen');
 unset($GLOBALS['opt']['sab_such_kand'], $GLOBALS['opt']['sab_importe_erledigt']);
+$mB = new ReflectionMethod('SAB', 'gleiche_bauart_nah'); $mB->setAccessible(true);
+$art = ['<p>[amz_bild asin="B0ALTNEST1"][/amz_bild] Text [amz_bild asin="B0NACHBAR1"][/amz_bild]</p>'];
+$nm = ['B0NACHBAR1' => 'Schwalbennest Doppelnest Lehm', 'B0DOPPEL01' => 'Doppelnest Schlamm', 'B0EINZEL01' => 'Einzelnest Holzbeton'];
+ok($mB->invoke(null, 'B0ALTNEST1', 'B0DOPPEL01', $art, [], $nm) && !$mB->invoke(null, 'B0ALTNEST1', 'B0EINZEL01', $art, [], $nm), 'Produktvielfalt: gleiche Bauart in der Nähe wird nicht vorgeschlagen, andere Bauart schon');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

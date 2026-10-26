@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.77.3
+ * Version: 0.77.4
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.77.3';
+    const VERSION = '0.77.4';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4109,7 +4109,7 @@ final class SAB {
      * @return array{liste:array,aussortiert:array} liste: bis zu $max Kandidaten, bester zuerst
      */
     /** Entfernt Kandidaten, bei denen der Tausch ALT => Kandidat in einem Artikel eine zu nahe Doppelung ergäbe (gleiche Prüfung wie beim Festschreiben). Prüft die ersten 40, mit demselben Weg wie der Tausch (Artikel pro ALT einmal geladen). */
-    private static function ohne_doppel_kandidaten(string $alt, array $liste): array {
+    private static function ohne_doppel_kandidaten(string $alt, array $liste, array $items = [], array $namen = []): array {
         global $wpdb; static $cache = [];
         if (!isset($wpdb) || !$liste) { return $liste; }
         if (!isset($cache[$alt])) {
@@ -4120,7 +4120,8 @@ final class SAB {
         $out = [];
         foreach ($liste as $i => $c) {
             $blockiert = false;
-            if ($i < 40) { foreach ($cache[$alt] as $t) {   // genau der Weg des Tauschs: Kurzlinks der Spalte mitnehmen, dann Text tauschen, dann Doppelungs-Prüfung
+            if (self::gleiche_bauart_nah($alt, (string) $c['asin'], $cache[$alt], $items, $namen)) { $blockiert = true; }   // Produktvielfalt: nicht zweimal dieselbe Bauart nebeneinander
+            if (!$blockiert && $i < 40) { foreach ($cache[$alt] as $t) {   // genau der Weg des Tauschs: Kurzlinks der Spalte mitnehmen, dann Text tauschen, dann Doppelungs-Prüfung
                 [$t1] = self::tausch_kurzlinks($t, $alt, (string) $c['asin'], ''); [$t2] = self::tausch_text($t1, $alt, (string) $c['asin'], [], '');
                 if (self::doppel_neu($t, $t2, (string) $c['asin']) || self::doppel_neu($t, str_replace($alt, (string) $c['asin'], $t), (string) $c['asin'])) { $blockiert = true; break; }
             } }
@@ -4194,6 +4195,26 @@ final class SAB {
         return false;
     }
 
+    /** Steht in der Nähe der Ersetzungsstelle (±2500 Zeichen) schon ein anderes Produkt gleicher Bauart (gleiche Zahl wie Einzel/Doppel oder gleiches Material)? Dann wird der Kandidat nicht vorgeschlagen. */
+    private static function gleiche_bauart_nah(string $alt, string $cand, array $artikel, array $items, array $namen): bool {
+        $mc = self::merkmale(($namen[$cand] ?? '') . ' ' . (string) ($items[$cand]['titel'] ?? ''));
+        $mc = array_intersect_key($mc, ['zahl' => 1, 'material' => 1]); if (!$mc) { return false; }
+        foreach ($artikel as $t) {
+            $off = 0;
+            while (($i = strpos($t, $alt, $off)) !== false) {
+                $off = $i + 10;
+                $fenster = substr($t, max(0, $i - 2500), 5000 > strlen($t) ? strlen($t) : 5000);
+                if (!preg_match_all('/\b(B[0-9A-Z]{9})\b/', $fenster, $m)) { continue; }
+                foreach (array_unique($m[1]) as $n) {
+                    if ($n === $alt || $n === $cand) { continue; }
+                    $mn = self::merkmale(($namen[$n] ?? '') . ' ' . (string) ($items[$n]['titel'] ?? ''));
+                    foreach ($mc as $g => $werte) { if (!empty($mn[$g]) && array_intersect($werte, $mn[$g])) { return true; } }
+                }
+            }
+        }
+        return false;
+    }
+
     private static function austausch_kandidaten(string $alt, string $name, array $d, array $trotz, array $fund, int $max = 4): array {
         $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $marken = (array) get_option('sab_marken', []);
         if (!defined('SAB_SYNC') && get_transient('sab_such_pruefung') === false) {   // eingetragene Suchtreffer ohne Amazon-Daten: Abruf im Hintergrund anstoßen (höchstens alle 10 Minuten)
@@ -4233,7 +4254,7 @@ final class SAB {
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
         usort($out, fn($p, $q2) => [(int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
-        $out = self::ohne_doppel_kandidaten($alt, $out);
+        $out = self::ohne_doppel_kandidaten($alt, $out, $items, $namen);
         $abl = self::lernen_abgelehnt($alt);   // schon einmal übergangene Vorschläge rutschen nach hinten, zweimal abgelehnte fliegen raus
         if ($abl) { $out = array_values(array_filter($out, fn($c) => ($abl[$c['asin']] ?? 0) < 2)); foreach ($out as &$c_) { $c_['abgel'] = (int) ($abl[$c_['asin']] ?? 0); } unset($c_); }   // nur Produkte vorschlagen, die der Austausch auch annehmen würde (keine Doppelung nebeneinander oder zu nah)
         $bestand = []; $neu = [];
