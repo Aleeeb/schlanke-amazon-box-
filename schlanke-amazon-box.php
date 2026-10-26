@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.38
+ * Version: 0.75.39
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.38';
+    const VERSION = '0.75.39';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -948,7 +948,7 @@ final class SAB {
             foreach (array_slice($posts, 0, 4) as $pid) { $links[] = '<a href="' . esc_url(get_edit_post_link($pid)) . '">' . esc_html(get_the_title($pid) ?: ('Beitrag ' . $pid)) . '</a>'; }
             $zeilen[] = '<li><code>' . esc_html($asin) . '</code> auf ' . count($posts) . ' Seite(n): ' . implode(', ', $links) . (count($posts) > 4 ? ' …' : '') . '</li>';
         }
-        return '<div class="notice notice-error" style="border-left-width:8px"><p><strong>Produktbilder fehlen (' . count($nach) . ' Produkte):</strong> An diesen Stellen bekommen Besucher kein Bild. Das hat Vorrang vor allem anderen: Produkt ersetzen oder Bild bei Amazon prüfen.</p><ul style="margin-left:18px;list-style:disc">' . implode('', $zeilen) . '</ul></div>';
+        return '<div class="notice notice-error" style="border-left-width:8px"><p><strong>Produktbilder fehlen (' . count($nach) . ' Produkte):</strong> An diesen Stellen bekommen Besucher kein Bild. Das hat Vorrang vor allem anderen: Produkt ersetzen oder Bild bei Amazon prüfen.</p><ul style="margin-left:18px;list-style:disc">' . implode('', $zeilen) . '</ul><p><a class="button button-primary" href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Zum Austausch: dringend tauschen</a></p></div>';
     }
 
     /** Fehlende Produktbilder zählen (nur Artikel, die noch veröffentlicht sind und deren Bild noch fehlt): [Produkte, Stellen]. */
@@ -2830,6 +2830,15 @@ final class SAB {
 
     /** Name des Produkts laut Artikel: Text einer anderen Zeile derselben Tabellenspalte (ohne Link/Bild), sonst fetter Text oder Überschrift kurz davor. */
     public static function kontext_titel(string $c, string $asin): string {
+        $q = preg_quote($asin, '#');
+        // Karte mit eigenem Titel: [amz_karte asin="…" titel="…"]
+        if (preg_match('#\[amz_karte\b[^\]]*\basin="' . $q . '"[^\]]*\btitel="([^"]+)"#i', $c, $m) || preg_match('#\[amz_karte\b[^\]]*\btitel="([^"]+)"[^\]]*\basin="' . $q . '"#i', $c, $m)) { $t = trim(html_entity_decode($m[1])); if ($t !== '') { return $t; } }
+        $t = self::kontext_titel_basis($c, $asin);
+        if ($t === '' && preg_match('#\[amz_link\b[^\]]*\basin="' . $q . '"[^\]]*\]([^\[]{3,140})\[/amz_link\]#i', $c, $m)) { $t = trim(html_entity_decode(strip_tags($m[1]))); }   // Linktext als letzter Ausweg
+        return $t;
+    }
+
+    private static function kontext_titel_basis(string $c, string $asin): string {
         $pos = strpos($c, $asin);
         if ($pos === false) { return ''; }
         if (preg_match_all('#<table\b.*?</table>#is', $c, $tm, PREG_OFFSET_CAPTURE)) {
@@ -4140,7 +4149,17 @@ final class SAB {
             $zeilen[] = ['alt' => $alt, 'grund' => $toet ? 'Tierschutz-Prüfung: Begriff „' . self::toetend_wort((string) $alt, (array) $d) . '“ im Titel, bitte prüfen' : $grund, 'seiten' => $seiten, 'n' => $n, 'name' => self::anzeige_name($alt, (array) $d, $fund), 'prio' => $toet ? 1000 * max(1, $seiten) : ($dring[$alt] ?? 100) * max(1, $seiten), 'dr' => $toet ? 1000 : ($dring[$alt] ?? 100), 'f' => $f];
         }
         usort($zeilen, fn($a, $b) => [(int) ($b['dr'] >= 100), $b['prio'], $b['n']] <=> [(int) ($a['dr'] >= 100), $a['prio'], $a['n']]);   // zuerst alles Nicht-Lieferbare/ohne Bild, darin nach Priorität; danach der Rest
-        $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = 10;
+        // Produkte ohne Bild (laut Warnliste, von Amazon unbekannt oder ohne Bild und ohne eigenes Bild) kommen als eigene Dringend-Liste nach oben: zuerst die auf den meisten Seiten
+        $bf = []; foreach ((array) get_option('sab_bildfehler', []) as $e_) { $bf[(string) ($e_['asin'] ?? '')] = 1; }
+        $zb = []; $zr = [];
+        foreach ($zeilen as $z_) {
+            $a_ = (string) $z_['alt'];
+            $z_['bl'] = isset($bf[$a_]) || !isset($d['items'][$a_]) || (empty($d['items'][$a_]['bilder']) && !is_file(self::bild_pfad($land, $a_, 0)));
+            if ($z_['bl']) { $zb[] = $z_; } else { $zr[] = $z_; }
+        }
+        usort($zb, fn($a, $b) => [$b['seiten'], $b['n']] <=> [$a['seiten'], $a['n']]);
+        $zeilen = array_merge($zb, $zr); $nb = count($zb);
+        $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = min(60, $nb + 10);
         $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
         $h .= '<script>window.SAB_PS=' . wp_json_encode($ps) . ';window.SAB_DP=' . wp_json_encode('https://' . self::LAENDER[$land][0] . '/dp/') . ';'
             . "document.addEventListener('input',function(e){var t=e.target;if(!t.classList||!t.classList.contains('sab-ps-in')){return;}var w=t.parentNode,out=w.querySelector('.sab-ps-out'),q=t.value.toLowerCase().trim().split(/\\s+/).filter(Boolean),alt=w.getAttribute('data-alt'),n=0,h='';if(!q.length){out.innerHTML='';return;}"
@@ -4153,10 +4172,12 @@ final class SAB {
         $zaehler = 0;
         $h .= '<p class="description">Vor jeder Austauschrunde sucht die Mac-Sitzung zu jedem Produkt bei Amazon nach dem Titel und trägt die besten Treffer mit Score und Provision unten ein (Quelle „Amazon-Suche“).</p>';
         foreach ($zeilen as $z) {
+            if ($nb > 0 && $zaehler === 0) { $h .= '<h3 style="margin:18px 0 6px;color:#8a1f1f">Dringend tauschen: Produkte ohne Bild (' . (int) $nb . '), zuerst die auf den meisten Seiten</h3><p class="description">Hier bekommen Besucher kein Bild. Oben stehen die Produkte, die auf vielen Seiten vorkommen.</p>'; }
+            if ($nb > 0 && $zaehler === $nb) { $h .= '<h3 style="margin:22px 0 6px">Weitere Produkte zu tauschen</h3>'; }
             if (++$zaehler > $ladeLimit) { $h .= '<p class="description">… und ' . (count($zeilen) - $ladeLimit) . ' weitere (erst diese erledigen).</p>'; break; }
             $alt = $z['alt']; $xalt = $d['items'][$alt] ?? [];
             $k = self::austausch_kandidaten($alt, (string) $z['name'], (array) $d, $trotz, $fund);
-            if ($z['dr'] < 100 && $z['dr'] < 1000) {   // Produkt ist lieferbar: Ersatz nur, wenn der Score deutlich höher ist
+            if (empty($z['bl']) && $z['dr'] < 100 && $z['dr'] < 1000) {   // Produkt ist lieferbar: Ersatz nur, wenn der Score deutlich höher ist
                 $salt = (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0];
                 $k['liste'] = array_values(array_filter($k['liste'], fn($c) => $c['score'] !== null && (int) $c['score'] >= $salt + 10));
             }
@@ -4173,8 +4194,13 @@ final class SAB {
                 }
                 $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
             }
+            $badge = !empty($z['bl']) ? ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#fcf0f1;color:#8a1f1f;font-weight:700;font-size:12px">ohne Bild</span>' : '';
+            $extra = '';
+            if (!isset($d['items'][$alt])) { $extra .= '<br><strong style="color:#a00">Amazon liefert für dieses Produkt weder Titel noch Bild.</strong>' . ($z['name'] !== '' ? ' Der Name stammt aus dem Artikel.' : ' Auch im Artikel ist kein Name zu finden: bitte ASIN bei Amazon suchen.'); }
+            elseif ((self::produkte()[$alt] ?? '') === '' && empty($d['items'][$alt]['titel']) && $z['name'] !== '') { $extra .= '<br><small>Name aus dem Artikel.</small>'; }
+            $extra .= '<br><a class="button button-small" href="' . esc_url(self::such_link($z['name'] !== '' ? (string) $z['name'] : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a>';
             $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
-                . '<div><strong>Zu tauschen:</strong> <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><span style="color:#a00;font-size:16px;font-weight:700">' . esc_html($z['grund']) . '</span><br><small style="color:#555" title="Reihenfolge der Liste: Dringlichkeit (0 bis 100) mal Zahl der Seiten">Priorität ' . (int) $z['prio'] . ' = Dringlichkeit ' . (int) $z['dr'] . ' &times; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . '</small><br>' . $wo . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
+                . '<div><strong>Zu tauschen:</strong>' . $badge . ' <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><span style="color:#a00;font-size:16px;font-weight:700">' . esc_html($z['grund']) . '</span><br><small style="color:#555" title="Reihenfolge der Liste: Dringlichkeit (0 bis 100) mal Zahl der Seiten">Priorität ' . (int) $z['prio'] . ' = Dringlichkeit ' . (int) $z['dr'] . ' &times; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . '</small><br>' . $wo . $extra . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
                 . '<div style="display:flex;flex-wrap:wrap;gap:10px">';
             foreach ($k['liste'] as $i => $c) {
                 $x = $c['x']; $pv = $c['pv'] ?? null; $nm = ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));

@@ -897,6 +897,7 @@ $wpdb_x = $GLOBALS['wpdb'] ?? null;
 $GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 20, 'post_title' => 'Seite X', 'post_content' => '<p>[amz_bild asin="B0DEAD0001" land="es"][/amz_bild]</p>']]; } function get_col($q) { return []; } function prepare($q, ...$a) { return $q; } };
 $mAh = new ReflectionMethod('SAB', 'austausch_html'); $ah = $mAh->invoke(null);
 ok(strpos($ah, 'Zu tauschen (1)') !== false && strpos($ah, 'B0ALT00001') !== false && strpos($ah, 'Amazon-Alternative 1') !== false && strpos($ah, 'name="sab_a[B0DEAD0001]"') !== false, 'Austausch-Reiter: totes Produkt mit Amazons Alternative als bestem Kandidaten');
+ok(strpos($ah, 'Dringend tauschen: Produkte ohne Bild (1)') !== false && strpos($ah, 'weder Titel noch Bild') !== false && strpos($ah, 'ASIN bei Amazon suchen') !== false && strpos($ah, 'ohne Bild</span>') !== false, 'Austausch: Produkte ohne Bild als eigene Dringend-Liste mit Hinweis und Suchsprüngen');
 $GLOBALS['opt']['sab_auto_tausch'] = '1'; $GLOBALS['opt']['sab_auto_schwelle'] = 0;
 $mAu = new ReflectionMethod('SAB', 'auto_tausch'); $mAu->invoke(null);
 ok(strpos((string) ($GLOBALS['opt']['sab_tausch'] ?? ''), 'B0DEAD0001 => B0ALT00001') !== false, 'Automatik: Austausch-Regel für das tote Produkt wird angelegt');
@@ -1110,4 +1111,8 @@ $GLOBALS['opt']['sab_bildfehler'] = ['B0BILDFEH1|5' => ['asin' => 'B0BILDFEH1', 
 ok(SAB::bildfehler_zaehlen() === [1, 2], 'Bildwarnung: ein Produkt auf zwei Stellen gezählt (ohne Absturz bei fehlendem Zwischenspeicher)');
 ok(method_exists('SAB', 'dashboard_widget') && method_exists('SAB', 'bild_hinweis') && method_exists('SAB', 'dashboard_inhalt'), 'Bildwarnung: Dashboard-Kasten und Admin-Hinweis vorhanden');
 unset($GLOBALS['opt']['sab_bildfehler']);
+
+// ---- 0.75.39: Titel aus Karte und Linktext ----
+ok(SAB::kontext_titel('<p>x</p>[amz_karten][amz_karte asin="B0KTITEL01" land="es" titel="Valla pequeña | Swissinno"][/amz_karten]', 'B0KTITEL01') === 'Valla pequeña | Swissinno', 'Titel aus dem Artikel: Karte mit titel-Angabe');
+ok(SAB::kontext_titel('<p>x</p>[amz_link asin="B0KTITEL02" land="es"]Cinta de cobre 50 mm[/amz_link]', 'B0KTITEL02') === 'Cinta de cobre 50 mm', 'Titel aus dem Artikel: Linktext als Ausweg');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
