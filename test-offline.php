@@ -453,14 +453,14 @@ ok(strpos($neu, 'href="https://amzn.to/start"') !== false, 'Kurzlink auf Startse
 
 if (!defined('ARRAY_A')) define('ARRAY_A', 'ARRAY_A');
 $mFd = new ReflectionMethod('SAB', 'fundstellen'); $mFd->setAccessible(true);
-$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 5, 'post_title' => 'T', 'post_content' => '[amz_link asin="B0AAAAAAA1" land="es"]Zaun[/amz_link] und <a href="https://www.amazon.es/dp/B0AAAAAAA1?tag=x">fest</a>']]; } function prepare($q, ...$a) { return $q; } function get_col($q) { return []; } };
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 5, 'post_title' => 'T', 'post_content' => '[amz_link asin="B0AAAAAAA1" land="es"]Zaun[/amz_link] und <a href="https://www.amazon.es/dp/B0AAAAAAA1?tag=x">fest</a>']]; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } function get_col($q) { return []; } };
 $fd = $mFd->invoke(null, ['B0AAAAAAA1']);
 ok(($fd['B0AAAAAAA1'][5]['n'] ?? 0) === 2 && ($fd['B0AAAAAAA1'][5]['fest'] ?? -1) === 1, 'Fundstellen: gesamt 2, davon 1 fester Link');
 
 // Umbau-Reiter: Artikelliste und Vorschau
 if (!function_exists('get_post')) { function get_post($id) { return (object) ['ID' => $id, 'post_title' => 'Zaun-Artikel', 'post_content' => $GLOBALS['pc'] ?? '<p><a href="https://amzn.to/abc">Zum Zaun</a> <a href="https://www.amazon.es/dp/B0BBBBBBB1?tag=x"><img src="x.jpg"></a></p>']; } }
 if (!function_exists('get_post_meta')) { function get_post_meta($id, $k, $single = false) { return ''; } }
-$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 7, 'post_title' => 'Zaun-Artikel', 'post_content' => '<p><a href="https://amzn.to/abc">Zum Zaun</a> <a href="https://www.amazon.es/dp/B0BBBBBBB1?tag=x"><img src="x.jpg"></a></p>']]; } function prepare($q, ...$a) { return $q; } };
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 7, 'post_title' => 'Zaun-Artikel', 'post_content' => '<p><a href="https://amzn.to/abc">Zum Zaun</a> <a href="https://www.amazon.es/dp/B0BBBBBBB1?tag=x"><img src="x.jpg"></a></p>']]; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } };
 $mL2 = new ReflectionMethod('SAB', 'umbau_artikelliste'); $mL2->setAccessible(true);
 $li = $mL2->invoke(null);
 ok(count($li) === 1 && $li[0]['fest'] === 1 && $li[0]['kurz'] === 1 && $li[0]['fertig'] === false, 'Umbau-Liste: 1 fester Link, 1 Kurzlink, offen');
@@ -551,6 +551,7 @@ ok(strpos($neu, 'asin="B0TABLE002"') !== false && strpos($neu, 'suche="anillos"'
 ok($n === 2, 'Umbau zählt die Karten');
 $h = SAB::sc_karten([], '[amz_karte asin="B0TABLE001" land="es" text="Ver en Amazon" ebay="1" suche="x" campid="5338794835"]');
 ok(strpos($h, 'class="sab-karten"') !== false && strpos($h, 'class="sab-karte"') !== false && strpos($h, 'sab-karte-btn') !== false && strpos($h, 'sab-karte-ebay') !== false && strpos($h, '_nkw=x') !== false, 'Karte rendert Button und eBay-Link');
+ok(substr_count($h, 'data-sab-asin="B0TABLE001"') === 1 && substr_count($h, 'href="https://www.amazon.es') === 1 && strpos($h, 'rel="nofollow sponsored noopener"') !== false, 'Karte: Bild, Titel und Button sind ein einziger Affiliate-Link mit data-Attribut und rel sponsored');
 $GLOBALS['opt']['sab_karten_umbau'] = '1';
 [$neu, ] = SAB::umbau_text(str_replace('https://amzn.to/unbekannt1', 'https://amzn.to/zeigtandres', $tab));
 $GLOBALS['kurz']['https://amzn.to/zeigtandres'] = 'https://www.amazon.es/dp/B0OTHER001';
@@ -786,7 +787,7 @@ ok(strpos($zc, 'link.amazon') !== false, 'Umbau: bei zwei Produkten im Abschnitt
 // ---- 0.52.1: Vorschau zeigt den ganzen Artikel ----
 $tab4 = '<table><tbody><tr><td>[aawp fields="B0D66TBQB5" value="thumb"]</td><td>[aawp fields="B07822M2BC" value="thumb"]</td></tr><tr><td><p>Cinta de cobre | Repelente</p></td><td><p>Barrera para babosas | Para 4 m</p></td></tr><tr><td><a href="https://link.amazon/B0d8rrpd3">Ver en Amazon</a></td><td><a href="https://amzn.to/3Plsb9Y">Ver en Amazon</a></td></tr></tbody></table>';
 $wpdb_v = $GLOBALS['wpdb'] ?? null;
-$GLOBALS['wpdb'] = new class($tab4) { public $posts = 'wp_posts'; private $c; function __construct($c) { $this->c = $c; } function get_results($q, $o = null) { return [['ID' => 8, 'post_title' => 'Kupfer', 'post_content' => $this->c]]; } function prepare($q, ...$a) { return $q; } };
+$GLOBALS['wpdb'] = new class($tab4) { public $posts = 'wp_posts'; private $c; function __construct($c) { $this->c = $c; } function get_results($q, $o = null) { return [['ID' => 8, 'post_title' => 'Kupfer', 'post_content' => $this->c]]; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } };
 $GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log'], $GLOBALS['opt']['sab_uebersicht_stand_es']);
 $GLOBALS['pc'] = $tab4; $mV2 = new ReflectionMethod('SAB', 'umbau_vorschau'); $vh2 = $mV2->invoke(null, 8); unset($GLOBALS['pc']);
 ok(strpos($vh2, 'amz_karte asin=&quot;B0D66TBQB5&quot;') !== false && strpos($vh2, 'Vorher') !== false && strpos($vh2, 'unverändert bleiben (0)') !== false, 'Vorschau: Vorher und Nachher nebeneinander, Tabelle mit link.amazon wird als Karten gezeigt, nichts bleibt offen');
@@ -882,11 +883,11 @@ ok($kn('Wasserkocher') === 'Wasserkocher', 'Kurzname: ein Wort bleibt');
 // ---- 0.58.0: Vorschau für mehrere Artikel auf einmal ----
 $GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log'], $GLOBALS['opt']['sab_uebersicht_stand_es'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_produkte']); unset($GLOBALS['tr']['sab_alle_asins']);
 $wpdb_m = $GLOBALS['wpdb'] ?? null;
-$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 12, 'post_title' => 'Artikel A', 'post_content' => '<p><a href="https://www.amazon.es/dp/B0VIELE001"><img src="x.jpg"></a></p>']]; } function prepare($q, ...$a) { return $q; } };
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 12, 'post_title' => 'Artikel A', 'post_content' => '<p><a href="https://www.amazon.es/dp/B0VIELE001"><img src="x.jpg"></a></p>']]; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } };
 $GLOBALS['pc'] = '<p><a href="https://www.amazon.es/dp/B0VIELE001"><img src="x.jpg"></a></p>';
 $mUe = new ReflectionMethod('SAB', 'umbau_uebersicht_html'); $uh = $mUe->invoke(null, 1);
 $GLOBALS['wpdb'] = $wpdb_m; unset($GLOBALS['pc']);
-ok(strpos($uh, 'Artikel A') !== false && strpos($uh, 'bereit') !== false && strpos($uh, 'bereiten Artikel jetzt umbauen') !== false && strpos($uh, 'value="umbau_viele"') !== false, 'Gesamtvorschau: Status je Artikel und Knopf zum Umbau der bereiten Artikel');
+ok(strpos($uh, 'Artikel A') !== false && strpos($uh, 'bereit') !== false && strpos($uh, 'Artikel ohne Problem jetzt umbauen') !== false && strpos($uh, 'value="umbau_viele"') !== false, 'Gesamtvorschau: Status je Artikel und Knopf zum Umbau der bereiten Artikel');
 
 // ---- 0.58.1: Sprung im Bearbeiten-Fenster ----
 $GLOBALS['admin'] = true; $_GET['sab_zeige'] = 'B0TOT00002';
@@ -903,7 +904,7 @@ $GLOBALS['opt']['sab_ungueltige_asins'] = ['B0DEAD0001']; $GLOBALS['opt']['sab_p
 $GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0ALT00001' => ['titel' => 'Cinta de cobre 50 mm', 'preis' => '9,99 €', 'kaufen' => true, 'lieferbar' => true, 'status' => 'IN_STOCK', 'rang' => 150, 'kategorie' => 'Jardín']], 'ts' => time()];
 $GLOBALS['tr']['sab_uebersicht_es'] = $GLOBALS['opt']['sab_uebersicht_stand_es']; $GLOBALS['tr']['sab_luecke_es'] = 1; unset($GLOBALS['tr']['sab_alle_asins']);
 $wpdb_x = $GLOBALS['wpdb'] ?? null;
-$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 20, 'post_title' => 'Seite X', 'post_content' => '<p>[amz_bild asin="B0DEAD0001" land="es"][/amz_bild]</p>']]; } function get_col($q) { return []; } function prepare($q, ...$a) { return $q; } };
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 20, 'post_title' => 'Seite X', 'post_content' => '<p>[amz_bild asin="B0DEAD0001" land="es"][/amz_bild]</p>']]; } function get_col($q) { return []; } function esc_like($s) { return $s; } function prepare($q, ...$a) { return $q; } };
 $mAh = new ReflectionMethod('SAB', 'austausch_html'); $ah = $mAh->invoke(null);
 ok(strpos($ah, 'Zu tauschen (1)') !== false && strpos($ah, 'B0ALT00001') !== false && strpos($ah, 'Amazon-Alternative 1') !== false && strpos($ah, 'name="sab_a[B0DEAD0001]"') !== false, 'Austausch-Reiter: totes Produkt mit Amazons Alternative als bestem Kandidaten');
 ok(strpos($ah, 'Dringend tauschen: Produkte ohne Bild (1)') !== false && strpos($ah, 'weder Titel noch Bild') !== false && strpos($ah, 'ASIN bei Amazon suchen') !== false && strpos($ah, 'ohne Bild</span>') !== false, 'Austausch: Produkte ohne Bild als eigene Dringend-Liste mit Hinweis und Suchsprüngen');
@@ -1138,7 +1139,7 @@ $mk = fn($rang, $preis) => ['titel' => 'T', 'preis' => $preis, 'kaufen' => true,
 $GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0SORT0001' => $mk(50, '9 €'), 'B0SORT0002' => $mk(900000, '9 €'), 'B0SORT0003' => $mk(5000, '9 €')], 'ts' => time()];
 $GLOBALS['tr']['sab_uebersicht_es'] = $GLOBALS['opt']['sab_uebersicht_stand_es']; $GLOBALS['tr']['sab_luecke_es'] = 1; unset($GLOBALS['tr']['sab_alle_asins']);
 $wpdb_s = $GLOBALS['wpdb'] ?? null;
-$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 30, 'post_title' => 'S', 'post_content' => '<p>[amz_bild asin="B0SORT0001"] [amz_bild asin="B0SORT0002"] [amz_bild asin="B0SORT0003"] [amz_bild asin="B0SORT0004"]</p>']]; } function get_col($q) { return []; } function get_var($q) { return 0; } function prepare($q, ...$a) { return $q; } };
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 30, 'post_title' => 'S', 'post_content' => '<p>[amz_bild asin="B0SORT0001"] [amz_bild asin="B0SORT0002"] [amz_bild asin="B0SORT0003"] [amz_bild asin="B0SORT0004"]</p>']]; } function get_col($q) { return []; } function get_var($q) { return 0; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } };
 $mUh = new ReflectionMethod('SAB', 'uebersicht_html'); $mUh->setAccessible(true);
 $_GET['sab_sort'] = 'score'; $_GET['sab_dir'] = 'desc'; $u1 = (string) $mUh->invoke(null);
 $_GET['sab_dir'] = 'asc'; $u2 = (string) $mUh->invoke(null);
@@ -1184,4 +1185,14 @@ $mTf = new ReflectionMethod('SAB', 'tausch_faelle'); $mTf->setAccessible(true);
 $tf = $mTf->invoke(null, ['items' => []], []);
 ok(isset($tf['B0UNGUELT1']) && !isset($tf['B0DROSSEL1']) && !isset($tf['B0GUT00001']), 'Austausch: nur eindeutig abgewiesene Produkte gelten als „Amazon kennt das Produkt nicht“');
 unset($GLOBALS['http']['B0GUT00001'], $GLOBALS['http']['B0GUT00002'], $GLOBALS['opt']['sab_uebersicht_stand_es'], $GLOBALS['opt']['sab_ungueltige_asins'], $GLOBALS['opt']['sab_unsicher_asins'], $GLOBALS['opt']['sab_uebersicht_teilfehler'], $GLOBALS['opt']['sab_produkte']);
+$GLOBALS['opt']['sab_such_kand'] = "B08562GF55 | B0ALT00001 | 2026-01-01"; unset($GLOBALS['opt']['sab_importe_erledigt']);
+$imp = ['x' => ['host' => 'schneckenhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => ['B08562GF55 | B0NEU00001 | 2026-10-26', 'B085631P3W | B0NEU00002 | 2026-10-26']]];
+SAB::einmal_importe('www.schneckenhilfe.de', $imp); SAB::einmal_importe('www.schneckenhilfe.de', $imp); SAB::einmal_importe('federhilfe.de', ['y' => $imp['x']]);
+$iz = preg_split('/\R/', get_option('sab_such_kand'));
+ok(count($iz) === 2 && strpos($iz[0], 'B0ALT00001') !== false && strpos($iz[1], 'B085631P3W') === 0 && get_option('sab_importe_erledigt') === ['x'], 'Einmal-Import: ergänzt nur neue ASINs, überschreibt nichts, läuft pro Seite einmal');
+unset($GLOBALS['opt']['sab_such_kand'], $GLOBALS['opt']['sab_importe_erledigt']);
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 40, 'post_title' => 'D', 'post_content' => '<p>[amz_bild asin="B0ALTDOP01" land="es"][/amz_bild] ' . str_repeat('x ', 500) . ' [amz_bild asin="B0NAHDOP01" land="es"][/amz_bild]</p>']]; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } };
+$mOd = new ReflectionMethod('SAB', 'ohne_doppel_kandidaten'); $mOd->setAccessible(true);
+$od = $mOd->invoke(null, 'B0ALTDOP01', [['asin' => 'B0NAHDOP01'], ['asin' => 'B0FERNDOP1']]);
+ok(count($od) === 1 && $od[0]['asin'] === 'B0FERNDOP1', 'Austausch-Vorschläge: Kandidaten, die der Austausch wegen Doppelung ablehnen würde, werden vorab entfernt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

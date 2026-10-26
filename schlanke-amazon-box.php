@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.43
+ * Version: 0.76.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.43';
+    const VERSION = '0.76.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -108,6 +108,7 @@ final class SAB {
         add_action('sab_update_check', [__CLASS__, 'update_cron']);
         add_action('admin_init',     [__CLASS__, 'update_admin']);
         add_action('admin_init',     [__CLASS__, 'tabelle']);
+        add_action('admin_init',     [__CLASS__, 'einmal_importe']);
         if (!wp_next_scheduled('sab_pruefen')) { wp_schedule_event(time() + 300, 'daily', 'sab_pruefen'); }
     }
 
@@ -1603,7 +1604,7 @@ final class SAB {
     }
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
-    const KARTE_CSS = '.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}';
+    const KARTE_CSS = '.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:block}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
@@ -1626,7 +1627,12 @@ final class SAB {
         $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn', 'tag' => $a['tag']], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
         $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
         if ($ebay !== '') { $ebay = str_replace('<a ', '<a class="sab-karte-ebay" ', $ebay); }
-        return '<div class="sab-karte">' . $bild . ($titel !== '' ? '<div class="sab-karte-titel">' . $titel . '</div>' : '') . $btn . $ebay . '</div>';
+        $tt = $titel !== '' ? '<div class="sab-karte-titel">' . $titel . '</div>' : '';
+        // Bild, Titel und Button sind EIN Link (für Crawler zählt das als ein Affiliate-Link); data-sab-asin/-slot/-var bleiben für Statistik und Austausch am Link
+        if (preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb) && preg_match('#^<a\b[^>]*>(.*)</a>$#s', $btn, $mt)) {
+            return '<div class="sab-karte">' . $mb[1] . $mb[2] . $tt . '<span class="sab-karte-btn">' . $mt[1] . '</span></a>' . $ebay . '</div>';
+        }
+        return '<div class="sab-karte">' . $bild . $tt . $btn . $ebay . '</div>';
     }
 
     /** [amz_ebay asin="…" host="www.ebay.es" campid="…" suche="…"]Text[/amz_ebay]: eBay-Suchlink; nach einem Austausch sucht er mit dem Namen des neuen Produkts. */
@@ -2008,7 +2014,7 @@ final class SAB {
            . 'function S(o){try{navigator.sendBeacon(U,new Blob([JSON.stringify(o)],{type:"text/plain"}))}catch(e){}}'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
-           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname});'
+           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname});'
            . 'p={id:id,t:Date.now(),h:false}},true);'
            . 'document.addEventListener("visibilitychange",function(){if(!p)return;'
            . 'if(document.visibilityState==="hidden"){p.h=true;return}'
@@ -3849,6 +3855,8 @@ final class SAB {
             $zeilen[] = [$abw ? 1 : 0, '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>'];
         }
         $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', array_column((function (array $z) { usort($z, fn($a, $b) => $a[0] <=> $b[0]); return $z; })($zeilen), 1)) : '<tr><td colspan="4">Keine offenen Artikel.</td></tr>') . '</tbody></table>';
+        $nGeprueft = count($zeilen);
+        $h = str_replace('</h3><p class="description">Es wird nichts gespeichert.', '</h3><p style="font-size:15px"><strong>Diese Seite: ' . count($bereit) . ' bereit · ' . $nProb . ' mit Problem · ' . max(0, $nGeprueft - count($bereit) - $nProb) . ' noch nicht fertig geprüft' . ($uebrig ? ' · ' . $uebrig . ' ungeprüft (Zeitgrenze)' : '') . '</strong> (von ' . count($liste) . ' auf dieser Seite, ' . $gesamt . ' offen insgesamt). Umbau in zwei Stufen: <strong>Stufe 1</strong> baut nur die Artikel ohne Problem um, <strong>Stufe 2</strong> sind die Artikel mit Problem, sobald das Ersatzprodukt getauscht ist.</p><p class="description">Es wird nichts gespeichert.', $h);
         if ($uebrig) { $h .= '<p><strong>' . $uebrig . ' Artikel dieser Seite wurden wegen der Zeitgrenze noch nicht geprüft.</strong> Bitte die Seite noch einmal öffnen, die Kurzlinks werden dabei Stück für Stück aufgelöst.</p>'; }
         if ($kurzOffen) { $h .= '<p><strong>' . $kurzOffen . ' Kurzlinks wurden noch nicht aufgelöst</strong> (Abrufgrenze pro Aufruf), bitte diese Seite noch einmal öffnen.</p>'; }
         if ($wegAlle) {
@@ -3858,7 +3866,7 @@ final class SAB {
         if ($bereit) {
             $h .= '<form method="post" style="margin:14px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_viele">';
             foreach ($bereit as $i) { $h .= '<input type="hidden" name="sab_ids[]" value="' . $i . '">'; }
-            $h .= '<button class="button button-primary button-hero">Diese ' . count($bereit) . ' bereiten Artikel jetzt umbauen</button> <span class="description">Jeder Artikel wird vorher gesichert, Rückgängig geht in der Liste. Artikel mit Problem bleiben unberührt.</span></form>';
+            $h .= '<button class="button button-primary button-hero">Stufe 1: diese ' . count($bereit) . ' Artikel ohne Problem jetzt umbauen</button> <span class="description">Jeder Artikel wird vorher gesichert, Rückgängig geht in der Liste. Artikel mit Problem bleiben unberührt.</span></form>';
         } else { $h .= '<p><em>Auf dieser Seite ist kein Artikel bereit.</em></p>'; }
         $nav = '';
         if ($seite > 1) { $nav .= '<a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'seite' => $seite - 1], admin_url('admin.php'))) . '">« Vorherige Seite</a> '; }
@@ -3918,6 +3926,52 @@ final class SAB {
         return $z;
     }
 
+    /** Einmal-Importe: feste Zeilen, die pro Seite genau einmal ergänzt werden (nur neue ASINs, nichts überschreiben). Ersetzt das Eintippen im Backend. */
+    const IMPORTE = [
+        '2026-10-26-such-kand' => ['host' => 'schneckenhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [
+            'B08562GF55 | B00B8QSSZY, B0DK7X57NC, B07BHMJKFJ | 2026-10-26',
+            'B085631P3W | B00B8QSSZY, B0DK7X57NC, B07BHMJKFJ | 2026-10-26',
+            'B01EC7PRMW | B00B8QSSZY, B006DUH03G, B0DK7X57NC | 2026-10-26',
+            'B07SC2VNHM | B0DK7X57NC, B00B8QSSZY | 2026-10-26',
+            'B07S8XF8P6 | B0DK7X57NC, B00B8QSSZY | 2026-10-26',
+            'B06XJ2GV3H | B0CG9Y4Q6F, B09KNCD6G1, B0838CTXD7 | 2026-10-26',
+        ]],
+        '2026-10-26-kurznamen-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
+            'B0F3P51Q4M | Nistkasten   2er-Set, 32 mm',
+        ]],
+        '2026-10-26-kurznamen-maulwurf' => ['host' => 'maulwurfhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
+            'B0H4R83YBT | Maulwurfschreck   Solar, 2er-Set',
+            'B08X2V8FL8 | Nistkasten   Steinkauz, Waldkauz',
+            'B075T5TTQB | Maulwurfschreck   Solar mit Erdspieß',
+        ]],
+        '2026-10-26-kurznamen-schnecken' => ['host' => 'schneckenhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
+            'B07SFV13F2 | Kupferband   50 mm x 30 m',
+        ]],
+    ];
+
+    public static function einmal_importe(?string $host = null, ?array $importe = null): void {
+        if (!current_user_can('manage_options')) { return; }
+        $host = preg_replace('/^www\./', '', strtolower($host ?? (string) wp_parse_url(home_url(), PHP_URL_HOST)));
+        $fertig = (array) get_option('sab_importe_erledigt', []);
+        $neu = false;
+        foreach ($importe ?? self::IMPORTE as $id => $j) {
+            if (in_array($id, $fertig, true) || $j['host'] !== $host) { continue; }
+            $txt = rtrim((string) get_option($j['option'], ''));
+            $vorhanden = [];
+            foreach (preg_split('/\R/', $txt) as $z) { $vorhanden[self::asin(explode('|', $z)[0])] = true; }
+            foreach ($j['zeilen'] as $z) {
+                $a = self::asin(explode('|', $z)[0]);
+                if ($a !== '' && !isset($vorhanden[$a])) { $txt .= ($txt === '' ? '' : "\n") . $z; $vorhanden[$a] = true; }
+            }
+            update_option($j['option'], $txt, false);
+            $fertig[] = $id; $neu = true;
+        }
+        if ($neu) {
+            update_option('sab_importe_erledigt', $fertig, false);
+            delete_transient('sab_alle_asins'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
+        }
+    }
+
     private static function such_kandidaten(): array {
         $out = [];
         foreach (preg_split('/\R/', (string) get_option('sab_such_kand', '')) as $z) {
@@ -3965,6 +4019,24 @@ final class SAB {
      * (gleiche Art, gleiche Gruppe oder gemeinsame Wörter, bei Produkten auf wenigen Seiten auch zur Textstelle), gereiht nach Score und Provision (5 % schlägt 3 %).
      * @return array{liste:array,aussortiert:array} liste: bis zu $max Kandidaten, bester zuerst
      */
+    /** Entfernt Kandidaten, bei denen der Tausch ALT => Kandidat in einem Artikel eine zu nahe Doppelung ergäbe (gleiche Prüfung wie beim Festschreiben). Prüft nur die ersten 20 (Artikel pro ALT einmal geladen). */
+    private static function ohne_doppel_kandidaten(string $alt, array $liste): array {
+        global $wpdb; static $cache = [];
+        if (!isset($wpdb) || !$liste) { return $liste; }
+        if (!isset($cache[$alt])) {
+            $cache[$alt] = [];
+            foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A) as $r) { $cache[$alt][] = (string) $r['post_content']; }
+        }
+        if (!$cache[$alt]) { return $liste; }
+        $out = [];
+        foreach ($liste as $i => $c) {
+            $blockiert = false;
+            if ($i < 20) { foreach ($cache[$alt] as $t) { if (self::doppel_neu($t, str_replace($alt, (string) $c['asin'], $t), (string) $c['asin'])) { $blockiert = true; break; } } }
+            if (!$blockiert) { $out[] = $c; }
+        }
+        return $out;
+    }
+
     private static function austausch_kandidaten(string $alt, string $name, array $d, array $trotz, array $fund, int $max = 4): array {
         $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $marken = (array) get_option('sab_marken', []);
         if (!defined('SAB_SYNC') && get_transient('sab_such_pruefung') === false) {   // eingetragene Suchtreffer ohne Amazon-Daten: Abruf im Hintergrund anstoßen (höchstens alle 10 Minuten)
@@ -4000,6 +4072,7 @@ final class SAB {
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
         usort($out, fn($p, $q2) => [(int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
+        $out = self::ohne_doppel_kandidaten($alt, $out);   // nur Produkte vorschlagen, die der Austausch auch annehmen würde (keine Doppelung nebeneinander oder zu nah)
         $bestand = []; $neu = [];
         foreach ($out as $c) { if (strpos((string) $c['quelle'], 'Amazon-Suche') === 0) { $c['neu'] = true; $neu[] = $c; } else { $bestand[] = $c; } }
         $bs = array_slice($bestand, 0, $max);
@@ -4268,6 +4341,7 @@ final class SAB {
             . "h+='<div style=\"display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #eee\"><button type=\"button\" class=\"button button-small sab-ps-pick\" data-asin=\"'+p[0]+'\" data-name=\"'+(p[1]||p[2]).replace(/\"/g,'')+'\">wählen</button><span><strong>'+(p[1]||p[2]||'(ohne Name)').replace(/</g,'&lt;')+'</strong> <small>'+(p[3]>=0?'Score '+p[3]+' · ':'')+p[0]+'</small></span> <a href=\"'+window.SAB_DP+p[0]+'\" target=\"_blank\" rel=\"noopener\">bei Amazon ansehen ↗</a></div>';}"
             . "out.innerHTML=h||'<em>Kein Treffer im Bestand.</em>';});"
             . "document.addEventListener('click',function(e){var b=e.target;if(!b.classList||!b.classList.contains('sab-ps-pick')){return;}var w=b.closest('.sab-ps'),alt=w.getAttribute('data-alt');document.querySelector('input[name=\"sab_eigen['+alt+']\"]').value=b.getAttribute('data-asin');var nf=document.querySelector('input[name=\"sab_eigen_name['+alt+']\"]');if(nf&&!nf.value){nf.value=b.getAttribute('data-name');}document.getElementById('sabr_'+alt).checked=true;w.querySelector('.sab-ps-out').innerHTML='<strong>Gewählt: '+b.getAttribute('data-asin')+'</strong> (steht unter „Eigene ASIN“, dann „Jetzt tauschen“)';});</script>";
+        $h .= '<style>@media(max-width:782px){.sab-tk{padding:8px!important;overflow:hidden}.sab-tk,.sab-tk *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.sab-tk-kopf{flex-direction:column;align-items:flex-start!important}.sab-tk-k{flex:1 1 100%!important;max-width:none!important}.sab-tk input[type=text]{width:100%!important;max-width:100%!important;size:auto}.sab-tk .sab-ps-out>div{flex-wrap:wrap}}</style>';
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
             . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
         $zaehler = 0;
@@ -4290,8 +4364,8 @@ final class SAB {
                 foreach ($z['f'] as $pid => $f) {
                     if (++$nr > 10) { break; }
                     $tt = ' title="' . esc_attr((string) ($f['titel'] ?: ('Beitrag ' . $pid)) . ' (' . (int) $f['n'] . '×)') . '"';
-                    $an .= ' <a href="' . esc_url(add_query_arg('sab_zeige', $alt, (string) get_permalink((int) $pid))) . '" target="_blank" rel="noopener"' . $tt . '>' . $nr . '</a>';
-                    $ed .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $alt)) . '" target="_blank" rel="noopener"' . $tt . '>' . $nr . '</a>';
+                    $an .= ' <a href="' . esc_url(add_query_arg('sab_zeige', $alt, (string) get_permalink((int) $pid))) . '" target="_blank" rel="noopener"' . $tt . '>' . ($z['seiten'] === 1 ? esc_html((string) ($f['titel'] ?: ('Beitrag ' . $pid))) : $nr) . '</a>';
+                    $ed .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $alt)) . '" target="_blank" rel="noopener"' . $tt . '>' . ($z['seiten'] === 1 ? 'Seite bearbeiten' : $nr) . '</a>';
                 }
                 $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
             }
@@ -4300,13 +4374,13 @@ final class SAB {
             if (!isset($d['items'][$alt])) { $extra .= '<br><strong style="color:#a00">Amazon liefert für dieses Produkt weder Titel noch Bild.</strong>' . ($z['name'] !== '' ? ' Der Name stammt aus dem Artikel.' : ' Auch im Artikel ist kein Name zu finden: bitte ASIN bei Amazon suchen.'); }
             elseif ((self::produkte()[$alt] ?? '') === '' && empty($d['items'][$alt]['titel']) && $z['name'] !== '') { $extra .= '<br><small>Name aus dem Artikel.</small>'; }
             $extra .= '<br><a class="button button-small" href="' . esc_url(self::such_link($z['name'] !== '' ? (string) $z['name'] : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a>';
-            $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
+            $h .= '<div class="sab-tk" style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1100px"><div class="sab-tk-kopf" style="display:flex;gap:12px;align-items:center;margin-bottom:8px">' . self::mini_bild($alt, $xalt)
                 . '<div><strong>Zu tauschen:</strong>' . $badge . ' <a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $alt) . '" target="_blank" rel="noopener"><code>' . esc_html($alt) . '</code></a> ' . ($z['name'] !== '' ? esc_html($z['name']) : '<em>Name unbekannt</em>') . '<br><span style="color:#a00;font-size:16px;font-weight:700">' . esc_html($z['grund']) . '</span><br><small style="color:#555" title="Reihenfolge der Liste: Dringlichkeit (0 bis 100) mal Zahl der Seiten">Priorität ' . (int) $z['prio'] . ' = Dringlichkeit ' . (int) $z['dr'] . ' &times; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . '</small><br>' . $wo . $extra . '</div>' . self::alt_kennzahlen($xalt, $alt, $z['seiten']) . '</div>'
                 . '<div style="display:flex;flex-wrap:wrap;gap:10px">';
             foreach ($k['liste'] as $i => $c) {
                 $x = $c['x']; $pv = $c['pv'] ?? null; $nm = ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''));
                 $pvStil = $pv !== null && $pv >= 5 ? 'background:#e3f4e7;color:#1a7f37' : ($pv !== null && $pv >= 4 ? 'background:#fdf0d8;color:#8a5a00' : 'background:#eef0f0;color:#333');
-                $h .= '<label style="flex:1 1 300px;max-width:340px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="' . esc_attr($c['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . '>'
+                $h .= '<label class="sab-tk-k" style="flex:1 1 300px;max-width:340px;border:1px solid #dcdcde;border-radius:6px;padding:8px;display:flex;gap:8px;cursor:pointer"><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="' . esc_attr($c['asin']) . '"' . ($voraus && $i === 0 ? ' checked' : '') . '>'
                     . self::mini_bild($c['asin'], $x) . '<span>' . (!empty($c['neu']) ? '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#dbe9ff;color:#0b3d91;font-size:11px;font-weight:700">NEU durch Amazon-Suche</span><br>' : '<span style="display:inline-block;padding:0 7px;border-radius:9px;background:#eee;color:#444;font-size:11px">aus dem Bestand</span><br>') . '<strong>' . esc_html($nm !== '' ? $nm : '(noch keine Daten)') . '</strong><br><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($c['asin']) . '</code></a> <small><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $c['asin']) . '" target="_blank" rel="noopener">bei Amazon ansehen ↗</a></small><br>'
                     . '<small>' . esc_html($c['quelle']) . ' · <strong>Score ' . ($c['score'] !== null ? (int) $c['score'] : '?') . '</strong>' . (!empty($x['bonus']) ? ' <span style="color:#6a3fb0;font-weight:700" title="Von Hand vergebener Bonus, im Score enthalten">&#9998; ' . ($x['bonus'] > 0 ? '+' : '') . (int) $x['bonus'] . ' manuell</span>' : '') . ($x && ($x['preis'] ?? '') !== '' ? ' · ' . esc_html((string) $x['preis']) : '') . ($x && isset($x['sterne']) && $x['sterne'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' ★' . (isset($x['anzahl']) && $x['anzahl'] !== null ? ' (' . number_format((int) $x['anzahl'], 0, ',', '.') . ')' : '') : '') . ' · ' . self::prime_zeichen($x && isset($x['prime']) ? $x['prime'] : null) . ($x && isset($x['liefertage']) && $x['liefertage'] !== null ? ' · ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : '') . '</small><br>'
                     . ($pv !== null ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;' . $pvStil . '">' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision</span>' : '<span style="color:#a00">Provision unbekannt</span>')
@@ -4412,7 +4486,8 @@ final class SAB {
                     . self::mini_bild($cd['asin'], $x) . '<span><strong>' . esc_html($nm ?: $cd['asin']) . '</strong><br><small><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $cd['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($cd['asin']) . '</code></a> · ' . esc_html((string) $cd['quelle']) . '<br><strong>Score ' . ($cd['score'] !== null ? (int) $cd['score'] : '?') . '</strong>'
                     . (!empty($x['preis']) ? ' · ' . esc_html((string) $x['preis']) : '') . ($pv !== null ? ' · ' . esc_html(str_replace('.', ',', (string) $pv)) . ' % Provision' : '') . (!$cd['ok'] ? ' · <span style="color:#a00">nicht lieferbar</span>' : '') . '</small></span></label>';
             }
-            if (!$k['liste']) { $h .= '<p style="margin:0"><em>Kein passender Kandidat gefunden.</em> <a class="button button-small" href="' . esc_url(self::such_link($name !== '' ? (string) $name : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
+            if (!$k['liste']) { $h .= '<p style="margin:0"><em>Kein passender Kandidat gefunden.</em></p>'; }
+            $h .= '<p style="margin:0 0 6px;flex:1 1 100%"><a class="button button-small" href="' . esc_url(self::such_link($name !== '' ? (string) $name : $alt)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a> <a class="button button-small" href="' . esc_url(self::such_link($alt)) . '" target="_blank" rel="noopener">ASIN bei Amazon suchen</a></p>';
             $vorn = '';
             $vorname = '';
             $h .= '</div><label>Neue ASIN: <input type="text" name="sab_neu" size="12" maxlength="10" value="' . esc_attr($vorn) . '" placeholder="B0…"></label> '
