@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.76.5
+ * Version: 0.76.6
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.76.5';
+    const VERSION = '0.76.6';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3983,6 +3983,12 @@ final class SAB {
             'B01EUS5G1U | B0F1DB4ZDL, B0FHRGMQ48, B0F93PWHPV | 2026-10-26',
             'B00D1VO916 | B07ST2P369, B0CDH4R958 | 2026-10-26',
             'B0167513IO | B08JGX3NYM, B08RNM1D5H, B06XDQW7BF | 2026-10-26',
+        ]],
+        '2026-10-26-such-kand-zecken-1' => ['host' => 'zeckenhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [
+            'B00E5AK7ZE | B001QC34LS, B07FTRT8WN, B07F89JFH6 | 2026-10-26',
+            'B008BI50OY | B07PRJFSWC, B07F89JFH6, B001QC34LS | 2026-10-26',
+            'B00F0LVLUM | B08DDF49L6, B06VW88X76 | 2026-10-26',
+            'B0983557BB | B0DBHR1XK3, B001EJOHYG | 2026-10-26',
         ]],
         '2026-10-26-kurznamen-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_produkte', 'zeilen' => [
             'B0F3P51Q4M | Nistkasten   2er-Set, 32 mm',
