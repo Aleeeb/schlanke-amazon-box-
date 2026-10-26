@@ -70,6 +70,7 @@ function wp_remote_head($u, $a = []) { $z = $GLOBALS['kurz'][$u] ?? ''; return [
 $GLOBALS['kurz'] = ['https://amzn.to/abc' => 'https://www.amazon.es/Producto-Largo/dp/B0AAAAAAA1?tag=x', 'https://amzn.to/start' => 'https://www.amazon.es/'];
 $fail = 0;
 if (!function_exists('shortcode_parse_atts')) { function shortcode_parse_atts($t) { $o = []; if (preg_match_all('/([a-z_]+)=["\']([^"\']*)["\']/i', (string) $t, $m, PREG_SET_ORDER)) { foreach ($m as $x) { $o[$x[1]] = $x[2]; } } return $o; } }
+if (!function_exists('wp_parse_url')) { function wp_parse_url($u, $c = -1) { return parse_url($u, $c); } }
 function ok($c, $n) { global $fail; echo ($c ? 'OK   ' : 'FEHLER ') . $n . "\n"; if (!$c) $fail++; }
 function item($asin, $listings) { return ['asin' => $asin, 'detailPageURL' => "https://www.amazon.es/dp/$asin?tag=t-21", 'itemInfo' => ['title' => ['displayValue' => "T$asin"]],
     'images' => ['primary' => ['large' => ['url' => 'https://m.media/x.jpg']]], 'offersV2' => ['listings' => $listings]]; }
@@ -1228,4 +1229,5 @@ $kv = SAB::kurzname_varianten('Relaxdays Nistkasten Bausatz Vögel, 2er Set, 32 
 ok(count($kv) >= 2 && count($kv) <= 3 && count(array_unique($kv)) === count($kv) && strpos($kv[0], ' | ') === false, 'Kurznamen-Vorschläge: zwei bis drei verschiedene Namen aus dem Titel');
 $ar = SAB::aawp_reste('[aawp box="B0AAAAAAA1"] [aawp fields="B0AAAAAAA1" value="thumb"] [aawp fields="B0AAAAAAA1" value="price"] [aawp table="B0AAAAAAA1,B0AAAAAAA2"] [amazon bestseller="garden" items="5"] [aawp link="B0AAAAAAA1"]Text[/aawp]');
 ok(count($ar) === 3 && strpos($ar[0], 'price') !== false && strpos($ar[1], 'table') !== false && strpos($ar[2], 'bestseller') !== false, 'AAWP-Reste: nur nicht ersetzte Shortcodes (Preis, Tabelle, Bestseller) werden gemeldet');
+ok(SAB::asin_aus_text('https://www.amazon.de/Schwegler-Nistkasten/dp/B08VKRJ5D4/ref=sr_1_3?keywords=x') === 'B08VKRJ5D4' && SAB::asin_aus_text('b08vkrj5d4') === 'B08VKRJ5D4' && SAB::asin_aus_text('https://amazon.de/gp/product/B0037YHTMS') === 'B0037YHTMS', 'Eigene ASIN: Amazon-Link oder ASIN wird erkannt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
