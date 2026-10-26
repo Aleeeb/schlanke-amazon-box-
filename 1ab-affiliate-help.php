@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.82.0
+ * Version: 0.82.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.82.0';
+    const VERSION = '0.82.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4340,6 +4340,10 @@ final class SAB {
         '2026-10-26-such-kand-schnecken-4' => ['host' => 'schneckenhilfe.de', 'option' => 'sab_such_kand', 'zusammen' => true, 'zeilen' => [   // Mac-Sitzung: Schneckenzaun nur 6 Treffer, B07BHMJKFJ/B08SW421HX/B09TTYK5HZ/B006DUH03G wenige Bewertungen (weniger sicher); Saat: Wildblumen-/Bienenweide
             'B08562GF55 | B00UVQQYFI, B00B8QSSZY, B07BHMJKFJ, B08SW421HX, B09TTYK5HZ, B006DUH03G | 2026-10-26',
             'B00D1VO916 | B07MK3Q8G5, B07RD876TC, B07KVM35TW, B07ST2P369, B0GT56XWFJ, B0CDH4R958, B0GTBY1X9P, B0872JB5HX, B0CXGZ14Y5 | 2026-10-26',
+        ]],
+        '2026-10-26-such-kand-feder-6' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zusammen' => true, 'zeilen' => [   // Mac-Sitzung: Nistkasten XXL, Teekannennest (Halbhöhlen); neue vor die vorhandenen
+            'B09T1C4YXC | B073T9SM39, B08P5Q97NF, B0CG6D8KJN, B085CX8W6B, B0BSHCJRDM, B0BT46LC5X, B09RTSPDZK, B08NW5FH5V | 2026-10-26',
+            'B0731JJNDQ | B091TXGPP9, B0CG6FVWDP, B0D8PYWZ88, B0B29H9TV2, B0BFJL4445, B0001IP93O, B083JMP12D, B09C8VLHWQ | 2026-10-26',
         ]],
         '2026-10-26-korrektur-feder' => ['host' => 'federhilfe.de', 'option' => 'sab_such_kand', 'zeilen' => [], 'ersetzen' => [   // nur wenn die Zeile noch genau so dasteht (von Hand Geändertes bleibt)
             'B01MU8UQ64 | B004WO8ZIE, B000WFLAMA, B091TXGPP9 | 2026-10-26' => 'B01MU8UQ64 | B0CXJFT8VK, B0CX6GF8HN, B0F3P51Q4M | 2026-10-26',
