@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.85.2
+ * Version: 0.85.3
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.85.2';
+    const VERSION = '0.85.3';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1667,16 +1667,17 @@ final class SAB {
     public static function zeige_editor_skript(): void {
         $a = isset($_GET['sab_zeige']) ? preg_replace('/[^A-Za-z0-9]/', '', (string) wp_unslash($_GET['sab_zeige'])) : '';
         if (strlen($a) < 5 || strlen($a) > 12 || !current_user_can('edit_posts')) { return; }
-        echo '<script>(function(){var a=' . wp_json_encode($a) . ';'
+        $k = max(0, (int) ($_GET['sab_nr'] ?? 1) - 1);   // 1. , 2. … Stelle desselben Produkts im Artikel
+        echo '<script>(function(){var a=' . wp_json_encode($a) . ',k=' . $k . ';'
            . 'function ban(t){var b=document.createElement("div");b.style.cssText="position:fixed;left:180px;right:0;top:32px;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px sans-serif;text-align:center";b.textContent=t;b.onclick=function(){b.remove()};document.body.appendChild(b)}'
            . 'function gb(n){n=n||0;var wd=window.wp&&wp.data;var be=wd&&wd.select("core/block-editor");var bl=be?be.getBlocks():[];if(!bl.length){if(n<25){setTimeout(function(){gb(n+1)},400)}else{ban("Der Editor ist nicht geladen; bitte mit Strg+F nach "+a+" suchen.")}return}'
-           . 'function fi(l){for(var i=0;i<l.length;i++){var b=l[i],t=JSON.stringify(b.attributes||{})+String(b.originalContent||"");if(t.indexOf(a)>=0){return b}var r=fi(b.innerBlocks||[]);if(r){return r}}return null}'
-           . 'var f=fi(bl);if(!f){ban("Im Text habe ich "+a+" nicht gefunden (vielleicht über einen Platzhalter oder eine Austausch-Regel).");return}'
+           . 'function fi(l,o){for(var i=0;i<l.length;i++){var b=l[i],t=JSON.stringify(b.attributes||{})+String(b.originalContent||"");if(t.indexOf(a)>=0){o.push(b)}fi(b.innerBlocks||[],o)}return o}'
+           . 'var fl=fi(bl,[]),f=fl[k]||fl[0];if(!f){ban("Im Text habe ich "+a+" nicht gefunden (vielleicht über einen Platzhalter oder eine Austausch-Regel).");return}'
            . 'wd.dispatch("core/block-editor").selectBlock(f.clientId);setTimeout(function(){var e=document.getElementById("block-"+f.clientId);if(!e){var fr=document.querySelector("iframe[name=editor-canvas]");e=fr&&fr.contentDocument&&fr.contentDocument.getElementById("block-"+f.clientId)}if(e){e.scrollIntoView({block:"center"})}},300);ban(a+" steht im markierten Block ("+f.name+"). Zum Schließen klicken.")}'
            . 'function hl(el){var o=el.style.cssText;el.style.cssText+=";background:#fff3a3;outline:3px solid #d63638";setTimeout(function(){el.style.cssText=o},6000)}'
            . 'function vis(n){n=n||0;var ed=window.tinyMCE&&tinyMCE.get&&tinyMCE.get("content");if(!ed||!ed.getBody()||!ed.getBody().innerHTML){if(n<30){setTimeout(function(){vis(n+1)},400)}else{txt()}return}'
-           . 'var body=ed.getBody(),w=ed.getDoc().createTreeWalker(body,NodeFilter.SHOW_TEXT,null),nd,hit=null;while((nd=w.nextNode())){if(nd.nodeValue.indexOf(a)>=0){hit=nd;break}}'
-           . 'var el=hit?hit.parentNode:body.querySelector("[href*=\""+a+"\"],[data-mce-href*=\""+a+"\"],[src*=\""+a+"\"]");'
+           . 'var body=ed.getBody(),w=ed.getDoc().createTreeWalker(body,NodeFilter.SHOW_TEXT,null),nd,hit=null,c=0,h1=null;while((nd=w.nextNode())){if(nd.nodeValue.indexOf(a)>=0){if(!h1){h1=nd}if(c++===k){hit=nd;break}}}if(!hit){hit=h1}'
+           . 'var qa=body.querySelectorAll("[href*=\""+a+"\"],[data-mce-href*=\""+a+"\"],[src*=\""+a+"\"]");var el=hit?hit.parentNode:(qa[k]||qa[0]);'
            . 'if(!el){txt();return}'
            . 'if(hit){var r=ed.getDoc().createRange(),i=hit.nodeValue.indexOf(a);r.setStart(hit,i);r.setEnd(hit,i+a.length);ed.selection.setRng(r)}'
            . 'var fr=document.getElementById("content_ifr"),rc=el.getBoundingClientRect();'
@@ -1685,7 +1686,7 @@ final class SAB {
            . 'hl(el);ban(a+" steht hier (gelb markiert, Ansicht Visuell). Zum Schließen klicken.")}'
            . 'function txt(){var t=document.getElementById("content");if(!t){return}'
            . 'if(window.switchEditors&&document.getElementById("wp-content-wrap")&&document.getElementById("wp-content-wrap").className.indexOf("tmce-active")>=0){try{switchEditors.go("content","html")}catch(e){}}'
-           . 'setTimeout(function(){var v=t.value,i=v.indexOf(a);if(i<0){ban("Im Text habe ich "+a+" nicht gefunden (vielleicht über einen Platzhalter oder eine Austausch-Regel).");return}'
+           . 'setTimeout(function(){var v=t.value,i=v.indexOf(a),p=i,c=0;while(i>=0&&c<k){var j=v.indexOf(a,p+1);if(j<0){break}p=j;i=j;c++}if(i<0){ban("Im Text habe ich "+a+" nicht gefunden (vielleicht über einen Platzhalter oder eine Austausch-Regel).");return}'
            . 'var z=v.slice(0,i).split("\n").length,tz=v.split("\n").length;'
            . 'var m=document.createElement("div"),cs=getComputedStyle(t);m.style.cssText="position:absolute;visibility:hidden;white-space:pre-wrap;word-wrap:break-word;top:0;left:-9999px;width:"+t.clientWidth+"px;font:"+cs.font+";padding:"+cs.padding+";letter-spacing:"+cs.letterSpacing;m.textContent=v.slice(0,i);document.body.appendChild(m);var h=m.offsetHeight;m.remove();'
            . 'document.getElementById("wp-content-editor-container").scrollIntoView({block:"start"});t.focus();t.setSelectionRange(i,i+a.length);t.scrollTop=Math.max(0,h-t.clientHeight/2);'
@@ -1925,11 +1926,19 @@ final class SAB {
         if (strlen($a) < 5 || strlen($a) > 12 || !function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts')) { return; }
         $eid = function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0;
         $ed = $eid && current_user_can('edit_post', $eid) ? admin_url('post.php?post=' . $eid . '&action=edit&sab_zeige=' . rawurlencode($a)) : '';
-        echo '<script>(function(){var ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
+        $nr = max(1, (int) ($_GET['sab_nr'] ?? 1));
+        echo '<script>(function(){var ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:10px 16px;font:600 15px sans-serif;text-align:center";'
-           . 'b.textContent=s.length?"Hier steht "+a+" ("+s.length+" Stelle"+(s.length>1?"n":"")+", rot markiert)":"Im sichtbaren Text steht "+a+" nicht"+(ed?"; ich öffne den Editor an der Stelle ...":" (vielleicht in einem Bild oder Code-Block).");document.body.appendChild(b);if(s.length&&ed){var l=document.createElement("a");l.href=ed;l.textContent="Im Editor bearbeiten";l.style.cssText="margin-left:14px;background:#fff;color:#d63638;padding:4px 10px;border-radius:4px;text-decoration:none";b.appendChild(l);var x=document.createElement("span");x.textContent=" ×";x.style.cssText="cursor:pointer;margin-left:12px";x.onclick=function(){b.remove()};b.appendChild(x)}if(!s.length&&ed){setTimeout(function(){location.href=ed},1200)}'
+           . 'var t=document.createElement("span");b.appendChild(t);document.body.appendChild(b);'
+           . 'function btn(x,f){var e=document.createElement("a");e.textContent=x;e.href="#";e.style.cssText="margin-left:12px;background:#fff;color:#d63638;padding:4px 10px;border-radius:4px;text-decoration:none";e.onclick=function(ev){ev.preventDefault();f(e)};b.appendChild(e);return e}'
+           . 'if(!s.length){t.textContent="Im sichtbaren Text steht "+a+" nicht"+(ed?"; ich öffne den Editor an der Stelle ...":" (vielleicht in einem Bild oder Code-Block).");if(ed){setTimeout(function(){location.href=ed},1200)}return}'
+           . 'if(idx>=s.length){idx=0}'
            . 'for(var i=0;i<s.length;i++){s[i].style.outline="4px solid #d63638";s[i].style.background="#fde8e8";}'
-           . 'if(s.length){setTimeout(function(){s[0].scrollIntoView({block:"center"})},300)}})();</script>';
+           . 'var le=null;function zeige(n){idx=(n+s.length)%s.length;t.textContent="Hier steht "+a+(s.length>1?" (Stelle "+(idx+1)+" von "+s.length+", alle rot markiert)":" (1 Stelle, rot markiert)");'
+           . 'for(var i=0;i<s.length;i++){s[i].style.outlineColor=i===idx?"#000":"#d63638"}s[idx].scrollIntoView({block:"center"});if(le){le.href=ed+"&sab_nr="+(idx+1)}}'
+           . 'if(s.length>1){btn("◀ vorige",function(){zeige(idx-1)});btn("nächste ▶",function(){zeige(idx+1)})}'
+           . 'if(ed){le=btn("Im Editor bearbeiten",function(e){window.open(e.href,"_blank")});le.href=ed+"&sab_nr="+(idx+1);le.target="_blank";le.onclick=null}'
+           . 'var x=btn("×",function(){b.remove()});setTimeout(function(){zeige(idx)},300)})();</script>';
     }
 
     public static function sc_link($a, $inhalt = ''): string {
@@ -3194,7 +3203,13 @@ final class SAB {
             foreach (array_slice($st, 0, 12) as $x) {
                 $url = add_query_arg('sab_zeige', $neu, (string) get_permalink((int) $x['pid']));
                 $h .= '<div style="margin:6px 0 0">' . ($x['satz'] !== '' && count($st) <= 2 ? '<div style="background:#fff;border:1px solid #c3e6cb;border-radius:6px;padding:6px 10px;margin:0 0 4px;max-width:760px">' . esc_html($x['satz']) . '<br><small style="color:#555">【…】 = Link mit diesem Text</small></div>' : '')
-                    . esc_html($x['titel']) . ' <small>(' . (int) $x['n'] . '×)</small> <a class="button button-small" href="' . esc_url($url) . '" target="_blank" rel="noopener">Stelle ansehen ↗</a> <a class="button button-small" href="' . esc_url(admin_url('post.php?post=' . (int) $x['pid'] . '&action=edit&sab_zeige=' . rawurlencode($neu))) . '" target="_blank" rel="noopener">Im Editor bearbeiten ↗</a></div>';
+                    . esc_html($x['titel']) . ' <small>(' . (int) $x['n'] . '×)</small>';
+                $nst = max(1, min(8, (int) $x['n']));
+                for ($k = 1; $k <= $nst; $k++) {
+                    $lab = $nst > 1 ? 'Stelle ' . $k . ' ' : '';
+                    $h .= ' <span style="display:inline-block;margin:2px 6px 2px 0"><a class="button button-small" href="' . esc_url(add_query_arg('sab_nr', $k, $url)) . '" target="_blank" rel="noopener">' . esc_html($lab) . 'ansehen ↗</a> <a class="button button-small" href="' . esc_url(admin_url('post.php?post=' . (int) $x['pid'] . '&action=edit&sab_zeige=' . rawurlencode($neu) . '&sab_nr=' . $k)) . '" target="_blank" rel="noopener">' . esc_html($lab) . 'bearbeiten ↗</a></span>';
+                }
+                $h .= '</div>';
             }
             if (count($st) > 12) { $h .= '<p class="description">… und ' . (count($st) - 12) . ' weitere Artikel.</p>'; }
             $h .= '<form method="post" style="margin:8px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="' . esc_attr($tab) . '"><input type="hidden" name="sab_form" value="kontrolle_ok"><input type="hidden" name="sab_id" value="' . esc_attr((string) $id) . '"><button class="button button-primary">Kontrolliert, in Ordnung</button> <button class="button" name="sab_form" value="kontrolle_zurueck" style="color:#b32d2e;border-color:#b32d2e" title="Stellt die Artikel auf den Stand vor dem Tausch zurück (nur wenn sie seitdem nicht geändert wurden)">Nicht in Ordnung, rückgängig machen</button></form></div>';
