@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.76.1
+ * Version: 0.76.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.76.1';
+    const VERSION = '0.76.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4079,13 +4079,14 @@ final class SAB {
         $out = self::ohne_doppel_kandidaten($alt, $out);   // nur Produkte vorschlagen, die der Austausch auch annehmen würde (keine Doppelung nebeneinander oder zu nah)
         $bestand = []; $neu = [];
         foreach ($out as $c) { if (strpos((string) $c['quelle'], 'Amazon-Suche') === 0) { $c['neu'] = true; $neu[] = $c; } else { $bestand[] = $c; } }
+        $bestand = array_values(array_filter($bestand, fn($c) => (int) ($c['passt'] ?? 0) >= 2 || ((int) ($c['passt'] ?? 0) === 1 && (int) ($c['aehn'] ?? 0) >= 1)));   // Bestand nur bei echter Namens-/Typ-Übereinstimmung
         $bs = array_slice($bestand, 0, $max);
         $liste = array_merge($bs, array_slice($neu, 0, max(2, min(4, 6 - count($bs)))));
-        if (count($liste) < 4 && $rest) {   // nichts Passendes gefunden: wenigstens die stärksten lieferbaren Produkte des Bestands zeigen
+        if (false && count($liste) < 4 && $rest) {   // nichts Passendes gefunden: wenigstens die stärksten lieferbaren Produkte des Bestands zeigen
             usort($rest, fn($p, $q2) => $q2['score'] <=> $p['score']);
             $liste = array_merge($liste, array_slice($rest, 0, 4 - count($liste)));
         }
-        usort($liste, fn($p, $q2) => [(int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
+        usort($liste, fn($p, $q2) => [(int) !empty($q2['neu']), (int) $q2['ok'], min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) !empty($p['neu']), (int) $p['ok'], min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
         return ['liste' => $liste, 'aussortiert' => $aus];   // hat der Bestand wenig Passendes, füllen Treffer der Amazon-Suche auf (bis zu vier)
     }
 
