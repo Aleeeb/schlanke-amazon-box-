@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.75.41
+ * Version: 0.75.42
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.75.41';
+    const VERSION = '0.75.42';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -105,6 +105,8 @@ final class SAB {
         add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
         add_action('wp_footer',      [__CLASS__, 'fuss'], 5);
         add_filter('pre_set_site_transient_update_plugins', [__CLASS__, 'update_pruefen']);
+        add_action('sab_update_check', [__CLASS__, 'update_cron']);
+        add_action('admin_init',     [__CLASS__, 'update_admin']);
         add_action('admin_init',     [__CLASS__, 'tabelle']);
         if (!wp_next_scheduled('sab_pruefen')) { wp_schedule_event(time() + 300, 'daily', 'sab_pruefen'); }
     }
@@ -1390,6 +1392,59 @@ final class SAB {
         return '<p class="sab-hinweis"><small>' . esc_html($a['text']) . '</small></p>';
     }
 
+    // ---------- Update-Prüfung mit wechselndem Abstand ----------
+
+    /** Alter der letzten Neuerung (Sekunden) => Abstand der Prüfung (Sekunden); danach nur noch einmal am Tag. Viele Updates nacheinander: Minutentakt. */
+    const UPD_STUFEN = [[1800, 60], [7200, 180], [21600, 600], [86400, 1800], [259200, 7200]];
+
+    public static function update_intervall(): int {
+        $st = (array) get_option('sab_upd_stat', []); $alter = time() - (int) ($st['neu'] ?? 0);
+        foreach (self::UPD_STUFEN as [$bis, $abstand]) { if ($alter <= $bis) { return $abstand; } }
+        return DAY_IN_SECONDS;
+    }
+
+    /** Merkt, wann zuletzt eine neue Version zu sehen war (bei GitHub oder frisch installiert): davon hängt der Prüfabstand ab. */
+    private static function update_merken(string $json_version): void {
+        $st = (array) get_option('sab_upd_stat', []); $neu = false;
+        if ($json_version !== '' && ($st['json'] ?? '') !== $json_version) { $st['json'] = $json_version; $neu = true; }
+        if (($st['inst'] ?? '') !== self::VERSION) { $st['inst'] = self::VERSION; $neu = true; }
+        if ($neu) { $st['neu'] = time(); update_option('sab_upd_stat', $st, false); }
+    }
+
+    /** Fragt GitHub jetzt (oder wenn der Abstand um ist) nach einer neuen Version und trägt sie sofort bei WordPress ein. @return string neue Version oder leer */
+    public static function update_nachsehen(bool $jetzt = false): string {
+        if (!$jetzt && time() < (int) get_option('sab_upd_naechste', 0)) { return ''; }
+        delete_transient('sab_update_json');
+        $key = plugin_basename(__FILE__);
+        $t = get_site_transient('update_plugins'); if (!is_object($t)) { $t = new stdClass(); }
+        if (empty($t->checked) || !is_array($t->checked)) { $t->checked = []; }
+        if (!isset($t->checked[$key])) { $t->checked[$key] = self::VERSION; }
+        if (empty($t->last_checked)) { $t->last_checked = time(); }
+        foreach (['response', 'no_update'] as $f) { if (!isset($t->$f) || !is_array($t->$f)) { $t->$f = []; } }
+        unset($t->response[$key], $t->no_update[$key]);
+        $t = self::update_pruefen($t);
+        set_site_transient('update_plugins', $t);   // WordPress zeigt es sofort an
+        update_option('sab_upd_naechste', time() + self::update_intervall(), false);
+        return isset($t->response[$key]) ? (string) $t->response[$key]->new_version : '';
+    }
+
+    /** Nur im Admin: Abstand um? Dann nachsehen (ein Optionswert pro Aufruf, im Frontend läuft nichts). Dazu die Kette der Hintergrundläufe am Leben halten. */
+    public static function update_admin(): void {
+        if (!current_user_can('update_plugins') || (defined('DOING_AJAX') && DOING_AJAX)) { return; }
+        self::update_nachsehen(false);
+        if (!wp_next_scheduled('sab_update_check')) { wp_schedule_single_event(time() + max(60, self::update_intervall()), 'sab_update_check'); }
+    }
+
+    /** Hintergrundlauf: nachsehen, bei neuer Version und eingeschalteten Auto-Updates nur dieses Plugin gleich einspielen lassen, nächsten Lauf planen. */
+    public static function update_cron(): void {
+        $neu = self::update_nachsehen(true); $key = plugin_basename(__FILE__);
+        if ($neu !== '' && in_array($key, (array) get_site_option('auto_update_plugins', []), true) && function_exists('wp_maybe_auto_update')) {
+            $nur = fn($u, $i) => is_object($i) && (string) ($i->plugin ?? '') === $key;
+            add_filter('auto_update_plugin', $nur, 99999, 2); wp_maybe_auto_update(); remove_filter('auto_update_plugin', $nur, 99999);
+        }
+        wp_schedule_single_event(time() + max(60, self::update_intervall()), 'sab_update_check');
+    }
+
     /** Meldet WordPress eine neuere Version aus update.json im GitHub-Repo; das ZIP muss aus diesem Repo stammen. */
     public static function update_pruefen($t) {
         if (!is_object($t) || empty($t->checked)) { return $t; }
@@ -1400,7 +1455,8 @@ final class SAB {
             $code = is_wp_error($r) ? $r->get_error_message() : wp_remote_retrieve_response_code($r);
             $m = (!is_wp_error($r) && $code === 200) ? json_decode((string) wp_remote_retrieve_body($r), true) : [];
             update_option('sab_update_status', ['ts' => time(), 'code' => (string) $code, 'version' => is_array($m) ? (string) ($m['version'] ?? '') : ''], false);
-            set_transient('sab_update_json', is_array($m) ? $m : [], $m ? 30 * MINUTE_IN_SECONDS : 15 * MINUTE_IN_SECONDS);  // bei Fehlern bald erneut versuchen
+            self::update_merken(is_array($m) ? (string) ($m['version'] ?? '') : '');
+            set_transient('sab_update_json', is_array($m) ? $m : [], $m ? max(60, self::update_intervall()) : 5 * MINUTE_IN_SECONDS);  // Zwischenspeicher so lang wie der Prüfabstand; bei Fehlern in 5 Minuten wieder
         }
         $v = (string) ($m['version'] ?? ''); $zip = (string) ($m['zip'] ?? '');
         if ($v === '' || strpos($zip, self::UPDATE_REPO) !== 0) { return $t; }
@@ -4486,6 +4542,7 @@ final class SAB {
         $neu = [
             '<a href="' . esc_url(admin_url('admin.php?page=sab-einstellungen')) . '">Einstellungen</a>',
             '<a href="' . esc_url(admin_url('admin.php?page=sab')) . '">Übersicht</a>',
+            '<a href="' . esc_url(wp_nonce_url(admin_url('admin.php?page=sab-einstellungen&sab_update_jetzt=1'), 'sab_update_jetzt')) . '">Nach Update suchen</a>',
         ];
         return array_merge($neu, (array) $links);
     }
@@ -4681,6 +4738,10 @@ JS;
         if (!isset($tabs[$tab])) { $tab = 'uebersicht'; }
 
         $meldung = '';
+        if (!empty($_GET['sab_update_jetzt']) && wp_verify_nonce((string) ($_GET['_wpnonce'] ?? ''), 'sab_update_jetzt')) {
+            $nv = self::update_nachsehen(true);
+            $meldung = $nv !== '' ? 'Neue Version ' . $nv . ' gefunden: sie steht jetzt unter Plugins zum Aktualisieren bereit.' : 'Kein Update gefunden: Installiert ist die neueste Version (' . self::VERSION . ').';
+        }
         if (!empty($_POST['sab_form']) && check_admin_referer('sab_speichern')) {
             $form = sanitize_key((string) $_POST['sab_form']);
             if ($form === 'produkte') {
@@ -5017,6 +5078,8 @@ JS;
                 echo '</tbody></table><p class="description">Gezählt werden Klicks, nicht Seitenaufrufe. Die Artikel verteilen sich gleichmäßig auf die Varianten, vergleiche daher erst bei genügend Klicks.</p>';
             }
         } elseif ($tab === 'einstellungen') {
+            $us = (array) get_option('sab_update_status', []); $ab = self::update_intervall();
+            echo '<p class="description"><strong>Update-Prüfung:</strong> letzte Abfrage bei GitHub ' . (!empty($us['ts']) ? 'vor ' . max(0, (int) round((time() - (int) $us['ts']) / 60)) . ' Min.' : 'noch nie') . ', dort liegt Version ' . esc_html((string) ($us['version'] ?? '?')) . ', installiert ist ' . esc_html(self::VERSION) . '. Abstand jetzt: ' . ($ab >= DAY_IN_SECONDS ? 'einmal am Tag' : ($ab >= 3600 ? (int) round($ab / 3600) . ' Std.' : (int) round($ab / 60) . ' Min.')) . ' (kürzer, solange oft Updates kommen). <a class="button button-small" href="' . esc_url(wp_nonce_url(admin_url('admin.php?page=sab-einstellungen&sab_update_jetzt=1'), 'sab_update_jetzt')) . '">Jetzt nach Update suchen</a></p>';
             echo self::ids_html();
             echo '<form method="post">'; wp_nonce_field('sab_speichern');
             echo '<input type="hidden" name="sab_tab" value="einstellungen"><input type="hidden" name="sab_form" value="einstellungen">';

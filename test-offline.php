@@ -25,6 +25,12 @@ function wp_remote_post($u, $a) {
 function wp_remote_get($u, $a) {
     if (strpos($u, 'update.json') !== false) return ['code' => 200, 'body' => json_encode($GLOBALS['upd'] ?? [])]; return ['code' => 200, 'body' => 'JPG', 'ct' => 'image/jpeg']; }
 function wp_remote_retrieve_response_code($r) { return $r['code']; }
+if (!function_exists('wp_nonce_url')) { function wp_nonce_url($u, $a = '') { return $u . '&_wpnonce=x'; } }
+if (!function_exists('wp_verify_nonce')) { function wp_verify_nonce($n, $a = '') { return true; } }
+if (!function_exists('get_site_transient')) { function get_site_transient($k) { return $GLOBALS['str'][$k] ?? false; } }
+if (!function_exists('set_site_transient')) { function set_site_transient($k, $v, $e = 0) { $GLOBALS['str'][$k] = $v; return true; } }
+if (!function_exists('wp_schedule_single_event')) { function wp_schedule_single_event($t, $h, $a = []) { $GLOBALS['sched'][] = $h; return true; } }
+if (!function_exists('get_site_option')) { function get_site_option($k, $d = false) { return $GLOBALS['opt'][$k] ?? $d; } }
 function wp_remote_retrieve_body($r) { return $r['body']; }
 function wp_remote_retrieve_header($r, $h) { return $r['ct'] ?? ''; }
 function wp_upload_dir() { $d = sys_get_temp_dir() . '/sabtest'; return ['basedir' => $d, 'baseurl' => 'https://x.test/up']; }
@@ -585,7 +591,7 @@ $o = SAB::block_ausgabe(['quelle' => 'https://amzn.to/blocktest', 'darstellung' 
 ok(strpos($o, 'B0TABLE002') !== false && strpos($o, '>Ver<') !== false, 'Block: Kurzlink wird zur ASIN, Button');
 ok(SAB::block_ausgabe(['quelle' => '', 'darstellung' => 'karte']) === '', 'Block: ohne Eingabe nichts');
 $l = SAB::aktionslinks(['<a>Deaktivieren</a>']);
-ok(count($l) === 3 && strpos($l[0], 'sab-einstellungen') !== false, 'Pluginliste: Link Einstellungen');
+ok(count($l) === 4 && strpos($l[0], 'sab-einstellungen') !== false, 'Pluginliste: Link Einstellungen');
 
 // ---- 0.42.0: Handdaten ----
 $GLOBALS['opt']['sab_manuell'] = "B0TABLE001 | 4,1 | 588 | ja | Madrid 2, Barcelona 3, Sevilla 2 | 2026-10-24\nB0TABLE002 | 4,8 | 9 | nein | Madrid 1,5";
@@ -1137,4 +1143,17 @@ $pos = fn($h, $a) => strpos($h, $a);
 ok($pos($u1, 'B0SORT0001') < $pos($u1, 'B0SORT0003') && $pos($u1, 'B0SORT0003') < $pos($u1, 'B0SORT0002') && $pos($u2, 'B0SORT0002') < $pos($u2, 'B0SORT0003') && $pos($u2, 'B0SORT0003') < $pos($u2, 'B0SORT0001'), 'Übersicht: Klick auf Score sortiert die ganze Liste auf- und absteigend');
 ok($pos($u1, 'B0SORT0004') > $pos($u1, 'B0SORT0002') && $pos($u2, 'B0SORT0004') > $pos($u2, 'B0SORT0001') && strpos($u1, 'data-sort="score"') !== false, 'Übersicht: Produkte ohne Score stehen bei jeder Sortierung am Ende, Spaltenkopf trägt data-sort');
 unset($_GET['sab_sort'], $_GET['sab_dir']); $GLOBALS['wpdb'] = $wpdb_s; unset($GLOBALS['tr']['sab_uebersicht_es'], $GLOBALS['opt']['sab_uebersicht_stand_es'], $GLOBALS['opt']['sab_produkte']);
+
+// ---- 0.75.42: Update-Prüfung mit wechselndem Abstand ----
+$GLOBALS['opt']['sab_upd_stat'] = ['neu' => time() - 600];  $iv1 = SAB::update_intervall();
+$GLOBALS['opt']['sab_upd_stat'] = ['neu' => time() - 3 * 3600]; $iv2 = SAB::update_intervall();
+$GLOBALS['opt']['sab_upd_stat'] = ['neu' => time() - 40 * 3600]; $iv3 = SAB::update_intervall();
+$GLOBALS['opt']['sab_upd_stat'] = ['neu' => time() - 30 * 86400]; $iv4 = SAB::update_intervall();
+ok($iv1 === 60 && $iv2 === 600 && $iv3 === 7200 && $iv4 === 86400, 'Update-Prüfung: Abstand wächst von Minuten auf einmal am Tag, je länger kein Update kam');
+$GLOBALS['upd'] = ['version' => '99.1.0', 'zip' => $zipok]; $GLOBALS['tr'] = []; $GLOBALS['str'] = []; unset($GLOBALS['opt']['sab_upd_naechste']); $GLOBALS['opt']['sab_upd_stat'] = ['neu' => time() - 30 * 86400, 'inst' => SAB::VERSION, 'json' => '99.0.0'];
+$nv = SAB::update_nachsehen(true);
+ok($nv === '99.1.0' && isset($GLOBALS['str']['update_plugins']->response['schlanke-amazon-box/schlanke-amazon-box.php']) && (int) get_option('sab_upd_naechste') >= time() + 55 && time() - (int) $GLOBALS['opt']['sab_upd_stat']['neu'] < 5, 'Update-Prüfung: „Jetzt suchen“ trägt die neue Version sofort bei WordPress ein, merkt die Neuerung und verkürzt den Abstand');
+$GLOBALS['upd'] = ['version' => '99.2.0', 'zip' => $zipok]; $GLOBALS['tr'] = [];
+ok(SAB::update_nachsehen(false) === '' && ($GLOBALS['str']['update_plugins']->response['schlanke-amazon-box/schlanke-amazon-box.php']->new_version ?? '') === '99.1.0', 'Update-Prüfung: vor Ablauf des Abstands wird nicht erneut bei GitHub gefragt');
+unset($GLOBALS['opt']['sab_upd_stat'], $GLOBALS['opt']['sab_upd_naechste'], $GLOBALS['upd'], $GLOBALS['str']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
