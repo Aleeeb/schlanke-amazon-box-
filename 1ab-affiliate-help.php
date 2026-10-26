@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.83.1
+ * Version: 0.83.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.83.1';
+    const VERSION = '0.83.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3040,7 +3040,7 @@ final class SAB {
         $c = str_replace($alt, $neu, $c);
         if ($neuer_name !== '') {
             // Der Text von Textlinks („Angebot bei Amazon“) bleibt, wie er ist; Namen werden nur außerhalb von Links ersetzt (Tabellen, Überschriften, Fließtext).
-            $teile = preg_split('#(<a\b[^>]*>.*?</a>|\[amz_link\b[^\]]*\].*?\[/amz_link\])#is', $c, -1, PREG_SPLIT_DELIM_CAPTURE);
+            $teile = preg_split('#(<a\b[^>]*>.*?</a>|\[amz_link\b[^\]]*\](?:(?!\[amz_link\b|\[/amz_link\]).)*\[/amz_link\]|\[amz_link\b[^\]]*\])#is', $c, -1, PREG_SPLIT_DELIM_CAPTURE);
             foreach (array_unique(array_filter(array_map('trim', $alte_namen))) as $name) {
                 if (mb_strlen($name) < 6 || $name === $neuer_name) { continue; }
                 foreach ($teile as $ti => $tt) {
@@ -3147,7 +3147,7 @@ final class SAB {
         if (preg_match('/<a\s|\[amz_|\[aawp/i', $vorn . $hinten) || trim(strip_tags($vorn . $hinten)) === '') { return null; }
         $tags = [];   // alle anderen Tags/Shortcodes im Satz werden zu ⟦1⟧, ⟦2⟧ …, damit im Textfeld nur Klartext steht
         $mask = function ($t) use (&$tags) { return preg_replace_callback('/<[^>]+>|\[[^\]]+\]/u', function ($m) use (&$tags) { $tags[] = $m[0]; return '⟦' . count($tags) . '⟧'; }, $t); };
-        return ['start' => $v0 + $von, 'ende' => $e + $bis, 'link' => $link, 'maske' => $mask($vorn) . '【LINK】' . $mask($hinten), 'tags' => $tags, 'linktext' => trim(strip_tags($link))];
+        return ['start' => $v0 + $von, 'ende' => $e + $bis, 'link' => $link, 'maske' => $mask($vorn) . '【LINK】' . $mask($hinten), 'tags' => $tags, 'linktext' => $link[0] === '[' ? trim(strip_tags(preg_match('/\](.*)\[\/amz_link\]$/s', $link, $lt) ? $lt[1] : (preg_match('/\btext\s*=\s*["\']([^"\']*)["\']/i', $link, $lt) ? $lt[1] : ''))) : trim(strip_tags($link))];
     }
 
     /** Textfeld-Inhalt zurück in Rohtext: 【LINK】 => Link, ⟦n⟧ => ursprüngliches Tag; sonst nichts Fremdes (Eingetipptes < > wird entfernt). Null bei unbekanntem Platzhalter oder wenn der Link nicht genau einmal vorkommt. */
@@ -3173,6 +3173,19 @@ final class SAB {
         return '';
     }
 
+    /** Prüft nach einer Satzänderung, ob alle Links noch heil sind. Leer = in Ordnung, sonst der Grund. */
+    public static function link_pruefung(string $vorher, string $nachher, string $alt, string $neu): string {
+        $b = fn($t) => [substr_count($t, '<a '), substr_count($t, '</a>'), substr_count($t, '[amz_link'), substr_count($t, '[/amz_link]')];
+        if ($b($vorher) !== $b($nachher)) { return 'Zahl der Links hat sich geändert'; }
+        if (substr_count($nachher, $neu) < substr_count($vorher, $alt)) { return 'neue ASIN steht seltener im Artikel als die alte'; }
+        $sm = self::satz_mit_link($nachher, $neu); $so = self::satz_mit_link($vorher, $alt);
+        if (!$sm) { return 'im Satz ist kein Textlink mehr zu erkennen'; }
+        if ($so && $sm['linktext'] !== $so['linktext']) { return 'der Linktext hat sich geändert'; }
+        $l = $sm['link'];
+        $ok = stripos($l, '<a ') === 0 ? (bool) preg_match('#^<a\b[^>]*\bhref\s*=\s*["\']https?://[^"\']+["\'][^>]*>.*</a>$#is', $l) : (bool) preg_match('#^\[amz_link\b[^\]]*\basin\s*=\s*["\']?' . preg_quote($neu, '#') . '#i', $l);
+        return $ok ? '' : 'der Link hat keine gültige Adresse';
+    }
+
     /** Geänderter Satz für den nächsten Tausch: [Satz vorher mit {{LINK}}, Satz nachher]. */
     private static $satz_aend = null;
 
@@ -3192,11 +3205,15 @@ final class SAB {
             [$c1, $nk1, $hw] = self::tausch_kurzlinks($c_arb, $alt, $neu, $neuer_name); $hw = array_merge($hw0, $hw);   // Kurzlinks derselben Spalte mitnehmen, sonst zeigt der Textlink aufs alte Produkt
             [$neu_c, $n] = self::tausch_text($c1, $alt, $neu, $alte_namen, $neuer_name); $n += $nk1;
             if ($n === 0 || $neu_c === $c) { continue; }
+            if ($hw0 && ($pf = self::link_pruefung($c, $neu_c, $alt, $neu)) !== '') {   // Satz geändert: danach muss genau derselbe funktionierende Link im Satz stehen, sonst bleibt der Artikel unberührt
+                $hinweise[] = ($r['post_title'] ?? ('Beitrag ' . $pid)) . ': NICHT getauscht, Linkprüfung fehlgeschlagen (' . $pf . '). Der Artikel ist unverändert.'; continue;
+            }
             if (self::doppel_neu($c, $neu_c, $neu)) { $doppel[] = (string) ($r['post_title'] ?? ('Beitrag ' . $pid)); continue; }   // Schutz: kein Produkt doppelt nebeneinander oder zu nah
             update_post_meta($pid, '_sab_tausch_' . $id, wp_slash($c));
             wp_update_post(['ID' => $pid, 'post_content' => wp_slash($neu_c)]);
             $posts[$pid] = md5($neu_c);
             foreach ($hw as $w) { $hinweise[] = ($r['post_title'] ?? ('Beitrag ' . $pid)) . ': ' . $w; }
+            if ($hw0 && ($sj = self::satz_mit_link($neu_c, $neu))) { $hinweise[] = 'Satz jetzt: ' . mb_substr(str_replace('【LINK】', '[Link „' . $sj['linktext'] . '“]', $sj['maske']), 0, 260); }
             $kurz += preg_match_all('#amzn\.to|amzn\.eu|a\.co/|link\.amazon/#i', $neu_c);
         }
         if ($neuer_name !== '' && !isset(self::produkte()[$neu])) { update_option('sab_produkte', trim((string) get_option('sab_produkte', '')) . "\n" . $neu . ' | ' . $neuer_name, false); }

@@ -1294,4 +1294,19 @@ $roh = SAB::satz_roh(str_replace('12-Volt-10-Ah-Akku', 'Akku 12 V', $smy['maske'
 ok($roh !== null && strpos($roh, '<strong>Kay</strong>') !== false && strpos($roh, '>Angebot bei Amazon</a>') !== false && strpos($roh, 'Akku 12 V') !== false, 'Satz zurück in Rohtext: Link und Formatierung bleiben');
 ok(SAB::satz_roh('ohne Link', $smy) === null && SAB::satz_roh('⟦9⟧ 【LINK】', $smy) === null, 'Satz: ohne Link oder mit fremdem Platzhalter wird abgelehnt');
 ok(SAB::suchtext_aus_satz('Angebot bei Amazon', 'B0AKKUALT1', 'Außerdem betreibt Kay den Zaun mit einem 12-Volt-10-Ah-Akku') === 'Akku 12V 10Ah' && SAB::suchtext_aus_satz('Kupferband 10 m', 'B0X', 'egal') === 'Kupferband 10 m', 'Suchtext: Satz-Begriffe statt „Angebot bei Amazon“/ASIN');
+// Ablauf Satz bearbeiten + eigene ASIN: Link muss danach vorhanden und korrekt sein (alle Link-Schreibweisen)
+$fluss = function ($l, $edit) {
+    $alt = 'B0AKKUALT1'; $neu = 'B0AKKUNEU1';
+    $c = '<p>Davor. Außerdem betreibt <strong>Kay</strong> den Zaun mit einem 12-Volt-10-Ah-Akku (' . $l . ').</p>';
+    $sm = SAB::satz_mit_link($c, $alt); if (!$sm) { return [false, 'kein Satz']; }
+    $roh = SAB::satz_roh($edit ? str_replace('Zaun', 'Weidezaun', $sm['maske']) : $sm['maske'], $sm);
+    $arb = substr($c, 0, $sm['start']) . $roh . substr($c, $sm['ende']);
+    [$c1] = SAB::tausch_kurzlinks($arb, $alt, $neu, 'Akku Kurzname'); [$c2] = SAB::tausch_text($c1, $alt, $neu, ['Angebot bei Amazon', 'Akku alt'], 'Akku Kurzname');
+    return [SAB::link_pruefung($c, $c2, $alt, $neu) === '' && strpos($c2, 'Angebot bei Amazon') !== false && strpos($c2, $neu) !== false && strpos($c2, '<strong>Kay</strong>') !== false, $c2];
+};
+foreach (['<a href="https://www.amazon.de/dp/B0AKKUALT1?tag=x" rel="sponsored nofollow noopener">Angebot bei Amazon</a>', '[amz_link asin="B0AKKUALT1"]Angebot bei Amazon[/amz_link]', '[amz_link asin="B0AKKUALT1" text="Angebot bei Amazon"]'] as $li => $lk) {
+    [$o1, $r1] = $fluss($lk, true);
+    ok($o1, 'Satz bearbeiten + Tausch: Link bleibt heil (Variante ' . $li . '): ' . $r1);
+}
+ok(SAB::link_pruefung('<p>Text (<a href="https://www.amazon.de/dp/B0AKKUALT1">Angebot bei Amazon</a>).</p>', '<p>Text (<a>Angebot bei Amazon</a>).</p>', 'B0AKKUALT1', 'B0AKKUNEU1') !== '' && SAB::link_pruefung('<p>Text (<a href="https://www.amazon.de/dp/B0AKKUALT1">Angebot bei Amazon</a>).</p>', '<p>Text (Angebot bei Amazon).</p>', 'B0AKKUALT1', 'B0AKKUNEU1') !== '', 'Linkprüfung erkennt fehlenden Link und Link ohne Adresse');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
