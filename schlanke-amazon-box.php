@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.84.0
+ * Version: 0.84.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.84.0';
+    const VERSION = '0.84.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1832,7 +1832,7 @@ final class SAB {
     private static function ids_scan(): array {
         global $wpdb; $out = ['amazon' => [], 'ebay' => [], 'ohne' => []];
         if (!isset($wpdb)) { return $out; }
-        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND (post_content LIKE '%tag=%' OR post_content LIKE '%tracking_id%' OR post_content LIKE '%campid%' OR post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%')", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND (post_content LIKE '%tag=%' OR post_content LIKE '%tracking_id%' OR post_content LIKE '%campid%' OR post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%')", ARRAY_A);
         foreach ((array) $rows as $r) {
             $c = html_entity_decode((string) $r['post_content']);
             $f = [];
@@ -2681,7 +2681,7 @@ final class SAB {
     private static function doppel_durch_tausch(string $alt, string $neu): array {
         global $wpdb; $out = [];
         if (!isset($wpdb)) { return $out; }
-        $rows = $wpdb->get_results($wpdb->prepare("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A);
         foreach ((array) $rows as $r) {
             $c = (string) $r['post_content'];
             if (self::doppel_neu($c, str_replace($alt, $neu, $c), $neu)) { $out[] = (string) $r['post_title']; }
@@ -3210,7 +3210,7 @@ final class SAB {
     private static function tausch_festschreiben(string $alt, string $neu, string $neuer_name, array $alte_namen): array {
         global $wpdb;
         if (!isset($wpdb) || strlen($alt) !== 10 || strlen($neu) !== 10 || $alt === $neu) { return [0, 0, 'Ungültige Angabe.', [], []]; }
-        $rows = $wpdb->get_results($wpdb->prepare("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A);
         $log = (array) get_option('sab_tausch_log', []); $id = (string) (time()) . substr(md5($alt . $neu), 0, 4); $posts = []; $stellen = []; $kurz = 0; $doppel = []; $hinweise = [];
         foreach ((array) $rows as $r) {
             $pid = (int) $r['ID']; $c = (string) $r['post_content'];
@@ -3502,7 +3502,7 @@ final class SAB {
         global $wpdb;
         $h = '<hr style="margin:2em 0"><h3>AAWP-Reste (Voraussetzung zum Abschalten von AAWP)</h3><p class="description">Nur lesen. Zeigt Artikel mit AAWP-Bestandteilen, die dieses Plugin nicht ersetzt. Sind es null, kann AAWP auf dieser Seite abgeschaltet werden (zusätzlich AAWP-Widgets unter Design &rarr; Widgets und in der Seitenleiste prüfen, die stehen nicht im Artikeltext).</p>';
         if (!isset($wpdb)) { return $h; }
-        $rows = (array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND (post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%wp:aawp%' OR post_content LIKE '%aawp%')", ARRAY_A);
+        $rows = (array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND (post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%wp:aawp%' OR post_content LIKE '%aawp%')", ARRAY_A);
         $zeilen = ''; $n = 0; $alle = 0;
         foreach ($rows as $r) {
             $res = self::aawp_reste((string) $r['post_content']); $alle++;
@@ -4030,7 +4030,7 @@ final class SAB {
         global $wpdb;
         $out = [];
         if (!isset($wpdb)) { return $out; }
-        $rows = $wpdb->get_results("SELECT ID, post_title, post_content, post_status FROM {$wpdb->posts} WHERE post_status IN ('publish','private','draft','pending','future') AND post_type NOT IN ('revision','attachment','nav_menu_item','customize_changeset','oembed_cache','wp_template','wp_template_part','wp_global_styles','wp_navigation','wp_block') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%' OR post_content LIKE '%link.amazon%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %') ORDER BY ID", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT ID, post_title, post_content, post_status FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type NOT IN ('revision','attachment','nav_menu_item','customize_changeset','oembed_cache','wp_template','wp_template_part','wp_global_styles','wp_navigation','wp_block') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%' OR post_content LIKE '%link.amazon%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %') ORDER BY ID", ARRAY_A);
         foreach ((array) $rows as $r) {
             $c = (string) $r['post_content'];
             $c = preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', $c);
@@ -4644,7 +4644,7 @@ final class SAB {
         if (!isset($wpdb) || !$liste) { return $liste; }
         if (!isset($cache[$alt])) {
             $cache[$alt] = [];
-            foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','draft','private') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A) as $r) { $cache[$alt][] = (string) $r['post_content']; }
+            foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND post_content LIKE %s", '%' . $wpdb->esc_like($alt) . '%'), ARRAY_A) as $r) { $cache[$alt][] = (string) $r['post_content']; }
         }
         if (!$cache[$alt]) { return $liste; }
         $out = [];
