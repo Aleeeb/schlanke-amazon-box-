@@ -1317,6 +1317,9 @@ unset($GLOBALS['opt']['sab_kontrolle']);
 if (!function_exists('is_singular')) { function is_singular() { return true; } }
 $GLOBALS['admin'] = true; $GLOBALS['loggedin'] = true; ob_start(); SAB::stellen_skript(); $stj = ob_get_clean(); $GLOBALS['admin'] = false; $GLOBALS['loggedin'] = false;
 ok(strpos($stj, 'bearbeiten') !== false && strpos($stj, 'Im Bestand suchen') !== false && strpos($stj, 'action=edit') !== false, 'Frontend-Tauschfenster: Bestandssuche und Bearbeiten-Knopf');
+ok(strpos($stj, 'a[href]') !== false && strpos($stj, 'cn[as]') !== false, 'Frontend: auch fest eingetragene Textlinks bekommen Tauschen/Bearbeiten');
+$tmpj = tempnam(sys_get_temp_dir(), 'sj'); file_put_contents($tmpj . '.js', preg_replace('#^<script>|</script>$#', '', trim($stj))); exec('node --check ' . escapeshellarg($tmpj . '.js') . ' 2>&1', $nout, $nrc);
+ok($nrc === 0, 'Frontend-Skript: JavaScript-Syntax ok ' . implode(' ', $nout));
 $GLOBALS['opt']['sab_kontrolle'] = ['2' => ['ts' => time(), 'alt' => 'B0A', 'neu' => 'B0AKKUNEU1', 'stellen' => [['pid' => 7, 'titel' => 'Zaun', 'satz' => '', 'n' => 2]]]];
 $ko2 = $mKo->invoke(null, 'austausch'); unset($GLOBALS['opt']['sab_kontrolle']);
 ok(strpos($ko2, 'Stelle 1 ansehen') !== false && strpos($ko2, 'Stelle 2 bearbeiten') !== false && strpos($ko2, 'sab_nr=2') !== false, 'Kontrollliste: zwei Stellen im Artikel, je Stelle ansehen und bearbeiten');

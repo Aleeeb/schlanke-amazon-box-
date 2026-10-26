@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.87.1
+ * Version: 0.87.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.87.1';
+    const VERSION = '0.87.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1739,6 +1739,13 @@ final class SAB {
         $ord = (int) ($_POST['ord'] ?? 0); $asin = self::asin((string) ($_POST['asin'] ?? ''));
         $post = get_post($pid); if (!$post) { wp_send_json_error('Artikel nicht gefunden.'); }
         $c = (string) $post->post_content; $st = self::stellen_finden($c);
+        $nth = (int) ($_POST['nth'] ?? 0);
+        if ($ord < 1 && $nth > 0 && strlen($asin) === 10) {   // fest eingetragener Textlink (<a href=…/dp/ASIN>) ohne Platzhalter: n-ter solcher Link, Linktext muss stimmen
+            if (!preg_match_all('#<a\b[^>]*\bhref=(["\'])[^"\']*(?<![A-Za-z0-9])' . preg_quote($asin, '#') . '(?![A-Za-z0-9])[^"\']*\1[^>]*>(.*?)</a>#is', $c, $hm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE) || !isset($hm[$nth - 1])) { wp_send_json_error('Der Link passt nicht mehr zum Artikeltext. Bitte die Seite neu laden.'); }
+            $h = $hm[$nth - 1]; $norm = fn($t) => trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string) $t))));
+            if ($norm($h[2][0]) !== $norm(wp_unslash((string) ($_POST['txt'] ?? '')))) { wp_send_json_error('Der Link passt nicht mehr zum Artikeltext. Bitte die Seite neu laden.'); }
+            return [$post, $c, $st, 0, $h[0][0], (int) $h[0][1], $asin, $asin];
+        }
         if ($ord < 1 || !isset($st[$ord - 1])) { wp_send_json_error('Die Stelle passt nicht mehr zum Artikeltext. Bitte die Seite neu laden.'); }
         [$tag, $pos] = $st[$ord - 1];
         $quelle = '';
@@ -1809,8 +1816,8 @@ final class SAB {
         if (!function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts') || !is_singular()) { return; }
         $pid_ = (int) get_queried_object_id();
         $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $pid_, 'e' => $pid_ && current_user_can('edit_post', $pid_) ? admin_url('post.php?post=' . $pid_ . '&action=edit&sab_zeige=') : '']);
-        echo '<script>(function(){var C=' . $cfg . ';var seen={};'
-           . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
+        echo '<script>(function(){var C=' . $cfg . ';var seen={};var cur={nth:0,txt:""};'
+           . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
            . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
            . 'function oeffne(o,asin){var ov=el("div","position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto");'
            . 'var bx=el("div","background:#fff;color:#222;max-width:640px;width:100%;border-radius:10px;padding:18px;font:14px/1.4 sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)");ov.appendChild(bx);'
@@ -1836,7 +1843,14 @@ final class SAB {
            . 'function mk(e){var o=e.getAttribute("data-sab-ord");if(!o||seen[o]){return}seen[o]=1;var box=e.closest(".sab-karte,.sab-produkt,td")||e.parentNode;if(getComputedStyle(box).position==="static"){box.style.position="relative"}'
            . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b);'
            . 'if(C.e){var b3=el("button","position:absolute;top:30px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","✎ bearbeiten");b3.type="button";b3.title="Öffnet den Editor an dieser Stelle (neuer Tab)";b3.onclick=function(ev){ev.preventDefault();ev.stopPropagation();window.open(C.e+encodeURIComponent(e.getAttribute("data-sab-asin")),"_blank")};box.appendChild(b3)}}'
-           . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}})();</script>';
+           . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}'
+           . 'var hs=document.querySelectorAll("a[href]"),cn={},al={};for(var j=0;j<hs.length;j++){var a=hs[j],m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(a.getAttribute("href")||"");var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as){continue}al[as]=(al[as]||0)+1;'
+           . 'if(a.hasAttribute("data-sab-asin")||a.closest("[data-sab-ord],#wpadminbar,.sab-karte,.sab-produkt")||!a.closest("article,.entry-content,.hentry,main,.post")){continue}cn[as]=(cn[as]||0)+1;'
+           . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}'
+           . 'kn("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};oeffne(0,as)});'
+           . 'if(C.e){kn("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(as)+"&sab_nr="+nr,"_blank")})}'
+           . 'a.parentNode.insertBefore(sp,a.nextSibling)})(a,as,cn[as],al[as])}'
+           . '})();</script>';
     }
 
 
