@@ -35,6 +35,8 @@ function wp_date($f, $t) { return date($f, $t); }
 if (!function_exists('wp_date')) { function wp_date($f, $t = null) { return date($f, $t); } }
 if (!function_exists('add_query_arg')) { function add_query_arg($a, $u) { return $u . '?' . http_build_query($a); } }
 if (!function_exists('admin_url')) { function admin_url($p) { return 'http://x/' . $p; } }
+if (!function_exists('untrailingslashit')) { function untrailingslashit($s) { return rtrim($s, '/'); } }
+if (!function_exists('home_url')) { function home_url($p = '') { return 'http://x' . $p; } }
 if (!defined('ARRAY_A')) define('ARRAY_A', 'ARRAY_A');
 class FW { public $prefix = 'wp_'; function prepare($q, ...$a) { return $q; } function get_results($q, $o = null) {
   if (strpos($q, 'DATE(ts)') !== false) return [['d' => gmdate('Y-m-d'), 'n' => 5], ['d' => gmdate('Y-m-d', time() - 86400), 'n' => 2]];
@@ -45,5 +47,5 @@ $m = new ReflectionMethod('SAB', 'statistik_html'); $m->setAccessible(true);
 $h = $m->invoke(null);
 $fail = 0; function ok($c, $n) { global $fail; echo ($c ? 'OK   ' : 'FEHLER ') . $n . "\n"; if (!$c) $fail++; }
 ok(strpos($h, '<svg') !== false && strpos($h, '<strong>7</strong> Klicks gesamt') !== false, 'Statistik: Grafik und Summe');
-ok(strpos($h, 'B000000001') !== false && strpos($h, '2 Min.') !== false && strpos($h, '71 %') !== false, 'Statistik: Liste mit Anteil und Zeit');
+ok(strpos($h, 'B000000001') !== false && strpos($h, '2 Min.') !== false && strpos($h, 'zu wenig Daten') !== false && strpos($h, '71 %') !== false, 'Statistik: Liste mit Anteil und Zeit');
 echo $fail ? "$fail FEHLER\n" : "Alles bestanden\n";

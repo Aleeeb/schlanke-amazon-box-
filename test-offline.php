@@ -47,6 +47,7 @@ require __DIR__ . '/schlanke-amazon-box.php';
 
 
 if (!function_exists("home_url")) { function home_url($p = "") { return "https://example.test" . $p; } }
+if (!function_exists("untrailingslashit")) { function untrailingslashit($s) { return rtrim($s, "/"); } }
 if (!function_exists("wpautop")) { function wpautop($t) { return $t; } }
 function do_shortcode_lite($t) {
     foreach (['amz_bild', 'amz_link'] as $sc) {
@@ -1253,4 +1254,16 @@ unset($GLOBALS['opt']['sab_ungueltige_asins']);
 $mP = new ReflectionMethod('SAB', 'ersatz_prompt_html'); $mP->setAccessible(true);
 $ph = $mP->invoke(null, [['B0PROMPT01', 'Mehlschwalben Einzelnest Holzbeton', 'Für Mehlschwalben eignet sich ein Einzelnest.', 'Garten', 0, 'Schwegler Mehlschwalbennest', 3]]);
 ok(strpos($ph, 'B0PROMPT01') !== false && strpos($ph, 'Einzelnest') !== false && strpos($ph, 'mindestens 8') !== false && strpos($ph, 'ALTE-ASIN | NEU1') !== false && strpos($ph, 'sab-kopieren') !== false && $mP->invoke(null, []) === '', 'Ersatz-Prompt: Produkt, Kontext, Regeln, Format und Kopierknopf');
+$mRt = new ReflectionMethod('SAB', 'rueck_text'); $mRt->setAccessible(true);
+ok(strpos($mRt->invoke(null, 1, 1), 'zu wenig Daten') !== false && strpos($mRt->invoke(null, 9, 0), 'zu wenig Daten') !== false && strpos($mRt->invoke(null, 20, 5), '25 %') !== false, 'Rückkehr: unter 10 Klicks „zu wenig Daten“, sonst Prozent');
+$oldDb = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class { public $prefix = 'wp_'; public function prepare($q, ...$a) { return $q; } public function esc_like($x) { return $x; }
+  public function get_results($q, $o = null) {
+    if (strpos($q, 'GROUP BY DATE') !== false) { return [['d' => gmdate('Y-m-d'), 'n' => 3]]; }
+    if (strpos($q, 'GROUP BY asin, pfad') !== false) { return [['asin' => 'B0STATIK01', 'pfad' => '/hochbeet/', 'anker' => 'ratgeber', 'n' => 2], ['asin' => 'B0STATIK01', 'pfad' => '/', 'anker' => '', 'n' => 1]]; }
+    return [['asin' => 'B0STATIK01', 'n' => 3, 'b' => 1, 'x' => 2, 'z' => 1, 'm' => 40]]; } };
+$mSt = new ReflectionMethod('SAB', 'statistik_html'); $mSt->setAccessible(true);
+$sh = $mSt->invoke(null);
+ok(strpos($sh, 'sab-bal-info') !== false && strpos($sh, '3 Klicks') !== false && strpos($sh, 'B0STATIK01') !== false && strpos($sh, '#ratgeber') !== false && strpos($sh, 'zu wenig Daten') !== false && strpos($sh, '<details') !== false, 'Statistik: Balken mit Klickzahl, Produktkarte, Seiten mit Sprungstelle, ehrliche Rückkehr');
+$GLOBALS['wpdb'] = $oldDb;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

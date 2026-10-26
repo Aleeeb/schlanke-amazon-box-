@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.79.0
+ * Version: 0.80.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.79.0';
+    const VERSION = '0.80.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1945,7 +1945,7 @@ final class SAB {
 
     public static function tabelle(): void {
         global $wpdb;
-        if (!isset($wpdb) || get_option('sab_db_version') === '2') { return; }
+        if (!isset($wpdb) || get_option('sab_db_version') === '3') { return; }
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $t = self::klicktabelle();
         dbDelta("CREATE TABLE $t (
@@ -1957,12 +1957,13 @@ final class SAB {
             typ VARCHAR(5) NOT NULL DEFAULT '',
             var CHAR(1) NOT NULL DEFAULT '',
             pfad VARCHAR(190) NOT NULL DEFAULT '',
+            anker VARCHAR(80) NOT NULL DEFAULT '',
             zurueck_s INT UNSIGNED NULL,
             PRIMARY KEY (id),
             KEY asin (asin),
             KEY kid (kid)
         ) {$wpdb->get_charset_collate()};");
-        update_option('sab_db_version', '2', false);
+        update_option('sab_db_version', '3', false);
     }
 
     public static function rest(): void {
@@ -2004,6 +2005,7 @@ final class SAB {
                     'slot' => substr(preg_replace('/[^A-Za-z0-9_-]/', '', (string) ($d['slot'] ?? '')), 0, 40),
                     'var' => substr(preg_replace('/[^A-D]/', '', (string) ($d['var'] ?? '')), 0, 1),
                     'typ' => $typ, 'pfad' => substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190),
+                    'anker' => substr(preg_replace('/[^A-Za-z0-9_.:-]/', '', (string) ($d['anker'] ?? '')), 0, 80),
                 ]);
             }
         }
@@ -2016,9 +2018,10 @@ final class SAB {
         $url = esc_url_raw(rest_url('sab/v1/m'));
         echo '<script>(function(){var U=' . wp_json_encode($url) . ',p=null;'
            . 'function S(o){try{navigator.sendBeacon(U,new Blob([JSON.stringify(o)],{type:"text/plain"}))}catch(e){}}'
+           . 'function H(a){var r="",h=document.querySelectorAll("h2[id],h3[id],h4[id]"),i;for(i=0;i<h.length;i++){if(h[i].compareDocumentPosition(a)&4)r=h[i].id}return r}'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
-           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname});'
+           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a)});'
            . 'p={id:id,t:Date.now(),h:false}},true);'
            . 'document.addEventListener("visibilitychange",function(){if(!p)return;'
            . 'if(document.visibilityState==="hidden"){p.h=true;return}'
@@ -2331,7 +2334,13 @@ final class SAB {
         return '<p class="description">Stand: vor ' . ($min < 60 ? $min . ' Min.' : round($min / 60, 1) . ' Std.') . (!empty($d['im_hintergrund']) ? ' &ndash; neue Daten werden gerade im Hintergrund geholt, bitte die Seite in ein bis zwei Minuten neu öffnen.' : '') . '</p>';
     }
 
-    /** Reiter „Statistik“: Klicks pro Tag als Balkengrafik und sortierbare Liste der meistgeklickten Produkte (mit Rückkehr und Zeit). */
+    /** Rückkehr-Anteil ehrlich: unter MIN_RUECK Klicks ist eine Prozentzahl nur Zufall. */
+    private static function rueck_text(int $n, int $z): string {
+        if ($n < 10) { return '<span style="color:#787c82">zu wenig Daten (' . $z . ' von ' . $n . ')</span>'; }
+        return round(100 * $z / $n) . ' % <span style="color:#787c82">(' . $z . ' von ' . $n . ')</span>';
+    }
+
+    /** Reiter „Statistik“: Klicks pro Tag (Balken antippbar), meistgeklickte Produkte mit Bild, Score und aufklappbaren Seiten. Nur Verwaltung. */
     private static function statistik_html(): string {
         global $wpdb;
         if (!isset($wpdb)) { return '<p>Keine Datenbank.</p>'; }
@@ -2346,36 +2355,67 @@ final class SAB {
             $werte[$d] = $pro[$d] ?? 0; $max = max($max, $werte[$d]); $summe += $werte[$d];
         }
         $br = 900; $hoch = 160; $bw = $br / $tage;
-        $svg = '<svg viewBox="0 0 ' . $br . ' ' . ($hoch + 22) . '" style="max-width:100%;height:auto;background:#fff;border:1px solid #ccd0d4" role="img" aria-label="Klicks pro Tag">';
-        $svg .= '<text x="4" y="12" font-size="11" fill="#555">max. ' . $max . ' Klicks/Tag</text>';
+        $svg = '<svg id="sab-bal" viewBox="0 0 ' . $br . ' ' . ($hoch + 22) . '" style="width:100%;height:auto;background:#fff;border:1px solid #dcdcde;border-radius:6px;cursor:pointer" role="img" aria-label="Klicks pro Tag">';
+        $svg .= '<text x="4" y="12" font-size="11" fill="#555">höchster Tag: ' . $max . ' Klicks</text>';
         $k = 0;
         foreach ($werte as $d => $n) {
-            $h = (int) round(($hoch - 18) * $n / $max); $x = $k * $bw;
-            $svg .= '<rect x="' . round($x + 1, 1) . '" y="' . ($hoch - $h) . '" width="' . round(max($bw - 2, 1), 1) . '" height="' . $h . '" fill="#2271b1"><title>' . esc_html(wp_date('d.m.Y', strtotime($d . ' 12:00:00 UTC')) . ': ' . $n . ' Klicks') . '</title></rect>';
+            $h = (int) round(($hoch - 22) * $n / $max); $x = $k * $bw;
+            $txt = wp_date('d.m.Y', strtotime($d . ' 12:00:00 UTC')) . ': ' . $n . ($n === 1 ? ' Klick' : ' Klicks');
+            $svg .= '<g class="sab-b" data-t="' . esc_attr($txt) . '"><rect x="' . round($x, 1) . '" y="18" width="' . round($bw, 1) . '" height="' . ($hoch - 18) . '" fill="transparent"/>'
+                . '<rect x="' . round($x + 1, 1) . '" y="' . ($hoch - $h) . '" width="' . round(max($bw - 2, 1), 1) . '" height="' . max($h, $n ? 1 : 0) . '" rx="2" fill="#2271b1"><title>' . esc_html($txt) . '</title></rect>';
+            if ($tage <= 14 && $n) { $svg .= '<text x="' . round($x + $bw / 2, 1) . '" y="' . ($hoch - $h - 3) . '" font-size="12" text-anchor="middle" fill="#1d2327">' . $n . '</text>'; }
+            $svg .= '</g>';
             if ($k % max(1, (int) ceil($tage / 10)) === 0) { $svg .= '<text x="' . round($x, 1) . '" y="' . ($hoch + 14) . '" font-size="10" fill="#555">' . esc_html(wp_date('d.m.', strtotime($d . ' 12:00:00 UTC'))) . '</text>'; }
             $k++;
         }
-        $svg .= '</svg>';
-        $namen = self::produkte();
+        $svg .= '</svg><p id="sab-bal-info" style="margin:6px 0 0;font-weight:600;min-height:1.5em">Balken antippen: Klicks dieses Tages</p>'
+            . '<script>(function(){var s=document.getElementById("sab-bal"),i=document.getElementById("sab-bal-info");if(!s)return;s.addEventListener("click",function(e){var g=e.target.closest&&e.target.closest(".sab-b");if(g)i.textContent=g.getAttribute("data-t")})})();</script>';
+
+        // Daten je Produkt und je Seite
         $zeilen = (array) $wpdb->get_results($wpdb->prepare("SELECT asin, COUNT(*) n, SUM(typ='bild') b, SUM(typ<>'bild') x, SUM(zurueck_s IS NOT NULL) z, AVG(zurueck_s) m FROM $t WHERE ts >= %s GROUP BY asin ORDER BY n DESC", $ab), ARRAY_A);
+        $seiten = [];
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT asin, pfad, anker, COUNT(*) n FROM $t WHERE ts >= %s GROUP BY asin, pfad, anker ORDER BY n DESC", $ab), ARRAY_A) as $r) { $seiten[$r['asin']][] = $r; }
+        $land = self::land('');
+        $cache = get_transient("sab_uebersicht_{$land}");   // nur lesen, nie neu holen
+        if (!is_array($cache)) { $cache = get_option("sab_uebersicht_stand_{$land}"); }
+        $items = is_array($cache) ? (array) ($cache['items'] ?? []) : [];
+        $namen = self::produkte(); $trotz = (array) get_option('sab_trotz', []);
+        $gz = 0; foreach ($zeilen as $r) { $gz += (int) $r['z']; }
         $us = (array) get_option('sab_update_status', []);
-        $h = '<h2>Statistik</h2><p>Zeitraum: ';
+
+        $h = '<h2>Statistik</h2><style>.sab-st-k{display:flex;gap:10px;align-items:center;padding:10px;cursor:pointer;list-style:none}.sab-st-k::-webkit-details-marker{display:none}.sab-st-p{background:#fff;border:1px solid #dcdcde;border-radius:8px;margin:0 0 8px}.sab-st-p[open]{border-color:#2271b1}.sab-st-z{flex:1;min-width:0}.sab-st-z b{display:block;overflow-wrap:anywhere}.sab-st-z small{color:#50575e}.sab-st-n{font-size:20px;font-weight:700;text-align:right;min-width:48px}.sab-st-n small{display:block;font-size:11px;font-weight:400;color:#50575e}.sab-st-s{padding:0 10px 10px 10px;border-top:1px solid #f0f0f1}.sab-st-s li{margin:6px 0;overflow-wrap:anywhere}.sab-sc{display:inline-block;padding:1px 7px;border-radius:10px;background:#f0f6fc;color:#0a4b78;font-size:12px;font-weight:600}</style>'
+          . '<p>Zeitraum: ';
         foreach ([7, 30, 90] as $z) { $h .= ($z === $tage ? '<strong>' . $z . ' Tage</strong>' : '<a href="' . esc_url(add_query_arg(['page' => 'sab-statistik', 'tage' => $z], admin_url('admin.php'))) . '">' . $z . ' Tage</a>') . ' · '; }
-        $h .= '<strong>' . $summe . '</strong> Klicks gesamt. Gezählt werden Klicks auf Plugin-Links; Bots werden ausgelassen.</p>' . $svg
+        $h .= '<strong>' . $summe . '</strong> Klicks gesamt. Gezählt werden Klicks auf Plugin-Links; Bots und angemeldete Redakteure werden ausgelassen.</p>' . $svg
           . '<p class="description">Update-Prüfung: ' . ($us ? esc_html(wp_date('d.m.Y H:i', (int) $us['ts']) . ', Antwort ' . $us['code'] . ', Version im Repo ' . ($us['version'] ?: '–')) : 'noch nicht gelaufen') . '</p>';
-        $h .= '<h3 style="margin-top:1.5em">Meistgeklickte Produkte</h3><p class="description">Auf eine Überschrift klicken sortiert die Liste (nochmal klicken: umgekehrt). „Zurück“ = Besucher kam nach dem Klick auf die Webseite zurück.</p>';
+        $h .= '<h3 style="margin-top:1.5em">Meistgeklickte Produkte</h3><p class="description">Auf ein Produkt tippen: darunter stehen die Seiten, von denen die Klicks kamen (mit Sprung zur Stelle im Artikel, soweit die Stelle erfasst ist). '
+          . '<strong>Zurück</strong> = Besucher kam nach dem Klick in den Tab der Webseite zurück. Das wird nur gemessen, wenn der Besucher später zurückkehrt; wer Amazon im selben Tab weiterbenutzt oder den Tab schließt, zählt nicht mit. '
+          . 'Darum ist die Zahl bei wenigen Klicks Zufall (1 von 1 = 100 %), erst ab 10 Klicks wird ein Prozentwert gezeigt. Insgesamt: ' . self::rueck_text($summe, $gz) . '.</p>';
         if (!$zeilen) { return $h . '<p>Noch keine Klicks in diesem Zeitraum.</p>'; }
-        $h .= '<style>table.sab-sort thead th{position:sticky;top:32px;z-index:3;background:#f6f7f7;box-shadow:0 1px 0 #c3c4c7}</style><table class="widefat striped sab-sort"><thead><tr><th>Produkt</th><th data-z="1">Klicks</th><th data-z="1">Anteil</th><th data-z="1">auf Bild</th><th data-z="1">auf Text/Button</th><th data-z="1">Zurück</th><th data-z="1">Zurück in %</th><th data-z="1">Ø Zeit bis zurück</th></tr></thead><tbody>';
+        $home = untrailingslashit(home_url());
         foreach ($zeilen as $r) {
-            $n = (int) $r['n']; $z = (int) $r['z'];
-            $h .= '<tr><td data-v="' . esc_attr(strtolower(($namen[$r['asin']] ?? '') . $r['asin'])) . '"><code>' . esc_html($r['asin']) . '</code> ' . esc_html($namen[$r['asin']] ?? '') . '</td>'
-                . '<td data-v="' . $n . '">' . $n . '</td><td data-v="' . $n / max($summe, 1) . '">' . round(100 * $n / max($summe, 1)) . ' %</td>'
-                . '<td data-v="' . (int) $r['b'] . '">' . (int) $r['b'] . '</td><td data-v="' . (int) $r['x'] . '">' . (int) $r['x'] . '</td>'
-                . '<td data-v="' . $z . '">' . $z . '</td><td data-v="' . ($n ? $z / $n : 0) . '">' . ($n ? round(100 * $z / $n) . ' %' : '–') . '</td>'
-                . '<td data-v="' . ($z ? (float) $r['m'] : -1) . '">' . ($z ? esc_html(self::dauer_text((float) $r['m'])) : '–') . '</td></tr>';
+            $a = (string) $r['asin']; $n = (int) $r['n']; $z = (int) $r['z']; $x = $items[$a] ?? [];
+            $name = ($namen[$a] ?? '') ?: mb_substr(trim((string) ($x['titel'] ?? '')), 0, 80);
+            if ($name === '') { $name = $a; }
+            $score = '';
+            if ($x) { $x['trotz'] = isset($trotz[$a]); $score = ' <span class="sab-sc" title="Score aus der Übersicht">Score ' . (int) self::score($x)[0] . '</span>'; }
+            $bild = $x ? self::mini_bild($a, $x) : self::mini_bild($a, []);
+            $h .= '<details class="sab-st-p"><summary class="sab-st-k">' . str_replace('width:64px;height:64px', 'width:44px;height:44px', $bild)
+                . '<span class="sab-st-z"><b>' . esc_html($name) . '</b><small><code>' . esc_html($a) . '</code>' . $score . '</small>'
+                . '<small style="display:block;margin-top:2px">Bild ' . (int) $r['b'] . ' · Text/Button ' . (int) $r['x'] . ' · Anteil ' . round(100 * $n / max($summe, 1)) . ' % · Zurück: ' . self::rueck_text($n, $z) . ($z ? ' · Ø ' . esc_html(self::dauer_text((float) $r['m'])) : '') . '</small></span>'
+                . '<span class="sab-st-n">' . $n . '<small>Klicks</small></span></summary><div class="sab-st-s"><p class="description" style="margin:8px 0 2px">Seiten, von denen die Klicks kamen:</p><ol style="margin:0 0 0 18px">';
+            $k = 0;
+            foreach ((array) ($seiten[$a] ?? []) as $sr) {
+                if (++$k > 15) { break; }
+                $pf = (string) ($sr['pfad'] ?? ''); $an = (string) ($sr['anker'] ?? '');
+                $titel = '';
+                if ($pf !== '' && function_exists('url_to_postid') && ($pid = (int) url_to_postid($home . $pf)) > 0) { $titel = (string) get_the_title($pid); }
+                $url = $home . $pf . ($an !== '' ? '#' . $an : '');
+                $h .= '<li><a href="' . esc_url($url) . '" target="_blank" rel="noopener">' . esc_html($titel !== '' ? $titel : ($pf !== '' ? $pf : '(unbekannte Seite)')) . '</a> &ndash; <strong>' . (int) $sr['n'] . '</strong>'
+                    . ($an !== '' ? ' <small>(Stelle: ' . esc_html($an) . ')</small>' : ' <small>(Stelle nicht erfasst)</small>') . '</li>';
+            }
+            $h .= '</ol></div></details>';
         }
-        $h .= '</tbody></table><script>(function(){var T=document.querySelector(".sab-sort");if(!T)return;T.tHead.querySelectorAll("th").forEach(function(th,i){th.style.cursor="pointer";th.addEventListener("click",function(){var b=T.tBodies[0],r=[].slice.call(b.rows),d=th.dataset.d=th.dataset.d==="1"?"-1":"1";'
-            . 'r.sort(function(x,y){var a=x.cells[i].dataset.v,c=y.cells[i].dataset.v,A=parseFloat(a),C=parseFloat(c);var u=isNaN(A)||isNaN(C)?(a<c?-1:a>c?1:0):A-C;return u*d});r.forEach(function(e){b.appendChild(e)})})})})();</script>';
         return $h;
     }
 
