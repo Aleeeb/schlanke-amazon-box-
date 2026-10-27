@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.7
+ * Version: 0.89.8
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.7';
+    const VERSION = '0.89.8';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1882,9 +1882,9 @@ JS;
             if (preg_match_all('#\[amz_[a-z]+\b[^\]]*' . $as . '[^\]]*\](?:(?:(?!\[amz_).){0,600}?\[/amz_[a-z]+\])?#is', $kopf, $m2, PREG_OFFSET_CAPTURE)) { $l_ = end($m2[0]); $ende = max($ende, $l_[1] + strlen($l_[0])); }
             if ($ende >= 0) { foreach (array_slice(preg_split($blk, substr($kopf, $ende)), 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } } }
         }
-        $vor = array_reverse(preg_split($blk, $kopf)); $dahinter = preg_split($blk, $nach);
+        $vor = array_values(array_filter(array_reverse(preg_split($blk, $kopf)), fn($x) => trim(strip_tags((string) $x)) !== '')); $dahinter = array_values(array_filter(preg_split($blk, $nach), fn($x) => trim(strip_tags((string) $x)) !== ''));
         $reihen = $in_zelle ? [$dahinter] : [$vor, $dahinter];   // Tabellen-/Spaltenzelle: Titel steht nach dem Bild; nur bei Einzelprodukten davor
-        foreach ($reihen as $liste) { foreach (array_slice($liste, 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } } }
+        foreach ($reihen as $liste) { foreach (array_slice($liste, 0, 2) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } } }
         return '';
     }
 
@@ -3242,10 +3242,17 @@ JS;
                 }
             }
         }
-        $vor = substr($c, max(0, $pos - 700), min($pos, 700));
-        if (preg_match_all('#<(strong|b|h[2-5])\b[^>]*>(.*?)</\1>|<span id="productTitle">(.*?)</span>#is', $vor, $m, PREG_SET_ORDER)) {
-            $l = end($m); $tx = trim(html_entity_decode(strip_tags((string) (($l[2] ?? '') !== '' ? $l[2] : ($l[3] ?? '')))));
-            if ($tx !== '') { return mb_substr($tx, 0, 140); }
+        // Nur der unmittelbare Text vor der Stelle (nie die Überschrift des Absatzes weiter oben): letzter Textblock direkt davor, höchstens zwei Blöcke zurück
+        $vor = substr($c, max(0, $pos - 400), min($pos, 400));
+        $vor = preg_replace('#(?:\[amz_[^\]]*|<a\b[^>]*)$#i', '', $vor);
+        $vor = preg_replace('#<a\b[^>]*>\s*<img\b[^>]*>\s*</a>|\[amz_[a-z]+\b[^\]]*\](?:\[/amz_[a-z]+\])?|<img\b[^>]*>#i', ' ', $vor);
+        $bl = array_reverse(preg_split('#</?(?:p|h[1-6]|div|li|td|th|tr|br|figure|figcaption|ul|ol|table)\b[^>]*>#i', $vor));
+        $n = 0;
+        foreach ($bl as $t) {
+            $tx = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string) $t))));
+            if ($tx === '') { continue; }
+            if (++$n > 2) { break; }
+            if (mb_strlen($tx) >= 5 && mb_strlen($tx) <= 140 && !preg_match('#https?://#', $tx) && !self::generischer_linktext($tx)) { return $tx; }
         }
         return '';
     }

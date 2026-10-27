@@ -1437,4 +1437,9 @@ $e10 = '<table><tr><td><img src="redaktion.jpg"><br>Falscher Bildtext</td><td>[a
 ok(SAB::titel_an_stelle($e10, strpos($e10, '[amz_link'), strlen('[amz_link asin="B0A1234567"]')) === 'Richtiger Titel', 'Titel zwischen Bildlink-Platzhalter und Textlink, nie von einem anderen Bild');
 $e11 = '<p><img src="x.jpg"></p><p>Redaktioneller Text unter Bild</p><p>[amz_link asin="B0A1234567"]Angebot bei Amazon[/amz_link]</p>';
 ok(strpos(SAB::titel_an_stelle($e11, strpos($e11, '[amz_link'), strlen('[amz_link asin="B0A1234567"]')), 'Redaktioneller Text') === false || true, 'Einzelbox ohne Zellen: kein Absturz');
+// 0.89.8: Überschrift des Absatzes weit oben liefert nie den Titel
+$e12 = '<h2>Schneckenschutz im Garten</h2><p>' . str_repeat('Langer Fließtext ohne Produkt. ', 12) . '</p><p>Weitere Erklärung zum Thema.</p><p>[amz_link asin="B0A1234567"]Angebot bei Amazon[/amz_link]</p>';
+ok(strpos(SAB::kontext_titel($e12, 'B0A1234567'), 'Schneckenschutz im Garten') === false, 'Kontexttitel: weit entfernte Überschrift wird nicht genommen');
+$e13 = '<p>Pflanzenhut 24er Set</p><p>[amz_bild asin="B0A1234567"][/amz_bild]</p><p>[amz_link asin="B0A1234567"]Angebot bei Amazon[/amz_link]</p>';
+ok(SAB::kontext_titel($e13, 'B0A1234567') === 'Pflanzenhut 24er Set', 'Kontexttitel: unmittelbarer Text vor der Stelle');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
