@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.31
+ * Version: 0.89.32
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.31';
+    const VERSION = '0.89.32';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1681,9 +1681,10 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         self::$links++;
         // data-Attribute: die Mini-Statistik kann Klicks damit dem Produkt und der Ersatzliste zuordnen
         $gt = '';
-        if (get_option('sab_geo') === '1') { $nm = (string) (self::produkte()[$asin] ?? ''); if ($nm === '') { $pp = self::produkt($asin, self::land('')); $nm = (string) ($pp['titel'] ?? ''); } $gt = $nm !== '' ? ' data-sab-t="' . esc_attr(mb_substr(trim(preg_replace('/\s*\|\s*/u', ' ', $nm)), 0, 80)) . '"' : ''; }   // Suchbegriff für die Länder-Umschaltung
+        $nm = (string) (self::produkte()[$asin] ?? ''); if ($nm === '') { $pp = self::produkt($asin, self::land('')); $nm = (string) ($pp['titel'] ?? ''); }
+        if ($nm !== '') { $tn = esc_attr(mb_substr(trim(preg_replace('/\s*\|\s*/u', ' ', $nm)), 0, 80)); $gt = ' data-sab-t="' . $tn . '" data-aawp-product-title="' . $tn . '"'; }   // Suchbegriff für die Länder-Umschaltung; das zweite Attribut kennt auch die ältere, fremde Umschaltung (sonst sucht sie nach „dp“)
         if (get_option('sab_geo') === '1') { $lmap = (array) get_option('sab_laender_map', []); $lm = (array) ($lmap[$asin] ?? []); $lz = []; foreach ($lm as $l_ => $e_) { if (!empty($e_['asin'])) { $lz[] = $l_ . ':' . $e_['asin']; } } if ($lz) { $gt .= ' data-sab-l="' . esc_attr(implode(',', $lz)) . '"'; } }   // freigegebene ASINs in den anderen Ländern
-        return ' data-sab-asin="' . esc_attr($asin) . '"' . $gt . ($slot ? ' data-sab-slot="' . esc_attr($slot) . '"' : '') . ($var ? ' data-sab-var="' . esc_attr($var) . '"' : '')
+        return ' data-sab-asin="' . esc_attr($asin) . '"' . ($slot ? ' data-sab-slot="' . esc_attr($slot) . '"' : '') . ($var ? ' data-sab-var="' . esc_attr($var) . '"' : '') . $gt
              . ' target="_blank" rel="nofollow sponsored noopener"';
     }
 
@@ -2126,7 +2127,7 @@ for(var i=0;i<all.length;i++){var a=all[i],u;try{u=new URL(a.href)}catch(e){cont
 var h=u.hostname.match(/(?:^|\.)amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)$/);if(!h||h[1]===w)continue;
 var tag=u.searchParams.get('tag'),ok=false;for(var k in T){if(T[k]===tag)ok=true}if(!ok)continue;
 var t=a.getAttribute('data-sab-t')||a.getAttribute('data-aawp-product-title')||a.getAttribute('title')||'';
-if(!t){t=(u.pathname.split('/')[1]||'').replace(/-/g,' ')}
+if(!t){var sg=(u.pathname.split('/')[1]||'');if(!/^(dp|gp|product|s|exec|d|o|ref|stores|hz|b)$/i.test(sg)&&!/^[A-Z0-9]{10}$/.test(sg))t=sg.replace(/-/g,' ')}
 t=t.replace(/[^\wÀ-ɏ ]+/g,' ').replace(/\s+/g,' ').trim().split(' ').slice(0,8).join(' ');if(!t)continue;
 var ma=null,lm=a.getAttribute('data-sab-l');if(lm){lm.split(',').forEach(function(x){var q=x.split(':');if(q[0]===w&&/^[A-Z0-9]{10}$/.test(q[1]||''))ma=q[1]})}
 a.setAttribute('data-sab-z',w+':'+(ma?'a':'s'));a.href=ma?'https://www.amazon.'+w+'/dp/'+ma+'?tag='+T[w]:'https://www.amazon.'+w+'/s?k='+encodeURIComponent(t)+'&tag='+T[w];

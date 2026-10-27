@@ -1605,4 +1605,16 @@ $scp = new ReflectionMethod('SAB', 'score'); $scp->setAccessible(true);
 $su = $scp->invoke(null, array_merge($mp['B0PRIMEUN1'], ['preis' => '10 €', 'lieferbar' => true]))[0]; $sn = $scp->invoke(null, array_merge($mp['B0PRIMEUN1'], ['prime' => false, 'preis' => '10 €', 'lieferbar' => true]))[0];
 ok($su > $sn, 'Prime unsicher wird nicht abgezogen wie „kein Prime“');
 unset($GLOBALS['opt']['sab_manuell']);
+$gj3 = tempnam(sys_get_temp_dir(), 'gk') . '.js';
+file_put_contents($gj3, "var window={},document={readyState:'x',addEventListener:function(){},querySelectorAll:function(){return A}},navigator={};function mk(h,at){var o={href:h,_a:at||{},getAttribute:function(k){return this._a[k]===undefined?null:this._a[k]},hasAttribute:function(){return false},setAttribute:function(){}};return o}\n"
+    . "var A=[mk('https://www.amazon.co.uk/dp/B0UKPROD01?tag=uk-21'),mk('https://www.amazon.co.uk/dp/B0UKPROD02?tag=uk-21',{'data-sab-t':'Zaun Akku'}),mk('https://www.amazon.co.uk/Mein-Zaun-Set/dp/B0UKPROD03?tag=uk-21')];\n"
+    . preg_replace('#^<script>|</script>$#', '', trim($g2)) . "\nvar out=[];['com','ca','com.au','co.uk'].forEach(function(w){var tz={com:'America/New_York',ca:'America/Toronto','com.au':'Australia/Sydney','co.uk':'Europe/London'}[w];A.forEach(function(a){a.href=a.href});window.sabGeoRun(tz,'en');});console.log(JSON.stringify(A.map(function(a){return a.href})));\n");
+exec('node ' . escapeshellarg($gj3) . ' 2>&1', $go3, $grc3);
+$o3 = implode('', $go3);
+ok($grc3 === 0 && strpos($o3, 's?k=dp') === false && strpos($o3, '"https://www.amazon.co.uk/dp/B0UKPROD01?tag=uk-21"') !== false, 'Länder-Umschaltung: Link ohne Titel bleibt unverändert, nie Suche nach „dp“ (' . $o3 . ')');
+ok(strpos($o3, 'Mein%20Zaun%20Set') !== false || strpos($o3, 'Zaun%20Akku') !== false, 'Länder-Umschaltung: Titel aus Attribut oder Pfad wird gesucht');
+// 0.89.32: Länder-Umschaltung sucht nie nach „dp“
+$gjs = new ReflectionMethod('SAB', 'geo_skript'); 
+$srcf = file_get_contents(__DIR__ . '/schlanke-amazon-box.php');
+ok(strpos($srcf, "u.pathname.split('/')[1]||'').replace(/-/g,' ')}\n") === false && strpos($srcf, "(dp|gp|product|s|exec|d|o|ref|stores|hz|b)") !== false, 'Geo-Skript: Pfadteil „dp“ wird nie Suchbegriff');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
