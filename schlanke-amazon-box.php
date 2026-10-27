@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.3
+ * Version: 0.88.4
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.3';
+    const VERSION = '0.88.4';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1851,7 +1851,7 @@ JS;
             $out[] = ['asin' => $c['asin'], 'name' => ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? '')), 'score' => $c['score'], 'preis' => (string) ($x['preis'] ?? ''), 'img' => $img, 'quelle' => $c['quelle'], 'ok' => (bool) $c['ok']];
         }
         $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
-        wp_send_json_success(['alt' => $name ?: $asin, 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
+        wp_send_json_success(['alt' => $name ?: $asin, 'asin' => $asin, 'suche' => self::suchtext_aus_satz((string) $name, $asin, ''), 'host' => self::LAENDER[$land][0], 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
     }
 
     public static function ajax_stelle_tausch(): void {
@@ -1910,18 +1910,18 @@ JS;
            . 'var lst=el("div","");bx.appendChild(lst);'
            . 'function tausche(neu){inf.textContent="Tausche …";post("sab_stelle_tausch",{ord:o,asin:asin,neu:neu},function(r){if(r.success){inf.textContent="Getauscht. Seite wird neu geladen …";location.reload()}else{inf.textContent="Nicht möglich: "+r.data;inf.style.color="#a00"}})}'
            . 'post("sab_stelle_kand",{ord:o,asin:asin},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}'
-           . 'inf.textContent="Jetzt: "+r.data.alt+". Nur diese Stelle im Artikel wird getauscht (mit Sicherung).";'
+           . 'inf.textContent="Jetzt: "+r.data.alt+". Nur diese Stelle im Artikel wird getauscht (mit Sicherung).";var H="https://"+r.data.host,lk=function(t,u){var a=el("a","display:inline-block;margin:4px 12px 0 0;color:#2271b1",t);a.href=u;a.target="_blank";a.rel="noopener";return a};var ar=el("div","");ar.appendChild(lk("Dieses Produkt bei Amazon ansehen ↗",H+"/dp/"+r.data.asin));ar.appendChild(lk("Bei Amazon nach dem Titel suchen ↗",H+"/s?k="+encodeURIComponent(r.data.suche||r.data.alt)));inf.parentNode.insertBefore(ar,inf.nextSibling);'
            . 'r.data.liste.forEach(function(c){var row=el("div","display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eee");'
            . 'if(c.img){var im=el("img","width:56px;height:56px;object-fit:contain;flex:none");im.src=c.img;row.appendChild(im)}'
-           . 'var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555","Score "+(c.score===null?"?":c.score)+(c.preis?" · "+c.preis:"")+" · "+c.quelle+(c.ok?"":" · nicht lieferbar")));row.appendChild(tx);'
+           . 'var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555","Score "+(c.score===null?"?":c.score)+(c.preis?" · "+c.preis:"")+" · "+c.quelle+(c.ok?"":" · nicht lieferbar")));tx.appendChild(lk("bei Amazon ansehen ↗",H+"/dp/"+c.asin));row.appendChild(tx);'
            . 'var bt=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");bt.onclick=function(){tausche(c.asin)};row.appendChild(bt);lst.appendChild(row)});'
            . 'if(!r.data.liste.length){lst.appendChild(el("p","","Keine passenden Vorschläge. Gib unten eine ASIN ein."))}'
            . 'var sw=el("div","padding-top:10px;margin-top:6px;border-top:1px solid #eee");sw.appendChild(el("strong","","Im Bestand suchen:"));var si=el("input","display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:6px;border:1px solid #bbb;border-radius:6px");si.placeholder="Name, Stichwort oder ASIN, schon ab zwei Buchstaben";si.type="search";var so=el("div","");sw.appendChild(si);sw.appendChild(so);bx.appendChild(sw);'
            . 'function nz(x){return x.toLowerCase().replace(/(\d+(?:[.,]\d+)?)[\s-]*(volt|amperestunden?|ah|mah|watt|liter|kg|ml|cm|mm|v|w|l)(?![a-zäöüß])/g,function(a,n,u){var m={volt:"v",amperestunde:"ah",amperestunden:"ah",watt:"w",liter:"l"};return n+(m[u]||u)})}'
            . 'si.oninput=function(){var q=nz(si.value).trim().split(/\s+/).filter(Boolean);so.textContent="";if(!q.length||si.value.trim().length<2){return}var rs=[];(r.data.ps||[]).forEach(function(p){var h=nz(p[0]+" "+p[1]+" "+p[2]),c=0;q.forEach(function(w){if(h.indexOf(w)>=0){c++}});if(c&&p[0]!==asin){rs.push([c,p])}});'
-           . 'rs.sort(function(a,b){return b[0]-a[0]||b[1][3]-a[1][3]});rs.slice(0,8).forEach(function(x){var p=x[1],row=el("div","display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0f0");var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",p[1]||p[2]||p[0]));tx.appendChild(el("div","font-size:12px;color:#555",(p[3]>=0?"Score "+p[3]+" · ":"")+p[0]));row.appendChild(tx);'
+           . 'rs.sort(function(a,b){return b[0]-a[0]||b[1][3]-a[1][3]});rs.slice(0,8).forEach(function(x){var p=x[1],row=el("div","display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0f0");var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",p[1]||p[2]||p[0]));tx.appendChild(el("div","font-size:12px;color:#555",(p[3]>=0?"Score "+p[3]+" · ":"")+p[0]));tx.appendChild(lk("bei Amazon ansehen ↗",H+"/dp/"+p[0]));row.appendChild(tx);'
            . 'var bt=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");bt.type="button";bt.onclick=function(){tausche(p[0])};row.appendChild(bt);so.appendChild(row)});if(!rs.length){so.appendChild(el("p","margin:6px 0;color:#555","Kein Treffer im Bestand."))}};'
-           . 'var fr=el("div","display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid #eee");var ip=el("input","flex:1;padding:6px;border:1px solid #bbb;border-radius:6px");ip.placeholder="Eigene ASIN, z. B. B0XXXXXXXX";var b2=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");b2.onclick=function(){tausche(ip.value.trim().toUpperCase())};fr.appendChild(ip);fr.appendChild(b2);bx.appendChild(fr);'
+           . 'var fr=el("div","display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid #eee");var ip=el("input","flex:1;padding:6px;border:1px solid #bbb;border-radius:6px");ip.placeholder="Eigene ASIN, z. B. B0XXXXXXXX";var b2=el("button","padding:6px 12px;border:0;border-radius:6px;background:#2271b1;color:#fff;cursor:pointer;font-weight:600","Einsetzen");b2.onclick=function(){tausche(ip.value.trim().toUpperCase())};var b4=el("button","padding:6px 10px;border:1px solid #2271b1;border-radius:6px;background:#fff;color:#2271b1;cursor:pointer","Bei Amazon ansehen");b4.type="button";b4.onclick=function(){var v=ip.value.trim().toUpperCase();if(v){window.open(H+"/dp/"+encodeURIComponent(v),"_blank","noopener")}};fr.appendChild(ip);fr.appendChild(b4);fr.appendChild(b2);bx.appendChild(fr);'
            . 'if(r.data.zurueck){var zu=el("a","display:inline-block;margin-top:10px;color:#a00;cursor:pointer;text-decoration:underline","Letzten Tausch in diesem Artikel rückgängig machen");zu.onclick=function(){post("sab_stelle_zurueck",{},function(q){if(q.success){location.reload()}else{inf.textContent=q.data;inf.style.color="#a00"}})};bx.appendChild(zu)}'
            . '});}'
            . 'function mk(e){var o=e.getAttribute("data-sab-ord");if(!o||seen[o]){return}seen[o]=1;var box=e.closest(".sab-karte,.sab-produkt,td")||e.parentNode;if(getComputedStyle(box).position==="static"){box.style.position="relative"}'
