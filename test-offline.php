@@ -1509,4 +1509,12 @@ set_transient('sab_es_B0WEG00001', ['ts' => time(), 'titel' => 'X', 'bild' => ''
 $lw = $GLOBALS['sc']['amz_link'](['asin' => 'B0WEG00001', 'land' => 'es'], 'Angebote bei Amazon ansehen');
 ok(strpos($lw, '<a ') !== false && strpos($lw, 'href=') !== false && strpos($lw, '/dp/B0WEG00001') !== false, 'Textlink bei „unbekanntem“ Produkt bleibt klickbar');
 unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
+// 0.89.21: übersprungene Links nennen den konkreten Grund
+$GLOBALS['opt']['sab_tags'] = "es=t-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; SAB::$skip_gruende = [];
+SAB::umbau_text('<p><a href="https://www.amazon.co.uk/dp/B0SKIP0001">Zaun kaufen</a></p>');
+ok(count(SAB::$skip_gruende) === 1 && strpos(SAB::$skip_gruende[0], 'amazon.co.uk') !== false && strpos(SAB::$skip_gruende[0], 'keine Partner-ID') !== false, 'Übersprungen: Grund nennt den Shop ohne Partner-ID');
+SAB::$skip_gruende = [];
+SAB::umbau_text('<p><a href="https://www.amazon.es/dp/B0SKIP0002">Zaun [x] kaufen</a></p>');
+ok(count(SAB::$skip_gruende) === 1 && strpos(SAB::$skip_gruende[0], 'Sonderinhalt') !== false, 'Übersprungen: Grund nennt Sonderinhalt (eckige Klammern)');
+unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

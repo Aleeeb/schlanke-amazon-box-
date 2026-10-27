@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.20
+ * Version: 0.89.21
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.20';
+    const VERSION = '0.89.21';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4132,6 +4132,8 @@ JS;
 
     /** Meldungen des Umbaus, warum eine Tabelle bewusst nicht umgebaut wurde (Abweichung zwischen Bild, Link und Titel). */
     public static array $skip_laender = [];
+    /** Gründe, warum einzelne Links übersprungen wurden (mit Artikeltitel). */
+    public static array $skip_gruende = [];
     public static array $umbau_abw = [];
     /** Hinweise, was der Umbau nach dem Bild angepasst hat (Link oder Titel passten nicht zum Bildprodukt). */
     public static array $umbau_info = [];
@@ -4338,14 +4340,19 @@ JS;
             if (!$u) { return $m[0]; }
             [$land, $asin] = $u;
             if ($nur !== '' && $asin !== $nur) { return $m[0]; }
-            if (!self::tag($land) || strpos($m[2], '[') !== false) { $skip++; if (!self::tag($land)) { self::$skip_laender[$land] = 1; } return $m[0]; }
+            if (!self::tag($land) || strpos($m[2], '[') !== false) {
+                $skip++;
+                if (!self::tag($land)) { self::$skip_laender[$land] = 1; self::$skip_gruende[] = 'Link zu ' . $asin . ' im Shop amazon.' . $land . ': keine Partner-ID für diesen Shop eingetragen'; }
+                else { self::$skip_gruende[] = 'Link zu ' . $asin . ' (Text „' . mb_substr(trim(strip_tags($m[2])), 0, 30) . '“): der Linktext enthält eckige Klammern/Platzhalter (Sonderinhalt), bitte von Hand ansehen'; }
+                return $m[0];
+            }
             if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land) && !self::weg_umbauen($asin)) { self::$umbau_keys[self::$umbau_abw[] = 'Link „' . mb_substr(trim(strip_tags($m[2])), 0, 40) . '“ zeigt auf ' . $asin . ', das Amazon nicht mehr kennt, nicht umgebaut (erst das Produkt tauschen)'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; $skip++; return $m[0]; }
             $cls = '';
             if (preg_match('#class=(["\'])(.*?)\1#is', $m[1], $cl)) { $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', $cl[2])); }
             $attr = ' asin="' . $asin . '" land="' . $land . '"' . ($cls !== '' ? ' class="' . $cls . '"' : '');
             if (stripos($m[2], '<img') !== false) { $n++; return '[amz_bild' . $attr . ']' . $m[0] . '[/amz_bild]'; }
             $text = trim(html_entity_decode(strip_tags($m[2])));
-            if ($text === '') { $skip++; return $m[0]; }
+            if ($text === '') { $skip++; self::$skip_gruende[] = 'Link zu ' . $asin . ' ohne Linktext und ohne Bild, nicht umbaubar'; return $m[0]; }
             $n++;
             return '[amz_link' . $attr . ']' . str_replace(['[', ']'], '', $text) . '[/amz_link]';
         }, $c);
@@ -4388,7 +4395,7 @@ JS;
             "SELECT p.ID FROM {$wpdb->posts} p WHERE p.post_status='publish' AND p.post_type IN ('post','page') AND (p.post_content LIKE %s OR p.post_content LIKE %s OR p.post_content LIKE '%%link.amazon%%')
              AND NOT EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id=p.ID AND m.meta_key='_sab_umbau_geprueft' AND m.meta_value=%s) ORDER BY p.ID LIMIT %d",
             '%amazon.%', '%amzn.%', $nur !== '' ? $nur : 'alle', self::UMBAU_PROSEITE));
-        $geaendert = 0; $links = 0; $skip = 0; self::$umbau_abw = []; self::$umbau_info = [];
+        $geaendert = 0; $links = 0; $skip = 0; self::$umbau_abw = []; self::$umbau_info = []; self::$skip_gruende = [];
         foreach ((array) $ids as $id) {
             $post = get_post((int) $id);
             if (!$post) { continue; }
@@ -4401,7 +4408,7 @@ JS;
              AND NOT EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id=p.ID AND m.meta_key='_sab_umbau_geprueft' AND m.meta_value=%s)",
             '%amazon.%', '%amzn.%', $nur !== '' ? $nur : 'alle'));
         return count((array) $ids) . ' Artikel geprüft, ' . $geaendert . ' geändert, ' . $links . ' Links umgebaut'
-             . ($skip ? ', ' . $skip . ' übersprungen (keine Partner-ID für das Land oder Sonderinhalt)' : '')
+             . ($skip ? ', ' . $skip . ' Links übersprungen: ' . (self::$skip_gruende ? implode(' | ', array_slice(array_unique(self::$skip_gruende), 0, 8)) : 'Grund unbekannt') : '')
              . '. ' . ($rest ? 'Noch ' . $rest . ' Artikel offen: bitte nochmal klicken.' : 'Fertig.')
              . (self::$umbau_info ? ' Nach dem Bild angepasst: ' . implode(' | ', array_slice(array_unique(self::$umbau_info), 0, 8)) . '.' : '')
              . (self::$umbau_abw ? ' NICHT umgebaut wegen Abweichung (bitte von Hand klären): ' . implode(' | ', array_slice(array_unique(self::$umbau_abw), 0, 8)) . '.' : '');
@@ -4446,9 +4453,10 @@ JS;
         if (!$post) { return [0, 0, 0]; }
         self::$kurz_offen = 0;
         self::$neue_namen = [];
-        $abw0 = count(self::$umbau_abw); $info0 = count(self::$umbau_info);
+        $abw0 = count(self::$umbau_abw); $info0 = count(self::$umbau_info); $skg0 = count(self::$skip_gruende);
         [$neu, $n, $sk] = self::umbau_text((string) $post->post_content, $nur);
         for ($i = $abw0; $i < count(self::$umbau_abw); $i++) { self::$umbau_abw[$i] = $post->post_title . ': ' . self::$umbau_abw[$i]; }
+        for ($i = $skg0; $i < count(self::$skip_gruende); $i++) { self::$skip_gruende[$i] = $post->post_title . ': ' . self::$skip_gruende[$i]; }
         for ($i = $info0; $i < count(self::$umbau_info); $i++) { self::$umbau_info[$i] = $post->post_title . ': ' . self::$umbau_info[$i]; }
         $gea = 0;
         if ($n > 0 && $neu !== $post->post_content) {
@@ -4645,7 +4653,7 @@ JS;
             if (microtime(true) - $t_start > 20) { $uebrig++; continue; }   // Zeitgrenze: Der Rest kommt auf der nächsten Seite (sie beginnt nach dem letzten geprüften Artikel)
             $letzte = (int) $a['id']; $geprueft++;
             $post = get_post($a['id']); if (!$post) { continue; }
-            self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = []; self::$skip_laender = [];
+            self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = []; self::$skip_laender = []; self::$skip_gruende = [];
             try { self::umbau_text((string) $post->post_content); }
             catch (\Throwable $e) { self::$umbau_abw[] = 'Prüfung abgebrochen: ' . $e->getMessage(); }
             $abw = array_values(array_unique(self::$umbau_abw)); $info = count(array_unique(self::$umbau_info)); $kurzOffen += self::$kurz_offen;
@@ -4705,12 +4713,12 @@ JS;
                 if ($v >= 10) { $problem(['Kurzlinks konnten nicht aufgelöst werden.'], []); } else { $rest++; }
                 continue;
             }
-            self::$umbau_abw = []; self::$umbau_info = []; $gea = 0; $sk = 0;
+            self::$umbau_abw = []; self::$umbau_info = []; self::$skip_gruende = []; $gea = 0; $sk = 0;
             try { [$n, $sk, $gea] = self::umbau_artikel($id); }
             catch (\Throwable $e) { self::$umbau_abw[] = 'Umbau abgebrochen (' . $e->getMessage() . '), Artikel unverändert'; }
             if (self::$umbau_abw) { $problem(self::$umbau_abw, self::$umbau_weg); }
             elseif ($gea) { $umg++; $l['umgebaut'] = (int) $l['umgebaut'] + 1; }
-            else { $problem(['Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: ' . (self::$skip_laender ? 'keine Partner-ID für ' . implode(', ', array_keys(self::$skip_laender)) . ' (in den Einstellungen eintragen)' : 'Sonderinhalt') . ')' : '') . '.'], []); }
+            else { $problem(['Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: ' . (self::$skip_gruende ? implode(' | ', array_slice(array_unique(self::$skip_gruende), 0, 4)) : 'Grund unbekannt') . ')' : '') . '.'], []); }
         }
         $l['rest'] = $rest;
         if ($rest === 0) { $l['aktiv'] = false; $l['ende'] = time(); }
@@ -6644,7 +6652,7 @@ JS;
                 self::$umbau_abw = []; self::$umbau_info = [];
                 try { [$n, $sk, $gea] = self::umbau_artikel((int) ($_POST['sab_id'] ?? 0)); }
                 catch (\Throwable $e) { self::$umbau_abw[] = 'Umbau abgebrochen (' . $e->getMessage() . '), Artikel unverändert'; $n = 0; $sk = 0; $gea = 0; }
-                $meldung = ($gea ? $n . ' Link(s) in diesem Artikel umgebaut. Bitte den Artikel ansehen; Rückgängig geht in der Liste.' : 'Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: keine Partner-ID für das Land oder Sonderinhalt)' : '') . '.')
+                $meldung = ($gea ? $n . ' Link(s) in diesem Artikel umgebaut. Bitte den Artikel ansehen; Rückgängig geht in der Liste.' : 'Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: ' . (self::$skip_gruende ? implode(' | ', array_slice(array_unique(self::$skip_gruende), 0, 6)) : 'Grund unbekannt') . ')' : '') . '.')
                     . (self::$umbau_info ? ' Nach dem Bild angepasst: ' . implode(' | ', array_slice(array_unique(self::$umbau_info), 0, 8)) . '.' : '')
                     . (self::$umbau_abw ? ' NICHT umgebaut wegen Abweichung: ' . implode(' | ', array_slice(array_unique(self::$umbau_abw), 0, 8)) . '.' : '');
             } elseif ($form === 'umbau_problemlos_start' && !empty($_POST['sab_bestaetigt'])) {
