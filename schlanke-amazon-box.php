@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.21
+ * Version: 0.89.22
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.21';
+    const VERSION = '0.89.22';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1354,6 +1354,32 @@ final class SAB {
     }
 
     private static $sofort_bilder = 0;
+
+    /** Liegt ein nicht zu altes Bild des Produkts (Hauptbild) auf dem eigenen Server? */
+    private static function bild_frisch(string $land, string $asin): bool {
+        $f = self::bild_pfad($land, $asin, 0);
+        return is_file($f) && time() - filemtime($f) <= self::BILD_MAX;
+    }
+
+    /**
+     * Knopf „Alle Bilder jetzt prüfen/nachladen“: holt für jedes Produkt der Seite ohne frisches Bild das Produkt neu (höchstens ~20 Sekunden je Klick)
+     * und bereinigt Warnlisten-Einträge, die damit erledigt sind. @return string Meldung
+     */
+    private static function bilder_nachladen(): string {
+        $land = self::land(''); $ende = microtime(true) + 20; $geholt = 0; $fehlt = 0; $offen = 0;
+        delete_transient('sab_alle_asins');
+        foreach (self::alle_asins() as $asin) {
+            $asin = (string) $asin; if (!self::asin($asin) || self::bild_frisch($land, $asin)) { continue; }
+            if (microtime(true) > $ende) { $offen++; continue; }
+            self::holen($asin, $land);
+            if (self::bild_frisch($land, $asin)) { $geholt++; } else { $fehlt++; }
+        }
+        $bf = (array) get_option('sab_bildfehler', []);
+        foreach ($bf as $k => $e) { $a = (string) ($e['asin'] ?? strtok((string) $k, '|')); if ($a !== '' && self::bild_frisch($land, $a)) { unset($bf[$k]); } }
+        update_option('sab_bildfehler', $bf, false);
+        foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
+        return $geholt . ' Bilder nachgeladen, ' . $fehlt . ' Produkte haben bei Amazon weiter kein Bild' . ($offen ? ', ' . $offen . ' noch offen: bitte noch einmal klicken' : ' (alles geprüft)') . '.';
+    }
 
     private static function bild_url(array $p, string $asin, string $land, int $idx = 0, bool $laden = false): string {
         $quelle = $idx > 0 ? ($p['bilder'][$idx] ?? '') : ($p['bild'] ?? '');
@@ -5167,6 +5193,7 @@ JS;
     /** Welche Produkte getauscht werden müssen: weg (Amazon kennt es nicht), kein Preis/Rang, nicht lieferbar, unklar. @return array<string,string> ASIN => Grund */
     /** Amazon hat die ASIN beim letzten Abruf eindeutig abgewiesen (ungültig/nicht zugänglich). Fehlende Daten durch gescheiterte Abrufe zählen nicht. */
     private static function amazon_unbekannt(string $asin, array $d): bool {
+        if (self::bild_frisch(self::land(''), $asin)) { return false; }   // ein frisches Bild liegt vor: das Produkt ist bekannt (Altlast aus früheren Fehlabrufen)
         return !isset($d['items'][$asin]) && in_array($asin, array_map('strval', (array) get_option('sab_ungueltige_asins', [])), true);
     }
 
@@ -5740,6 +5767,7 @@ JS;
     private static function austausch_html(bool $helfer = false): string {
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte();
         $h = '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2><p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten aus dem eigenen Bestand plus neue Treffer der Amazon-Suche (zwei, bei wenig Passendem im Bestand bis zu vier) (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>';
+        $h .= '<form method="post" style="margin:8px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="bilder_nachladen"><button class="button">Alle Bilder jetzt prüfen und nachladen</button> <span class="description">Holt für alle Produkte dieser Seite ohne frisches Bild das Bild sofort und räumt erledigte Warnungen auf. Die Zahl in „Produkte ohne Bild“ unten zeigt, was noch fehlt.</span></form>';
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         $faelle = self::tausch_faelle((array) $d, $trotz);
         $fund = self::fundstellen(array_keys($faelle) ?: ['XXXXXXXXXX']);
@@ -5751,6 +5779,7 @@ JS;
             if (self::toetend_asin((string) $a0, (array) $d)) { $dring[$a0] = 100; if (!isset($faelle[$a0])) { $faelle[$a0] = 'Tierschutz'; } continue; }
             if (!$x0) { if (self::amazon_unbekannt((string) $a0, (array) $d)) { $dring[$a0] = 100; } continue; }
             $x0['trotz'] = isset($trotz[$a0]);
+            if (empty($x0['bild']) && empty($x0['bilder']) && self::bild_frisch($land, (string) $a0)) { $x0['bild'] = 'lokal'; $x0['bilder'] = ['lokal']; }   // Bild liegt bereits auf dem Server: nicht als „ohne Bild“ melden
             $sc0 = self::score($x0)[0]; $dr0 = self::tausch_dringlichkeit($x0, $sc0);
             if (($marken[$a0] ?? '') === 'ers') { $dr0 = max($dr0, 100); }
             if ($dr0 > 0) {
@@ -6588,6 +6617,8 @@ JS;
                 }
             } elseif ($form === 'kurzlink_setzen') {
                 $meldung = self::kurzlink_setzen((int) ($_POST['sab_id'] ?? 0), esc_url_raw(html_entity_decode((string) wp_unslash($_POST['sab_kurz'] ?? ''))), sanitize_text_field(wp_unslash($_POST['sab_asin'] ?? '')));
+            } elseif ($form === 'bilder_nachladen') {
+                $meldung = self::bilder_nachladen();
             } elseif ($form === 'kurzlink_ok') {
                 self::kurz_ok_setzen(esc_url_raw(html_entity_decode((string) wp_unslash($_POST['sab_kurz'] ?? ''))), empty($_POST['sab_aus']));
                 $meldung = empty($_POST['sab_aus']) ? 'Gemerkt: Dieser Kurzlink bleibt so und zählt nicht mehr als Problem.' : 'Der Kurzlink wird wieder geprüft.';

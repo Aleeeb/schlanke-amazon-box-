@@ -1517,4 +1517,17 @@ SAB::$skip_gruende = [];
 SAB::umbau_text('<p><a href="https://www.amazon.es/dp/B0SKIP0002">Zaun [x] kaufen</a></p>');
 ok(count(SAB::$skip_gruende) === 1 && strpos(SAB::$skip_gruende[0], 'Sonderinhalt') !== false, 'Übersprungen: Grund nennt Sonderinhalt (eckige Klammern)');
 unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
+// 0.89.22: Bilder nachladen / frisches Bild räumt „unbekannt“ auf
+$rb = new ReflectionMethod('SAB', 'bild_frisch'); $rb->setAccessible(true);
+$rbp = new ReflectionMethod('SAB', 'bild_pfad'); $rbp->setAccessible(true);
+$lnd = (new ReflectionMethod('SAB', 'land')); $lnd->setAccessible(true); $lx = $lnd->invoke(null, '');
+$bfile = $rbp->invoke(null, $lx, 'B0FRISCH01', 0); @mkdir(dirname($bfile), 0777, true); file_put_contents($bfile, 'x');
+ok($rb->invoke(null, $lx, 'B0FRISCH01') === true && $rb->invoke(null, $lx, 'B0NIEGELA1') === false, 'Bild frisch erkannt');
+$au = new ReflectionMethod('SAB', 'amazon_unbekannt'); $au->setAccessible(true);
+$GLOBALS['opt']['sab_ungueltige_asins'] = ['B0FRISCH01', 'B0NIEGELA1'];
+ok($au->invoke(null, 'B0FRISCH01', ['items' => []]) === false && $au->invoke(null, 'B0NIEGELA1', ['items' => []]) === true, 'Mit frischem Bild nie „Amazon kennt es nicht“');
+@unlink($bfile); unset($GLOBALS['opt']['sab_ungueltige_asins']);
+$bn = new ReflectionMethod('SAB', 'bilder_nachladen'); $bn->setAccessible(true);
+$be = null; try { $bm = $bn->invoke(null); } catch (\Throwable $e) { $be = $e->getMessage(); }
+ok($be === null && strpos((string) $bm, 'Bilder nachgeladen') !== false, 'Bilder nachladen läuft: ' . ($be ?? $bm));
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
