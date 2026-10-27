@@ -1563,4 +1563,8 @@ $rh = new ReflectionMethod('SAB', 'ersatz_html'); $rh->setAccessible(true);
 $eh = $rh->invoke(null);
 ok(strpos($eh, 'Lücken') !== false && strpos($eh, 'Schlauch') !== false && strpos($eh, 'nur eine Reserve') !== false && strpos($eh, 'B0ERSATZ01') !== false, 'Ersatz-Übersicht zeigt Lücken und Einträge');
 unset($GLOBALS['opt']['sab_ersatz'], $GLOBALS['opt']['sab_gruppen']);
+// 0.89.27: Auftragsliste für gezielte Ersatzsuche
+ok(SAB::ersatz_auftraege(['A' => 30, 'B' => 20, 'C' => 70, 'D' => 10, 'E' => 40], ['A' => 3, 'B' => 2, 'C' => 5, 'D' => 1], 50) === ['B', 'A'], 'Auftragsliste: mehr als eine Seite, Score niedrig, schwächste zuerst');
+$rh2 = new ReflectionMethod('SAB', 'ersatz_auftrag_html'); $rh2->setAccessible(true);
+ok(strpos($rh2->invoke(null, ['items' => []]), 'Gezielte Ersatzsuche') !== false, 'Ersatz-Auftrag rendert ohne Daten');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

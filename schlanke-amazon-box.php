@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.26
+ * Version: 0.89.27
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.26';
+    const VERSION = '0.89.27';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -284,6 +284,30 @@ final class SAB {
         return [implode("\n", $zeilen), $geaendert];
     }
 
+    const ERSATZ_SCORE = 50;   // darunter gilt ein oft verwendetes Produkt als Kandidat für gezielte Ersatzsuche
+
+    /** Produkte, die auf mehr als einer Seite stehen und einen niedrigen Score haben (schwächste zuerst). @param array<string,int> $scores @param array<string,int> $seiten @return string[] */
+    public static function ersatz_auftraege(array $scores, array $seiten, int $schwelle = self::ERSATZ_SCORE): array {
+        $o = [];
+        foreach ($scores as $a => $sc) { if (($seiten[$a] ?? 0) >= 2 && $sc < $schwelle) { $o[(string) $a] = (int) $sc; } }
+        asort($o);
+        return array_keys($o);
+    }
+
+    /** Suchauftrag für die PC-/Mac-Sitzung: oft verwendete Produkte mit niedrigem Score; Ergebnis im Format der Ersatz-Datenbank plus Handdaten (8 Felder). */
+    private static function ersatz_auftrag_html(array $d): string {
+        $land = self::land(''); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte(); $sc = []; $alle = self::alle_asins();
+        foreach ($alle as $a) { if (isset($d['items'][$a])) { $sc[$a] = (int) self::score(array_merge($d['items'][$a], ['trotz' => isset($trotz[$a])]))[0]; } }
+        $fund = self::fundstellen(array_keys($sc)); $seiten = []; foreach ($fund as $a => $f) { $seiten[$a] = count($f); }
+        $liste = self::ersatz_auftraege($sc, $seiten);
+        if (!$liste) { return '<p class="description">Gezielte Ersatzsuche: keine Produkte auf mehr als einer Seite mit Score unter ' . self::ERSATZ_SCORE . '.</p>'; }
+        $host = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST))); $dat = gmdate('Y-m-d');
+        $p = "Aufgabe: Suche bei Amazon (" . self::LAENDER[$land][0] . ") für die folgenden Produkte der Seite $host je 3 bis 5 Ersatzprodukte gleicher Produktart, die besser sind (mehr Sterne, mehr Bewertungen, Prime oder schnelle Lieferung, niedrige Lieferkosten, hohe Provision). Regeln: mindestens ca. 4 Sterne und 30 Bewertungen, lieferbar, keine tötenden oder verletzenden Produkte (keine Netze, Fallen, Gift, Kieselgur, Eierschalen), möglichst auch in UK/USA (ggf. CA/AU) erhältlich. Lies für jeden Ersatz die Handdaten und die Provision (SiteStripe) aus.\n\n"
+           . "Ausgabe 1 (Ersatz-Datenbank), je Ersatz eine Zeile: `Produktart | $land | ASIN | neu | $dat | Quelle`. Produktart = die ALTE ASIN des Produkts unten.\nAusgabe 2 (Handdaten), je Ersatz eine Zeile: `ASIN | Sterne | Anzahl | Prime ja/nein | Lieferzeit je Stadt | $dat | Provision % | Lieferkosten (Betrag, 0 oder gratis)`.\nNichts live ändern; die Zeilen gehen an den Plugin-Thread.\n\nProdukte (" . count($liste) . "):\n";
+        foreach (array_slice($liste, 0, 40) as $i => $a) { $p .= ($i + 1) . '. ' . $a . ' | ' . trim(preg_replace('/\s+/', ' ', ($namen[$a] ?? '') ?: mb_substr((string) ($d['items'][$a]['titel'] ?? ''), 0, 90))) . ' | Score ' . $sc[$a] . ' | auf ' . $seiten[$a] . " Seiten\n"; }
+        return '<h4>Gezielte Ersatzsuche (' . count($liste) . ' Produkte)</h4><p class="description">Produkte, die auf mehr als einer Seite stehen und einen Score unter ' . self::ERSATZ_SCORE . ' haben. Auftrag für die PC-/Mac-Sitzung, zum Kopieren:</p><textarea readonly rows="8" class="large-text code">' . esc_textarea($p) . '</textarea>';
+    }
+
     /** Übersicht der Ersatz-Datenbank: Score und Handdaten je Eintrag, Knopf „geprüft“, und Lücken (Produktarten mit weniger als zwei Ersatzprodukten im Land dieser Webseite). */
     private static function ersatz_html(): string {
         $liste = self::ersatz_liste(); $land = self::land(''); $d = (array) self::uebersicht_daten($land, false); $namen = self::produkte(); $trotz = (array) get_option('sab_trotz', []);
@@ -309,6 +333,7 @@ final class SAB {
             $n = 0; foreach ($liste as $e) { if ($e['land'] === $land && $e['status'] === 'geprüft' && mb_strtolower($e['art']) === mb_strtolower($name)) { $n++; } }
             if ($n < 2) { $luecken[] = '<li><strong>' . esc_html($name) . '</strong>: ' . $n . ' geprüft' . ($n === 0 ? ' (keine Reserve)' : ' (nur eine Reserve)') . '</li>'; }
         }
+        $h .= self::ersatz_auftrag_html($d);
         if ($luecken) { $h .= '<p><strong>Lücken</strong> (Produktarten mit weniger als zwei geprüften Ersatzprodukten im Land ' . esc_html($land) . '):</p><ul style="columns:2;max-width:860px">' . implode('', array_slice($luecken, 0, 60)) . '</ul>'; }
         return $h;
     }
