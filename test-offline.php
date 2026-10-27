@@ -1464,4 +1464,11 @@ ok(!$o2 && strpos($r2, 'Weit entfernt') !== false, 'Einzelprodukt: ohne fetten T
 ok($o3 && strpos($r3, '<br>Neuer Titel<br>[amz_link') !== false && strpos($r3, 'eBay') !== false, 'Zelle: Text zwischen Bild- und Textlink wird ersetzt');
 [$r4, $o4] = SAB::titel_ersetzen('<td>[amz_bild asin="B0A1234567"][/amz_bild]<br>[amz_link asin="B0A1234567"]Bei Amazon[/amz_link]<br>Unter dem Link</td>', 'Neuer Titel', true);
 ok(!$o4, 'Zelle ohne Titel zwischen Bild und Textlink: unverändert');
+// 0.89.12: Kurzlinks, die sich nicht lösen lassen, mit Umgebung und Eingabefeld
+$GLOBALS['pc'] = '<p>Die Zeckenzange ist wichtig. <a href="https://amzn.to/3xyzabc">Zeckenzange ansehen</a></p>';
+$rk = new ReflectionMethod('SAB', 'kurzlink_liste_html'); $rk->setAccessible(true);
+$kh = $rk->invoke(null, 5);
+ok(strpos($kh, 'amzn.to/3xyzabc') !== false && strpos($kh, 'Zeckenzange ist wichtig') !== false && strpos($kh, 'sab_asin') !== false && strpos($kh, 'sab_zeige=3xyzabc') !== false, 'Kurzlink-Liste: Umgebung, Stelle ansehen, Eingabefeld');
+$GLOBALS['pc'] = '<p>Kein Kurzlink hier.</p>'; ok($rk->invoke(null, 5) === '', 'Kurzlink-Liste leer ohne Kurzlinks');
+unset($GLOBALS['pc']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

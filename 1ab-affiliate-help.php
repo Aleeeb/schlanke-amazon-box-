@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.11
+ * Version: 0.89.12
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.11';
+    const VERSION = '0.89.12';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4430,6 +4430,48 @@ JS;
         return $out;
     }
 
+    /** Kurzlinks (amzn.to …) eines Artikels, die sich nicht als Produkt auflösen lassen: Textumgebung, Sprung zur Stelle und Feld für ASIN oder Amazon-Link. */
+    private static function kurzlink_liste_html(int $id, string $rueck = ''): string {
+        $post = get_post($id); if (!$post) { return ''; }
+        $c = preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', (string) $post->post_content);
+        if (!preg_match_all('#<a\b[^>]*href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/[^"\']*)\1[^>]*>(.*?)</a>#is', $c, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { return ''; }
+        $h = ''; $gesehen = [];
+        foreach ($m as $x) {
+            $u = html_entity_decode($x[2][0]);
+            if (isset($gesehen[$u]) || self::umbau_url($u, true)) { continue; }
+            $gesehen[$u] = 1;
+            $vor = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', substr($c, max(0, $x[0][1] - 500), min(500, $x[0][1])))))));
+            $vor = mb_strlen($vor) > 140 ? '… ' . mb_substr($vor, -140) : $vor;
+            $lt = trim(html_entity_decode(strip_tags($x[3][0])));
+            $kenn = preg_match('#/([A-Za-z0-9]{5,12})$#', rtrim(explode('?', $u)[0], '/'), $kn) ? $kn[1] : '';
+            $h .= '<li style="margin:6px 0"><div><code style="word-break:break-all">' . esc_html($u) . '</code> · Linktext „' . esc_html(mb_substr($lt, 0, 60)) . '“</div>'
+                . '<div class="description">Davor im Text: ' . esc_html($vor !== '' ? $vor : '(nichts)') . '</div>'
+                . '<div>Grund: der Kurzlink lässt sich nicht auf ein Produkt auflösen (Amazon antwortet nicht oder gibt keine Produktadresse heraus). '
+                . ($kenn !== '' ? '<a href="' . esc_url(add_query_arg('sab_zeige', $kenn, (string) get_permalink($id))) . '" target="_blank" rel="noopener">Stelle im Frontend ansehen</a> · <a href="' . esc_url(admin_url('post.php?post=' . $id . '&action=edit&sab_zeige=' . rawurlencode($kenn))) . '" target="_blank" rel="noopener">Im Editor bearbeiten</a>' : '') . '</div>'
+                . '<form method="post" style="margin:4px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="kurzlink_setzen"><input type="hidden" name="sab_id" value="' . $id . '"><input type="hidden" name="sab_kurz" value="' . esc_attr($u) . '">' . $rueck
+                . '<input type="text" name="sab_asin" placeholder="ASIN oder Amazon-Produktlink (mit /dp/…)" style="width:340px" required> <button class="button button-small button-primary">Diesen Kurzlink ersetzen</button></form></li>';
+        }
+        return $h === '' ? '' : '<div style="background:#fff8e5;border:1px solid #dba617;padding:6px 12px;margin:8px 0;max-width:900px"><strong>Kurzlinks, die das Plugin nicht lösen kann:</strong> Mit ASIN oder Amazon-Link ersetzen, danach lässt sich der Artikel umbauen.<ul style="margin:6px 0 0 16px">' . $h . '</ul></div>';
+    }
+
+    /** Ersetzt einen Kurzlink im Artikel durch die Produktadresse zur eingegebenen ASIN (WordPress legt dabei eine Revision an). */
+    private static function kurzlink_setzen(int $id, string $kurz, string $eingabe): string {
+        $post = get_post($id);
+        if (!$post || !current_user_can('edit_post', $id)) { return 'Artikel nicht gefunden oder keine Berechtigung.'; }
+        if (!preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $kurz)) { return 'Das ist kein Kurzlink.'; }
+        $asin = self::asin_aus_text($eingabe);
+        if (strlen($asin) !== 10) { return 'Bitte eine gültige ASIN oder einen Amazon-Produktlink mit /dp/… eingeben (Kurzlinks enthalten keine ASIN).'; }
+        $u = self::umbau_url($eingabe); $land = $u ? $u[0] : self::land('');
+        if (!isset(self::LAENDER[$land])) { $land = self::land(''); }
+        $c = (string) $post->post_content; $neu_url = 'https://' . self::LAENDER[$land][0] . '/dp/' . $asin;
+        $n = substr_count($c, $kurz) + substr_count($c, htmlspecialchars($kurz, ENT_QUOTES)) + substr_count($c, str_replace('&', '&#038;', $kurz));
+        if ($n < 1) { return 'Der Kurzlink steht nicht mehr im Artikel.'; }
+        $c2 = str_replace([$kurz, htmlspecialchars($kurz, ENT_QUOTES), str_replace('&', '&#038;', $kurz)], $neu_url, $c);
+        wp_update_post(['ID' => $id, 'post_content' => wp_slash($c2)]);
+        delete_transient('sab_alle_asins');
+        return 'Kurzlink ersetzt durch ' . $neu_url . ' (' . $n . '×). Der Artikel kann jetzt umgebaut werden; die alte Fassung steht unter „Versionen“.';
+    }
+
     /** Vorschau: jeder Amazon-Link des Artikels vorher und nachher (ohne etwas zu speichern). */
     /** Links „Stelle ansehen“ zu einer Meldung des Umbaus: Kurzlink-Kennungen und ASINs aus dem Meldungstext, der Sprung markiert die Stelle im Artikel und scrollt dorthin. */
     private static function ort_links(string $text, int $id): string {
@@ -4482,7 +4524,8 @@ JS;
             elseif (self::$kurz_offen) { $status = '<strong style="color:#b36b00">noch nicht fertig geprüft</strong>'; }
             else { $status = '<strong style="color:#1a7f37">bereit</strong>' . ($info ? ' <small>(' . $info . ' Anpassung' . ($info === 1 ? '' : 'en') . ' nach dem Bild)</small>' : ''); $bereit[] = (int) $a['id']; }
             $meld = ''; foreach (array_slice($abw, 0, 3) as $m) { $meld .= '<li>' . esc_html($m) . self::ort_links($m, (int) $a['id']) . '</li>'; }
-            $zeilen[] = [$abw ? 1 : 0, '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>'];
+            $kl_ = self::kurzlink_liste_html((int) $a['id'], '<input type="hidden" name="sab_alle_vorschau" value="1"><input type="hidden" name="sab_ab" value="' . (int) $ab . '">');
+            $zeilen[] = [$abw ? 1 : 0, '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . $kl_ . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>'];
         }
         $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', array_column((function (array $z) { usort($z, fn($a, $b) => $a[0] <=> $b[0]); return $z; })($zeilen), 1)) : '<tr><td colspan="4">Keine weiteren offenen Artikel.</td></tr>') . '</tbody></table>';
         $nGeprueft = $geprueft;
@@ -4497,7 +4540,7 @@ JS;
             $h .= '<form method="post" style="margin:14px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_viele"><input type="hidden" name="sab_alle_vorschau" value="1"><input type="hidden" name="sab_ab" value="' . (int) $ab . '">';
             foreach ($bereit as $i) { $h .= '<input type="hidden" name="sab_ids[]" value="' . $i . '">'; }
             $h .= '<button class="button button-primary button-hero">Stufe 1: diese ' . count($bereit) . ' Artikel ohne Problem jetzt umbauen</button> <span class="description">Jeder Artikel wird vorher gesichert, Rückgängig geht in der Liste. Artikel mit Problem bleiben unberührt.</span></form>';
-        } else { $h .= '<p><em>Auf dieser Seite ist kein Artikel bereit.</em></p>'; }
+        } else { $h .= '<p><em>Auf dieser Seite ist kein Artikel bereit, deshalb gibt es hier keinen Umbau-Knopf. Erst die Probleme oben lösen (bei Kurzlinks: ASIN oder Link eintragen), danach diese Seite neu laden.</em></p>'; }
         $nav = '';
         if ($ab > 0) { $nav .= '<a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'ab' => 0], admin_url('admin.php'))) . '">« Zum Anfang</a> '; }
         if ($geprueft && count(array_filter($rest, fn($a) => $a['id'] > $letzte)) > 0) { $nav .= '<a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'ab' => $letzte], admin_url('admin.php'))) . '">Nächste ' . self::UMBAU_PROSEITE . ' Artikel »</a>'; }
@@ -4562,7 +4605,7 @@ JS;
             $h .= '<h3>Problemartikel (' . $np . '), zuletzt zu klären</h3><p class="description">Diese Artikel wurden nicht angefasst. Meist fehlt ein Ersatz für ein Produkt, das Amazon nicht mehr kennt: unten gleich tauschen, dann „Alle problemlosen umbauen“ erneut starten.</p><table class="widefat striped" style="max-width:1100px"><thead><tr><th>Artikel</th><th>Problem</th><th></th></tr></thead><tbody>';
             foreach ($l['probleme'] as $pid => $pr) {
                 $m = ''; foreach ((array) $pr['m'] as $t) { $m .= '<li>' . esc_html($t) . self::ort_links($t, (int) $pid) . '</li>'; }
-                $h .= '<tr><td><a href="' . esc_url((string) get_permalink((int) $pid)) . '" target="_blank" rel="noopener">' . esc_html($pr['t'] ?: ('Beitrag ' . $pid)) . '</a></td><td><ul style="margin:0 0 0 14px">' . $m . '</ul></td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => (int) $pid], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>';
+                $h .= '<tr><td><a href="' . esc_url((string) get_permalink((int) $pid)) . '" target="_blank" rel="noopener">' . esc_html($pr['t'] ?: ('Beitrag ' . $pid)) . '</a></td><td><ul style="margin:0 0 0 14px">' . $m . '</ul>' . self::kurzlink_liste_html((int) $pid) . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => (int) $pid], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>';
             }
             $h .= '</tbody></table>';
             if ($mit_karten) {
@@ -5791,6 +5834,7 @@ JS;
         $h .= $knopf;
         if (self::$umbau_info) { $h .= '<div class="notice notice-info inline"><p><strong>Das Bild bestimmt das Produkt, daher angepasst:</strong></p><ul>' . implode('', array_map(fn($x) => '<li>' . esc_html($x) . self::ort_links($x, $id) . self::ok_knopf($x, $id) . '</li>', array_unique(self::$umbau_info))) . '</ul></div>'; }
         if (self::$umbau_abw) { $h .= '<div class="notice notice-warning inline"><p><strong>Wird bewusst nicht umgebaut (bitte von Hand klären):</strong></p><ul>' . implode('', array_map(fn($x) => '<li>' . esc_html($x) . self::ort_links($x, $id) . self::ok_knopf($x, $id) . '</li>', array_unique(self::$umbau_abw))) . '</ul></div>'; }
+        $h .= self::kurzlink_liste_html($id, '<input type="hidden" name="sab_vorschau" value="' . $id . '">');
         if (self::$umbau_weg) { $h .= self::umbau_ersatz_html(array_keys(self::$umbau_weg), $id, $c, 0, 'einzel'); }
         if (self::$kurz_offen) { $h .= '<p><strong>' . (int) self::$kurz_offen . ' Kurzlinks wurden noch nicht aufgelöst</strong> (Abrufgrenze), bitte die Vorschau noch einmal öffnen.</p>'; }
         // Vorher / Nachher nebeneinander: der Artikel wird an den Trennlinien in Abschnitte geteilt, jeder Abschnitt einzeln umgebaut und gezeigt, wenn er sich ändert
@@ -6404,6 +6448,8 @@ JS;
                     update_option('sab_umbau_ok', $okl, false);
                     $meldung = $form === 'umbau_ok' ? 'Gemerkt: Diese Abweichung ist gewollt und wird beim Umbau nicht mehr beanstandet.' : 'Die Abweichung wird wieder geprüft.';
                 }
+            } elseif ($form === 'kurzlink_setzen') {
+                $meldung = self::kurzlink_setzen((int) ($_POST['sab_id'] ?? 0), esc_url_raw(html_entity_decode((string) wp_unslash($_POST['sab_kurz'] ?? ''))), sanitize_text_field(wp_unslash($_POST['sab_asin'] ?? '')));
             } elseif ($form === 'claude_empf') {
                 update_option('sab_claude_empf', sanitize_textarea_field(wp_unslash($_POST['sab_claude_empf'] ?? '')), false);
                 $meldung = 'Empfehlungen gespeichert.';
