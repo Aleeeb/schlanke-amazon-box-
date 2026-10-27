@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.6
+ * Version: 0.89.7
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.6';
+    const VERSION = '0.89.7';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1888,6 +1888,13 @@ JS;
         return '';
     }
 
+    /** Suchtitel für „Bei Amazon suchen“: derselbe wie im Reiter Austausch (bekannter Produktname), sonst der Titel an der Stelle, sonst Schlüsselbegriffe aus dem Satz davor. */
+    private static function suche_titel(string $asin, array $d, array $fund, string $an_stelle): string {
+        $nm = self::anzeige_name($asin, $d, $fund);
+        if (trim($nm) !== '' && !self::generischer_linktext($nm)) { return $nm; }
+        return $an_stelle !== '' ? $an_stelle : self::suchtext_aus_satz('', $asin, self::text_vor_stelle($asin, $fund[$asin] ?? []));
+    }
+
     public static function ajax_stelle_kand(): void {
         [$post, $c_, , , $tag_, $pos_, , $asin] = self::stelle_pruefen();
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []);
@@ -1901,7 +1908,7 @@ JS;
             $out[] = ['asin' => $c['asin'], 'name' => ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? '')), 'score' => $c['score'], 'preis' => (string) ($x['preis'] ?? ''), 'img' => $img, 'quelle' => $c['quelle'], 'ok' => (bool) $c['ok']];
         }
         $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
-        wp_send_json_success(['alt' => $name ?: $asin, 'asin' => $asin, 'suche' => self::titel_an_stelle($c_, $pos_, strlen($tag_)) ?: self::suchtext_aus_satz((string) $name, $asin, ''), 'host' => self::LAENDER[$land][0], 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
+        wp_send_json_success(['alt' => $name ?: $asin, 'asin' => $asin, 'suche' => self::suche_titel($asin, (array) $d, $fund, self::titel_an_stelle($c_, $pos_, strlen($tag_))), 'host' => self::LAENDER[$land][0], 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
     }
 
     public static function ajax_stelle_tausch(): void {
@@ -5142,10 +5149,11 @@ JS;
             $aehn = count(array_intersect($wn, self::woerter($tc))) + min(2, $tt + $nb); if ($tk >= 2) { $aehn++; if ($passt === 0) { $passt = 1; } } $sim = $wn ? min(1.0, count(array_intersect($wn, self::woerter($tc))) / max(1, count($wn))) : 0.0;
             if ($passt === 0 && ($quelle === 'Kunden kauften auch' || strpos($quelle, 'Amazon-Suche') === 0)) { $passt = 2; }   // von Amazon als zugehörig gezeigt beziehungsweise von Hand geprüft   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
             if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; if ($ok && $quelle === 'Katalog') { $rest[] = ['asin' => $a, 'quelle' => 'Bestes im Portfolio (Passung unklar)', 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => 0, 'pv' => $pv, 'rang' => $sc, 'ausgeschlossen' => false]; } continue; }
-            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'sim' => $sim, 'pv' => $pv, 'rang' => $sc + 30 * $tt + 10 * $nb + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + 40 * $sim + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
+            $gw = $wn ? count(array_intersect($wn, self::woerter($tc))) : 0;   // gemeinsame Titelwörter (ohne Füllwörter): Hauptkriterium der Reihenfolge, danach Score
+            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'sim' => $sim, 'gw' => $gw, 'ahs' => min(6, $gw) * 5 + (int) floor(4 * $sim) + min(2, $aehn), 'pv' => $pv, 'rang' => $sc + 30 * $tt + 10 * $nb + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + 40 * $sim + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
-        usort($out, fn($p, $q2) => [(int) $q2['ok'], (int) floor(4 * (float) ($q2['sim'] ?? 0)) + min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (int) floor(4 * (float) ($p['sim'] ?? 0)) + min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
+        usort($out, fn($p, $q2) => [(int) $q2['ok'], (int) ($q2['ahs'] ?? 0), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (int) ($p['ahs'] ?? 0), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
         $bl_ = []; $out = self::ohne_doppel_kandidaten($alt, $out, $items, $namen, $bl_);
         foreach ($bl_ as $c_) { $aus[] = ['asin' => $c_['asin'], 'quelle' => $c_['quelle'], 'titel' => (string) ($c_['x']['titel'] ?? ''), 'grund' => 'steht oder passt schon in der Nähe im Artikel (Doppelung)']; }
         $abl = self::lernen_abgelehnt($alt);   // schon einmal übergangene Vorschläge rutschen nach hinten, zweimal abgelehnte fliegen raus
@@ -5159,7 +5167,7 @@ JS;
             usort($rest, fn($p, $q2) => $q2['score'] <=> $p['score']);
             $liste = array_merge($liste, array_slice($rest, 0, 4 - count($liste)));
         }
-        usort($liste, fn($p, $q2) => [(int) !empty($q2['neu']), -(int) ($q2['abgel'] ?? 0), (int) $q2['ok'], (int) floor(4 * (float) ($q2['sim'] ?? 0)) + min(2, (int) ($q2['aehn'] ?? 0)), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) !empty($p['neu']), -(int) ($p['abgel'] ?? 0), (int) $p['ok'], (int) floor(4 * (float) ($p['sim'] ?? 0)) + min(2, (int) ($p['aehn'] ?? 0)), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
+        usort($liste, fn($p, $q2) => [(int) !empty($q2['neu']), -(int) ($q2['abgel'] ?? 0), (int) $q2['ok'], (int) ($q2['ahs'] ?? 0), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) !empty($p['neu']), -(int) ($p['abgel'] ?? 0), (int) $p['ok'], (int) ($p['ahs'] ?? 0), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // Bestand und neue Treffer zusammen: oben links ähnlicher Name, dann höchster Score
         return ['liste' => $liste, 'aussortiert' => $aus];   // hat der Bestand wenig Passendes, füllen Treffer der Amazon-Suche auf (bis zu vier)
     }
 
