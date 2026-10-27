@@ -376,7 +376,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 15 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und dreizehn Untermenüs');
+ok(count($GLOBALS['menu']) === 16 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und vierzehn Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -1574,4 +1574,17 @@ $GLOBALS['opt']['sab_alarm'] = ['B0ALARM001' => ['seit' => 1, 'grund' => 'nicht 
 $_GET['page'] = 'sab-austausch'; $adm0 = $GLOBALS['admin']; $GLOBALS['admin'] = true; ob_start(); SAB::alarm_hinweis(); $ah = ob_get_clean(); unset($_GET['page']); $GLOBALS['admin'] = $adm0;
 ok(strpos($ah, 'B0ALARM001') !== false && strpos($ah, 'Ersatz bereit') !== false, 'Alarm-Hinweis zeigt Produkt und Ersatz');
 unset($GLOBALS['opt']['sab_alarm']);
+// 0.89.29: Lernen
+$f1 = ['titel' => 0.9, 'art' => 1.0, 'preis' => 0.5, 'score' => 0.8, 'prov' => 0.5, 'liefer' => 0.5]; $f2 = ['titel' => 0.2, 'art' => 1.0, 'preis' => 0.5, 'score' => 0.9, 'prov' => 0.5, 'liefer' => 0.5];
+$w0 = SAB::LERN_STANDARD; $w1 = SAB::lern_schritt($w0, $f1, [$f2]);
+ok($w1['titel'] > $w0['titel'] && $w1['score'] < $w0['score'] && $w1['art'] === $w0['art'], 'Lernschritt: Gewicht wandert zu Titelähnlichkeit');
+$wx = $w0; for ($i = 0; $i < 500; $i++) { $wx = SAB::lern_schritt($wx, $f1, [$f2], 0.5); }
+ok($wx['titel'] <= 3.0 && $wx['score'] >= 0.0, 'Gewichte bleiben begrenzt (0 bis 3)');
+ok(SAB::lern_summe($f1, $w0) > SAB::lern_summe($f2, $w0) - 5 && abs(SAB::lern_summe($f1, $w1) - SAB::lern_summe($f2, $w1)) > abs(SAB::lern_summe($f1, $w0) - SAB::lern_summe($f2, $w0)), 'Nach dem Lernen liegt der Gewählte weiter vorn');
+$wa = SAB::lern_ablehnen($w0, [$f1, $f2]); ok($wa['titel'] <= $w0['titel'] && $wa['art'] === $w0['art'] - 0.1 * 0.5 * (1 - 0.5), 'Ablehnen senkt überdurchschnittliche Merkmale');
+$fm1 = SAB::lern_merkmale(0.5, 3, 10.0, 10.0, 80, 4.0, ['prime' => true, 'liefertage' => 1]); ok($fm1['preis'] === 1.0 && $fm1['art'] === 1.0 && $fm1['liefer'] > 0.9, 'Merkmale 0 bis 1');
+ok(!SAB::lern_aktiv(), 'Lernen ohne Runden nicht aktiv');
+$GLOBALS['opt']['sab_lern_w'] = ['w' => ['titel' => 9, 'art' => 1], 'runden' => 12, 'log' => []]; $ldx = SAB::lern_daten(); ok(SAB::lern_aktiv() && $ldx['w']['titel'] === 3.0 && $ldx['w']['score'] === 1.0, 'Gespeicherte Gewichte begrenzt, Rest Standard');
+unset($GLOBALS['opt']['sab_lern_w']);
+$rl = new ReflectionMethod('SAB', 'lernen_html'); $rl->setAccessible(true); ok(strpos($rl->invoke(null), 'Ausfall simulieren') !== false, 'Reiter Lernen rendert');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
