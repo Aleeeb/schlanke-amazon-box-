@@ -33,7 +33,7 @@ function sanitize_key($k) { return strtolower(preg_replace('/[^a-z0-9_-]/i', '',
 function get_permalink($i = 0) { return 'https://x.test/p'; }
 function wp_date($f, $t) { return date($f, $t); }
 $GLOBALS['sched'] = [];
-function wp_next_scheduled($h, $a = []) { if ($h === "sab_pruefen") return true; foreach ($GLOBALS['sched'] as $s) { if ($s === [$h, $a]) return 1; } return false; }
+function wp_next_scheduled($h, $a = []) { if ($h === "sab_pruefen" || $h === "sab_auffrischen") return true; foreach ($GLOBALS['sched'] as $s) { if ($s === [$h, $a]) return 1; } return false; }
 function wp_schedule_single_event($t, $h, $a = []) { $GLOBALS['sched'][] = [$h, $a]; return true; }
 function spawn_cron() {}
 require __DIR__ . '/schlanke-amazon-box.php';

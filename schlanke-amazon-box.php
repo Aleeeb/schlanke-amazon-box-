@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.18
+ * Version: 0.89.19
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.18';
+    const VERSION = '0.89.19';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -82,6 +82,7 @@ final class SAB {
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
         add_shortcode('amazon',      [__CLASS__, 'sc_aawp']);   // Alias wie bei AAWP (AAWP gewinnt, solange es aktiv ist)
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
+        add_action('sab_auffrischen', [__CLASS__, 'auffrischen']);
         add_action('wp_ajax_sab_pruef_start',   [__CLASS__, 'ajax_pruef_start']);
         add_action('wp_ajax_sab_pruef_schritt', [__CLASS__, 'ajax_pruef_schritt']);
         add_action('sab_holen',      [__CLASS__, 'holen'], 10, 2);
@@ -114,6 +115,7 @@ final class SAB {
         add_action('admin_init',     [__CLASS__, 'tabelle']);
         add_action('admin_init',     [__CLASS__, 'einmal_importe']);
         if (!wp_next_scheduled('sab_pruefen')) { wp_schedule_event(time() + 300, 'daily', 'sab_pruefen'); }
+        if (!wp_next_scheduled('sab_auffrischen')) { wp_schedule_event(time() + 600, 'hourly', 'sab_auffrischen'); }   // Produkte und Bilder rechtzeitig vor Ablauf erneuern, damit nie ein Bild fehlt
     }
 
     // ---------- Zugang ----------
@@ -313,6 +315,8 @@ final class SAB {
      * @return array{titel:string,bild:string,link:string,weg:bool,verfuegbar:bool}|null
      * null = Amazon gerade nicht erreichbar und nichts Gespeichertes da.
      */
+    private static $sofort_produkte = 0;
+
     private static function produkt(string $asin, string $land, bool $frisch = false, bool $warten = false): ?array {
         if (!$asin) { return null; }
         if ($frisch) { delete_transient("sab_{$land}_{$asin}"); }
@@ -323,9 +327,9 @@ final class SAB {
             return $c;
         }
         if (!$warten && function_exists('current_user_can') && current_user_can('edit_posts')) { $warten = true; }   // Redakteure warten kurz, damit sie nie eine leere Stelle sehen
-        if (!$frisch && !$warten && !defined('SAB_SYNC')) { // nichts im Speicher: Hintergrundabruf anstoßen, die Seite nutzt den Rückfall (schlichter Link)
-            self::im_hintergrund('sab_holen', [$asin, $land]);
-            return null;
+        if (!$frisch && !$warten && !defined('SAB_SYNC')) {
+            if (self::$sofort_produkte < 2 && !defined('SAB_KEIN_SOFORT')) { self::$sofort_produkte++; }   // nichts im Speicher (Update, Ablauf): die ersten zwei Produkte je Seitenaufruf gleich holen, damit kein Bild fehlt
+            else { self::im_hintergrund('sab_holen', [$asin, $land]); return null; }   // sonst Hintergrundabruf, die Seite nutzt den Rückfall (schlichter Link)
         }
 
         $alt = get_option("sab_alt_{$land}_{$asin}");
@@ -344,6 +348,24 @@ final class SAB {
         if (!function_exists('wp_schedule_single_event') || wp_next_scheduled($hook, $args)) { return; }
         wp_schedule_single_event(time(), $hook, $args);
         if (function_exists('spawn_cron')) { spawn_cron(); }
+    }
+
+    /**
+     * Stündlich: Produkte und Bilder, die fehlen oder in den nächsten Stunden ablaufen, rechtzeitig frisch holen (höchstens 12 je Lauf).
+     * So ist der Zwischenspeicher (Amazon: höchstens 1 Tag) nie leer, auch wenn lange kein Besucher da war oder ein Update stattfand.
+     */
+    public static function auffrischen(): void {
+        $land = self::land(''); $n = 0;
+        foreach (self::alle_asins() as $asin) {
+            if ($n >= 12) { break; }
+            $asin = (string) $asin; if (!self::asin($asin)) { continue; }
+            $c = get_transient("sab_{$land}_{$asin}");
+            if (!$c || time() - (int) ($c['ts'] ?? 0) > self::TTL - 6 * HOUR_IN_SECONDS) { self::holen($asin, $land); $n++; continue; }
+            if (!empty($c['bild']) && !empty($c['link'])) {
+                $f = self::bild_pfad($land, $asin, 0);
+                if (!file_exists($f) || time() - filemtime($f) > self::TTL - 6 * HOUR_IN_SECONDS) { self::bild_url($c, $asin, $land, 0, true); $n++; }
+            }
+        }
     }
 
     public static function holen($asin, $land): void {
@@ -1339,7 +1361,7 @@ final class SAB {
         $file = "$dir/$name";
         $alter = file_exists($file) ? time() - filemtime($file) : PHP_INT_MAX;
 
-        if ($alter === PHP_INT_MAX && !$laden && !defined('SAB_SYNC') && self::$sofort_bilder < 2) { $laden = true; self::$sofort_bilder++; }   // noch nie geladen (neues Produkt): jetzt sofort holen statt „Bild fehlt“, höchstens 2 je Seitenaufruf
+if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilder < 2) { $laden = true; self::$sofort_bilder++; }   // noch nie geladen oder abgelaufen: jetzt sofort holen statt „Bild fehlt“, höchstens 2 je Seitenaufruf; schlägt das fehl, bleibt das alte Bild bis BILD_MAX
         if ($alter > self::TTL && !$laden && !defined('SAB_SYNC')) { self::im_hintergrund('sab_bild_holen', [$land, $asin, $idx]); }
         if ($alter > self::TTL && ($laden || defined('SAB_SYNC'))) {
             wp_mkdir_p($dir);

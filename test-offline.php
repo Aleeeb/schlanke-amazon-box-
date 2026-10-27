@@ -1498,4 +1498,9 @@ $rd = new ReflectionMethod('SAB', 'tausch_dringlichkeit'); $rd->setAccessible(tr
 $xu = ['manuell_stand' => 1, 'prime' => null, 'preis' => '12,99 €', 'lieferbar' => true, 'kaufen' => true, 'liefertage' => 2, 'sterne' => 4.5];
 ok($rd->invoke(null, $xu, 80) === 0, 'Prime unklar, Preis da, gute Lieferzeit: kein Tauschgrund');
 ok($rd->invoke(null, array_merge($xu, ['kaufen' => false]), 80) === 100, 'Prime unklar ohne Buy Box: weiter Problem');
+// 0.89.19: stündliche Auffrischung läuft ohne Fehler durch (leer und mit Produkt)
+set_transient('sab_alle_asins', ['B0ARTIKEL01'], 600);
+$ae = null; try { SAB::auffrischen(); } catch (\Throwable $e) { $ae = $e->getMessage(); }
+ok($ae === null, 'Auffrischen: kein Fehler ' . ($ae ?? ''));
+delete_transient('sab_alle_asins');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
