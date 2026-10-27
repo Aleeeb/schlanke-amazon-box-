@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.19
+ * Version: 0.89.20
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.19';
+    const VERSION = '0.89.20';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -405,6 +405,9 @@ final class SAB {
         $j  = json_decode(wp_remote_retrieve_body($r), true);
         $it = $j['itemsResult']['items'][0] ?? null;
         if (!$it || empty($it['detailPageURL'])) {
+            // „Unbekannt“ nur bei eindeutiger Antwort von Amazon (Produkt nicht gefunden/nicht zugänglich); jede andere Fehlermeldung zählt als „nicht erreichbar“, nie als „Produkt weg“
+            $codes = []; foreach ((array) ($j['errors'] ?? []) as $e_) { $codes[] = (string) ($e_['code'] ?? '') . ' ' . (string) ($e_['message'] ?? ''); }
+            if ($codes && !preg_match('/ItemNotAccessible|InvalidParameterValue|ItemNotFound|NoResults|NotFound|not\s+(?:found|accessible)/i', implode(' ', $codes))) { return null; }
             // Amazon antwortet, kennt das Produkt aber nicht (mehr)
             return ['ts' => time(), 'titel' => $alt['titel'] ?? '', 'bild' => '', 'link' => '', 'weg' => true, 'verfuegbar' => false];
         }
@@ -2253,7 +2256,7 @@ JS;
         $asin = self::getauscht($orig);
         $p = self::produkt($asin, self::land($a['land']));
         if ($asin !== $orig && trim((string) $inhalt) !== '') { $inhalt = self::name_tauschen((string) $inhalt, $orig, $asin, self::land($a['land']), $p); }
-        if ($p && !empty($p['weg'])) { return self::weg_marker($asin, esc_html($inhalt)); }
+        $weg_ = $p && !empty($p['weg']);   // Amazon kennt das Produkt (angeblich) nicht: der Link bleibt trotzdem klickbar (Besucher nie ohne Link), Redakteure sehen die Markierung
         $link = $p['link'] ?? '';
         if (!$link) { // Amazon nicht erreichbar und kein frischer Stand: schlichter Link mit Partner-ID
             $land = self::land($a['land']); $tag = self::tag($land);
@@ -2262,7 +2265,8 @@ JS;
         }
         $link = self::lnk($link, (string) $a['tag']);
         $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $a['class']));
-        return '<a' . ($cls ? ' class="' . esc_attr($cls) . '"' : '') . ' href="' . esc_url($link) . '"' . self::a_attr($asin) . '>' . esc_html($inhalt ?: ($p['titel'] ?? '')) . '</a>';
+        $a_html = '<a' . ($cls ? ' class="' . esc_attr($cls) . '"' : '') . ' href="' . esc_url($link) . '"' . self::a_attr($asin) . '>' . esc_html($inhalt ?: ($p['titel'] ?? '')) . '</a>';
+        return $weg_ ? self::weg_marker($asin, $a_html) : $a_html;
     }
 
     // ---------- Eigene Klickmessung (ohne Cookies, ohne IP, ohne Besucher-Kennung) ----------

@@ -1503,4 +1503,10 @@ set_transient('sab_alle_asins', ['B0ARTIKEL01'], 600);
 $ae = null; try { SAB::auffrischen(); } catch (\Throwable $e) { $ae = $e->getMessage(); }
 ok($ae === null, 'Auffrischen: kein Fehler ' . ($ae ?? ''));
 delete_transient('sab_alle_asins');
+// 0.89.20: Textlink bleibt klickbar, auch wenn Amazon das Produkt (angeblich) nicht kennt
+$GLOBALS['opt']['sab_tags'] = "es=t-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+set_transient('sab_es_B0WEG00001', ['ts' => time(), 'titel' => 'X', 'bild' => '', 'link' => '', 'weg' => true, 'verfuegbar' => false], 600);
+$lw = $GLOBALS['sc']['amz_link'](['asin' => 'B0WEG00001', 'land' => 'es'], 'Angebote bei Amazon ansehen');
+ok(strpos($lw, '<a ') !== false && strpos($lw, 'href=') !== false && strpos($lw, '/dp/B0WEG00001') !== false, 'Textlink bei „unbekanntem“ Produkt bleibt klickbar');
+unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
