@@ -1554,4 +1554,13 @@ $el = SAB::ersatz_liste();
 ok(count($el) === 3 && $el[0]['land'] === 'co.uk' && $el[0]['status'] === 'geprüft' && $el[1]['status'] === 'neu', 'Ersatz-Datenbank lesen');
 ok(SAB::ersatz_fuer('B0ALTPROD1', 'co.uk') === ['B0ERSATZ01' => 'geprüft', 'B0ERSATZ03' => 'geprüft'] && SAB::ersatz_fuer('B0ALTPROD1', 'com') === ['B0ERSATZ02' => 'neu'] && SAB::ersatz_fuer('B0ANDERES1', 'co.uk') === [], 'Ersatz je Produktart, Land und ASIN');
 unset($GLOBALS['opt']['sab_ersatz'], $GLOBALS['opt']['sab_gruppen']);
+// 0.89.26: Ersatz-Datenbank Status und Übersicht
+[$e1, $c1] = SAB::ersatz_status_setzen("Zaunart | co.uk | B0ERSATZ02 | neu\nAnderes | com | B0ERSATZ09 | neu", 'Zaunart', 'co.uk', 'B0ERSATZ02', 'geprüft');
+ok($c1 && strpos($e1, 'Zaunart | co.uk | B0ERSATZ02 | geprüft | ') === 0 && strpos($e1, "Anderes | com | B0ERSATZ09 | neu") !== false, 'Status geprüft setzen, andere Zeilen unverändert');
+[, $c2] = SAB::ersatz_status_setzen("A | com | B0ERSATZ09 | neu", 'A', 'com', 'B0NICHTDA01', 'geprüft'); ok(!$c2, 'Unbekannter Eintrag ändert nichts');
+$GLOBALS["opt"]["sab_ersatz"] = "Zaunart | de | B0ERSATZ01 | geprüft"; $GLOBALS['opt']['sab_gruppen'] = "Zaunart: B0ALTPROD1\nSchlauch: B0ALTPROD3";
+$rh = new ReflectionMethod('SAB', 'ersatz_html'); $rh->setAccessible(true);
+$eh = $rh->invoke(null);
+ok(strpos($eh, 'Lücken') !== false && strpos($eh, 'Schlauch') !== false && strpos($eh, 'nur eine Reserve') !== false && strpos($eh, 'B0ERSATZ01') !== false, 'Ersatz-Übersicht zeigt Lücken und Einträge');
+unset($GLOBALS['opt']['sab_ersatz'], $GLOBALS['opt']['sab_gruppen']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

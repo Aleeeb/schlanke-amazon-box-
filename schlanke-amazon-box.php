@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.25
+ * Version: 0.89.26
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.25';
+    const VERSION = '0.89.26';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -269,6 +269,48 @@ final class SAB {
             $st = mb_strtolower($t[3] ?? ''); $out[] = ['art' => $t[0], 'land' => self::land_schluessel($t[1] ?? ''), 'asin' => $a, 'status' => in_array($st, ['geprüft', 'geprueft', 'ok', 'ja'], true) ? 'geprüft' : 'neu', 'stand' => $t[4] ?? '', 'quelle' => $t[5] ?? ''];
         }
         return $out;
+    }
+
+    /** Setzt den Status (neu/geprüft) einer Zeile der Ersatz-Datenbank; übrige Zeilen bleiben unverändert. @return array{0:string,1:bool} [neuer Text, geändert] */
+    public static function ersatz_status_setzen(string $text, string $art, string $land, string $asin, string $status): array {
+        $zeilen = preg_split('/\R/', $text); $geaendert = false;
+        foreach ($zeilen as $i => $z) {
+            $t = array_map('trim', explode('|', $z));
+            if (($t[0] ?? '') === $art && self::land_schluessel($t[1] ?? '') === $land && self::asin($t[2] ?? '') === $asin) {
+                while (count($t) < 4) { $t[] = ''; }
+                $t[3] = $status; if (($t[4] ?? '') === '' ) { $t[4] = gmdate('Y-m-d'); } $zeilen[$i] = implode(' | ', $t); $geaendert = true;
+            }
+        }
+        return [implode("\n", $zeilen), $geaendert];
+    }
+
+    /** Übersicht der Ersatz-Datenbank: Score und Handdaten je Eintrag, Knopf „geprüft“, und Lücken (Produktarten mit weniger als zwei Ersatzprodukten im Land dieser Webseite). */
+    private static function ersatz_html(): string {
+        $liste = self::ersatz_liste(); $land = self::land(''); $d = (array) self::uebersicht_daten($land, false); $namen = self::produkte(); $trotz = (array) get_option('sab_trotz', []);
+        $h = '<h4>Stand der Ersatz-Datenbank (' . count($liste) . ' Einträge, Land dieser Webseite: ' . esc_html($land) . ')</h4>';
+        if ($liste) {
+            $h .= '<table class="widefat striped" style="max-width:980px"><thead><tr><th>Produktart</th><th>Land</th><th>Produkt</th><th>Score</th><th>Daten</th><th>Status</th></tr></thead><tbody>';
+            foreach ($liste as $e) {
+                $x = $d['items'][$e['asin']] ?? null; $sc = $x ? self::score(array_merge($x, ['trotz' => isset($trotz[$e['asin']])]))[0] : null; $t = [];
+                if ($x) {
+                    if (isset($x['sterne']) && $x['sterne'] !== null) { $t[] = '&#9733; ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')'; } else { $t[] = 'Sterne fehlen'; }
+                    $t[] = self::prime_zeichen($x['prime'] ?? null);
+                    $t[] = isset($x['liefertage']) && $x['liefertage'] !== null ? '&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : 'Lieferzeit fehlt';
+                    $t[] = isset($x['lieferkosten']) && $x['lieferkosten'] !== null ? ((float) $x['lieferkosten'] <= 0 ? 'Versand gratis' : 'Versand ' . esc_html(str_replace('.', ',', (string) $x['lieferkosten']))) : 'Versand ?';
+                    $pv = self::provision_satz($x); $t[] = $pv !== null ? esc_html(str_replace('.', ',', (string) $pv)) . ' % Prov.' : 'Provision fehlt';
+                }
+                $knopf = '<form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="ersatz_pruef"><input type="hidden" name="sab_art" value="' . esc_attr($e['art']) . '"><input type="hidden" name="sab_land" value="' . esc_attr($e['land']) . '"><input type="hidden" name="sab_asin" value="' . esc_attr($e['asin']) . '"><input type="hidden" name="sab_status" value="' . ($e['status'] === 'geprüft' ? 'neu' : 'geprüft') . '"><button class="button button-small">' . ($e['status'] === 'geprüft' ? 'Prüfung zurücknehmen' : 'als geprüft markieren') . '</button></form>';
+                $h .= '<tr><td>' . esc_html($e['art']) . '</td><td>' . esc_html($e['land']) . '</td><td><code>' . esc_html($e['asin']) . '</code> ' . esc_html(($namen[$e['asin']] ?? '') ?: mb_substr((string) ($x['titel'] ?? ''), 0, 60)) . '</td><td>' . ($sc === null ? '<em>Amazon-Daten fehlen noch</em>' : (int) $sc) . '</td><td><small>' . ($t ? implode(' · ', $t) : '') . '</small></td><td>' . ($e['status'] === 'geprüft' ? '<strong style="color:#1a7f37">geprüft</strong> ' : 'neu ') . $knopf . '</td></tr>';
+            }
+            $h .= '</tbody></table>';
+        }
+        $luecken = [];
+        foreach (self::gruppen() as $name => $asins) {
+            $n = 0; foreach ($liste as $e) { if ($e['land'] === $land && $e['status'] === 'geprüft' && mb_strtolower($e['art']) === mb_strtolower($name)) { $n++; } }
+            if ($n < 2) { $luecken[] = '<li><strong>' . esc_html($name) . '</strong>: ' . $n . ' geprüft' . ($n === 0 ? ' (keine Reserve)' : ' (nur eine Reserve)') . '</li>'; }
+        }
+        if ($luecken) { $h .= '<p><strong>Lücken</strong> (Produktarten mit weniger als zwei geprüften Ersatzprodukten im Land ' . esc_html($land) . '):</p><ul style="columns:2;max-width:860px">' . implode('', array_slice($luecken, 0, 60)) . '</ul>'; }
+        return $h;
     }
 
     /** Ersatzprodukte aus der Datenbank für ein Produkt im Land der Webseite: gleiche Produktgruppe oder ausdrücklich für diese ASIN. @return array<string,string> ASIN => Status */
@@ -2706,7 +2748,7 @@ JS;
            . '<textarea name="sab_manuell" rows="10" class="large-text code">' . esc_textarea((string) get_option('sab_manuell', '')) . '</textarea><p><button class="button button-primary">Handdaten speichern</button></p></form>';
         $h .= '<h3 style="margin-top:2em">Ersatz-Datenbank</h3><p class="description">Geprüfte Ersatzprodukte, aus denen der Austausch zuerst schöpft. Eine Zeile pro Ersatzprodukt: <code>Produktart | Land | ASIN | Status (neu/geprüft) | Stand | Quelle</code>, z. B. <code>Schneckenzaun | co.uk | B0EXAMPLE1 | geprüft | 2026-10-27 | PC-Sitzung</code>. „Produktart“ ist der Name einer Produktgruppe (Reiter Gruppen) oder eine ASIN (Ersatz nur für dieses Produkt). Sterne, Provision, Lieferzeit und Lieferkosten der Ersatzprodukte stehen oben bei den Handdaten. Geprüfte Einträge werden im Austausch bevorzugt; es zählt nur das Land dieser Webseite (' . esc_html(self::land('')) . ').</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="ersatz">'
-           . '<textarea name="sab_ersatz" rows="8" class="large-text code">' . esc_textarea((string) get_option('sab_ersatz', '')) . '</textarea><p><button class="button button-primary">Ersatz-Datenbank speichern</button></p></form>';
+           . '<textarea name="sab_ersatz" rows="8" class="large-text code">' . esc_textarea((string) get_option('sab_ersatz', '')) . '</textarea><p><button class="button button-primary">Ersatz-Datenbank speichern</button></p></form>' . self::ersatz_html();
         $d = self::uebersicht_daten($land, false);
         $h .= self::stand_hinweis($d);
         if (!empty($d['items'])) {
@@ -6775,6 +6817,9 @@ JS;
             } elseif ($form === 'ersatz') {
                 update_option('sab_ersatz', sanitize_textarea_field(wp_unslash($_POST['sab_ersatz'] ?? '')), false); delete_transient('sab_alle_asins'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
                 $meldung = 'Ersatz-Datenbank gespeichert (' . count(self::ersatz_liste()) . ' Einträge).';
+            } elseif ($form === 'ersatz_pruef') {
+                [$txt, $ch] = self::ersatz_status_setzen((string) get_option('sab_ersatz', ''), sanitize_text_field(wp_unslash($_POST['sab_art'] ?? '')), self::land_schluessel((string) ($_POST['sab_land'] ?? '')), self::asin((string) ($_POST['sab_asin'] ?? '')), ($_POST['sab_status'] ?? '') === 'geprüft' ? 'geprüft' : 'neu');
+                if ($ch) { update_option('sab_ersatz', $txt, false); } $meldung = $ch ? 'Status gespeichert.' : 'Eintrag nicht gefunden.';
             } elseif ($form === 'dringlichkeit') {
                 if (!empty($_POST['sab_dr_std'])) { delete_option('sab_dringlichkeit'); $meldung = 'Dringlichkeit auf den Standard zurückgesetzt.'; }
                 else {
