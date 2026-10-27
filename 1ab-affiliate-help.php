@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.4
+ * Version: 0.88.5
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.4';
+    const VERSION = '0.88.5';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -124,6 +124,13 @@ final class SAB {
         ];
     }
 
+    /** Ländercode tolerant lesen: „couk“, „co-uk“, „UK“, „GB“ => co.uk; „comau“, „AU“ => com.au; „us“ => com; „.de“ => de. */
+    public static function land_schluessel(string $k): string {
+        $k = strtolower(trim($k, " \t.\"'")); $n = preg_replace('/[^a-z]/', '', $k);
+        $m = ['couk' => 'co.uk', 'uk' => 'co.uk', 'gb' => 'co.uk', 'comau' => 'com.au', 'au' => 'com.au', 'us' => 'com', 'usa' => 'com'];
+        return $m[$n] ?? $k;
+    }
+
     /** Zeilen "land=partner-id" aus der Eingabemaske => [land => id] */
     private static function tags(): array {
         if (defined('SAB_TAGS')) { return SAB_TAGS; }
@@ -132,7 +139,7 @@ final class SAB {
             $z = trim($z, " \t\"'");
             if ($z === '') { continue; }
             $t = array_map(fn($v) => trim($v, " \t\"'"), preg_split('/\s*[=:]\s*/', $z, 2));
-            if (count($t) === 2 && $t[0] !== '' && $t[1] !== '') { $out[strtolower($t[0])] = $t[1]; }
+            if (count($t) === 2 && $t[0] !== '' && $t[1] !== '') { $out[self::land_schluessel($t[0])] = $t[1]; }
             elseif (count($t) === 1 && preg_match('/^[A-Za-z0-9][A-Za-z0-9\-]{2,39}$/', $t[0])) { $out[self::standardland_roh()] = $out[self::standardland_roh()] ?? $t[0]; }   // nur die ID ohne „de=“: gilt für das Standardland
         }
         return $out;

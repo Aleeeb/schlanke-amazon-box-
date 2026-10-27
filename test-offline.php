@@ -1362,4 +1362,8 @@ unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
 $_GET['sab_zeige'] = 'B0AKKUNEU1'; $GLOBALS['admin'] = true; $GLOBALS['loggedin'] = true; ob_start(); SAB::zeige_skript(); $zj = ob_get_clean(); unset($_GET['sab_zeige']); $GLOBALS['admin'] = false; $GLOBALS['loggedin'] = false;
 $zf = tempnam(sys_get_temp_dir(), 'zj') . '.js'; file_put_contents($zf, preg_replace('#^<script>|</script>$#', '', trim($zj))); exec('node --check ' . escapeshellarg($zf) . ' 2>&1', $zo, $zrc);
 ok($zj !== '' && $zrc === 0 && strpos($zj, 'Hier tauschen') !== false, 'Sprung-Banner: Knopf „Hier tauschen“, JavaScript ok ' . implode(' ', $zo));
+// 0.88.5: Ländercode tolerant (couk, UK, comau …)
+$GLOBALS['opt']['sab_tags'] = "couk=uk-21"; $GLOBALS['opt']['sab_default_land'] = 'de';
+ok($mSl->invoke(null) === 'co.uk' && SAB::land_schluessel('CO.UK') === 'co.uk' && SAB::land_schluessel('comau') === 'com.au' && SAB::land_schluessel('de') === 'de', 'Ländercode „couk“ ohne Punkt wird als co.uk erkannt');
+unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
