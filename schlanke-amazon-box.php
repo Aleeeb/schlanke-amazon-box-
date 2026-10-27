@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.12
+ * Version: 0.88.13
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.12';
+    const VERSION = '0.88.13';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1321,6 +1321,8 @@ final class SAB {
         return wp_upload_dir()['basedir'] . '/sab/' . "{$land}-{$asin}" . ($idx > 0 ? "-{$idx}" : '') . '.jpg';
     }
 
+    private static $sofort_bilder = 0;
+
     private static function bild_url(array $p, string $asin, string $land, int $idx = 0, bool $laden = false): string {
         $quelle = $idx > 0 ? ($p['bilder'][$idx] ?? '') : ($p['bild'] ?? '');
         if (!$quelle) { return ''; }
@@ -1330,10 +1332,11 @@ final class SAB {
         $file = "$dir/$name";
         $alter = file_exists($file) ? time() - filemtime($file) : PHP_INT_MAX;
 
+        if ($alter === PHP_INT_MAX && !$laden && !defined('SAB_SYNC') && self::$sofort_bilder < 2) { $laden = true; self::$sofort_bilder++; }   // noch nie geladen (neues Produkt): jetzt sofort holen statt „Bild fehlt“, höchstens 2 je Seitenaufruf
         if ($alter > self::TTL && !$laden && !defined('SAB_SYNC')) { self::im_hintergrund('sab_bild_holen', [$land, $asin, $idx]); }
         if ($alter > self::TTL && ($laden || defined('SAB_SYNC'))) {
             wp_mkdir_p($dir);
-            $r = wp_remote_get($quelle, ['timeout' => 10]);
+            $r = wp_remote_get($quelle, ['timeout' => $alter === PHP_INT_MAX ? 6 : 10]);
             $ok = !is_wp_error($r) && wp_remote_retrieve_response_code($r) === 200
                && strpos((string) wp_remote_retrieve_header($r, 'content-type'), 'image/') === 0;
             if ($ok) {
@@ -1887,9 +1890,7 @@ JS;
         [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin] = self::stelle_pruefen();
         $neu = self::asin_aus_text((string) wp_unslash($_POST['neu'] ?? ''));
         if (strlen($neu) !== 10 || $neu === $asin) { wp_send_json_error('Bitte eine gültige, andere ASIN oder einen Amazon-Produktlink (mit /dp/…) angeben. Kurzlinks wie amzn.to enthalten keine ASIN.'); }
-        $ld_ = self::land(''); $pn_ = self::produkt($neu, $ld_, true, true);   // neues Produkt sofort bei Amazon holen: ohne Bild und Daten wird nicht getauscht, sonst steht dort nur „Bild fehlt“
-        if (!self::hat_bild($pn_)) { wp_send_json_error('Amazon liefert zu ' . $neu . ' gerade kein Bild oder keine Daten. Nicht getauscht. Bitte Link prüfen oder in ein paar Minuten noch einmal versuchen.'); }
-        self::bild_url($pn_, $neu, $ld_, 0, true);
+        if (!self::neues_produkt_vorladen($neu)) { wp_send_json_error('Amazon liefert zu ' . $neu . ' gerade kein Bild oder keine Daten, oder das Bild ließ sich nicht speichern. Nicht getauscht. Bitte Link prüfen oder in ein paar Minuten noch einmal versuchen.'); }
         $bf_ = (array) get_option('sab_bildfehler', []); foreach (array_keys($bf_) as $k_) { if (strpos((string) $k_, $neu . '|') === 0) { unset($bf_[$k_]); } } update_option('sab_bildfehler', $bf_, false);
         $namen = self::produkte(); $neuer = (string) ($namen[$neu] ?? '');
         $alte = array_filter([(string) ($namen[$asin] ?? ''), (string) ($namen[$quelle] ?? '')]);
@@ -4470,10 +4471,21 @@ JS;
     }
 
     /** Tausch ALT => NEU in allen Artikeln (mit Sicherung, Kurzlinks der Spalte, Titel, Schutz vor Doppelung). @return string Meldung für den Redakteur */
+    /** Neues Produkt vor dem Tausch holen: Daten und Bild in allen Ländern mit Partner-ID speichern (Artikel können ein eigenes Land haben). Wahr, wenn es im Standardland samt Bild da ist. */
+    private static function neues_produkt_vorladen(string $neu): bool {
+        $std = self::land(''); $ok = false;
+        $laender = array_values(array_unique(array_merge([$std], array_filter(array_keys(self::tags()), fn($l) => isset(self::LAENDER[$l])))));
+        foreach ($laender as $l) {
+            $pn = self::produkt($neu, $l, true, true);
+            if (!self::hat_bild($pn)) { continue; }
+            $u = self::bild_url($pn, $neu, $l, 0, true);
+            if ($l === $std && $u !== '') { $ok = true; }
+        }
+        return $ok;
+    }
+
     private static function tausch_ausfuehren(string $alt, string $neu, string $name): string {
-        $pn = self::produkt($neu, self::land(''), true, true);   // Ersatz sofort bei Amazon holen und Bild speichern, sonst fehlt es nach dem Tausch auf der Seite
-        if (!self::hat_bild($pn)) { return 'NICHT getauscht: Für ' . $neu . ' liefert Amazon kein Bild oder keinen Link (Produkt unbekannt oder Abruf fehlgeschlagen). Bitte ein anderes Ersatzprodukt wählen.'; }
-        self::bild_url($pn, $neu, self::land(''), 0, true);
+        if (!self::neues_produkt_vorladen($neu)) { return 'NICHT getauscht: Für ' . $neu . ' liefert Amazon kein Bild oder keinen Link, oder das Bild ließ sich nicht speichern (Produkt unbekannt oder Abruf fehlgeschlagen). Bitte ein anderes Ersatzprodukt wählen oder in einer Minute noch einmal versuchen.'; }
         update_option('sab_ungueltige_asins', array_values(array_diff(array_map('strval', (array) get_option('sab_ungueltige_asins', [])), [$neu])), false);   // Amazon hat das neue Produkt gerade geliefert: nie als „unbekannt“ führen, bis die Übersicht es selbst kennt
         $d0 = self::uebersicht_daten(self::land(''), false); $f0 = self::fundstellen([$alt]); $an = [(string) (self::produkte()[$alt] ?? ''), (string) ($d0['items'][$alt]['titel'] ?? '')];
         if (!$an[1] && !empty($f0[$alt])) { $p0 = get_post((int) array_key_first($f0[$alt])); $an[] = $p0 ? self::kontext_titel((string) $p0->post_content, $alt) : ''; }
