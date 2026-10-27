@@ -1476,4 +1476,16 @@ set_transient('sab_kurz_' . md5('https://amzn.to/REZ1234'), 'https://www.amazon.
 $rg = new ReflectionMethod('SAB', 'kurzlink_grund'); $rg->setAccessible(true);
 $gr = $rg->invoke(null, 'https://amzn.to/REZ1234');
 ok(strpos($gr, 'Rezensionen') !== false && strpos($gr, 'zeck-21') !== false && strpos($gr, 'B0ABCDEFGH') !== false, 'Kurzlink zu Rezension: erkannt, Partner-ID im Ziel angezeigt');
+// 0.89.15: „Ist okay, so lassen“ für Kurzlinks
+$GLOBALS['pc'] = '<p>Alles zur Zeckenzange. <a href="https://amzn.to/3xyzabc">Rezensionen</a></p>';
+$k0 = $rk->invoke(null, 5);
+ok(strpos($k0, 'Ist okay, so lassen') !== false && !SAB::kurz_ok('https://amzn.to/3xyzabc'), 'Kurzlink-Liste: Knopf „Ist okay, so lassen“, noch nicht bestätigt');
+SAB::kurz_ok_setzen('https://amzn.to/3xyzabc', true);
+$k1 = $rk->invoke(null, 5);
+ok(SAB::kurz_ok('https://amzn.to/3xyzabc') && strpos($k1, 'Wieder prüfen') !== false && strpos($k1, 'Diesen Kurzlink ersetzen') === false, 'Bestätigter Kurzlink: nicht mehr als Problem, „Wieder prüfen“ da');
+[$u1] = SAB::umbau_text($GLOBALS['pc']);
+ok(strpos($u1, 'amzn.to/3xyzabc') !== false && !SAB::$umbau_abw, 'Umbau lässt bestätigten Kurzlink aus ohne Abweichung');
+SAB::kurz_ok_setzen('https://amzn.to/3xyzabc', false);
+ok(!SAB::kurz_ok('https://amzn.to/3xyzabc'), 'Wieder prüfen: Bestätigung entfernt');
+unset($GLOBALS['pc']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

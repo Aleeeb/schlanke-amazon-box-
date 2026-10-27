@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.14
+ * Version: 0.89.15
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.14';
+    const VERSION = '0.89.15';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -105,6 +105,7 @@ final class SAB {
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
         add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
+        add_action('wp_ajax_sab_kurz_ok',        [__CLASS__, 'ajax_kurz_ok']);
         add_action('wp_ajax_sab_stelle_ok',      [__CLASS__, 'ajax_stelle_ok']);
         add_action('wp_footer',      [__CLASS__, 'fuss'], 5);
         add_filter('pre_set_site_transient_update_plugins', [__CLASS__, 'update_pruefen']);
@@ -2075,7 +2076,7 @@ JS;
     public static function stellen_skript(): void {
         if (!function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts') || !is_singular()) { return; }
         $pid_ = (int) get_queried_object_id();
-        $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $pid_, 'e' => $pid_ && current_user_can('edit_post', $pid_) ? admin_url('post.php?post=' . $pid_ . '&action=edit&sab_zeige=') : '']);
+        $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $pid_, 'e' => $pid_ && current_user_can('edit_post', $pid_) ? admin_url('post.php?post=' . $pid_ . '&action=edit&sab_zeige=') : '', 'ko' => array_values(array_slice((array) get_option('sab_kurz_ok', []), -200))]);
         echo '<script>(function(){var C=' . $cfg . ';var seen={};var cur={nth:0,txt:""};'
            . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);fd.append("kurz",cur.kurz||"");for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
            . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
@@ -2104,7 +2105,7 @@ JS;
            . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.className="sab-tb";b.setAttribute("data-o",o);b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b);'
            . 'if(C.e){var b3=el("button","position:absolute;top:30px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","✎ bearbeiten");b3.type="button";b3.title="Öffnet den Editor an dieser Stelle (neuer Tab)";b3.onclick=function(ev){ev.preventDefault();ev.stopPropagation();window.open(C.e+encodeURIComponent(e.getAttribute("data-sab-asin")),"_blank")};box.appendChild(b3)}}'
            . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}'
-           . 'var hs=document.querySelectorAll("a[href]"),cn={},al={},kz={};for(var j=0;j<hs.length;j++){var a=hs[j],hr=a.getAttribute("href")||"",m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(hr);var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as&&/^https?:\/\/(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)\//i.test(hr)&&!a.closest("#wpadminbar")&&a.closest("article,.entry-content,.hentry,main,.post")){kz[hr]=(kz[hr]||0)+1;(function(a,hr,nth){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn2(t,f,tb){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(tb){b.className="sab-tb"}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}kn2("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim(),kurz:hr};oeffne(0,"")},1);if(C.e){kn2("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(hr.replace(/[?#].*$/,"").replace(/\/+$/,"").split("/").pop()),"_blank")})}a.parentNode.insertBefore(sp,a.nextSibling)})(a,hr,kz[hr]);continue}if(!as){continue}al[as]=(al[as]||0)+1;'
+           . 'var hs=document.querySelectorAll("a[href]"),cn={},al={},kz={};for(var j=0;j<hs.length;j++){var a=hs[j],hr=a.getAttribute("href")||"",m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(hr);var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as&&/^https?:\/\/(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)\//i.test(hr)&&!a.closest("#wpadminbar")&&a.closest("article,.entry-content,.hentry,main,.post")){kz[hr]=(kz[hr]||0)+1;(function(a,hr,nth){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn2(t,f,tb){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(tb){b.className="sab-tb"}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}kn2("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim(),kurz:hr};oeffne(0,"")},1);if(C.e){kn2("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(hr.replace(/[?#].*$/,"").replace(/\/+$/,"").split("/").pop()),"_blank")})}var ik=C.ko.indexOf(hr)>=0;kn2(ik?"✓ so gelassen – wieder prüfen":"✓ okay, so lassen",function(){var fd=new FormData();fd.append("action","sab_kurz_ok");fd.append("n",C.n);fd.append("post",C.p);fd.append("kurz",hr);fd.append("ok",ik?"0":"1");fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){if(r.success){location.reload()}})});a.parentNode.insertBefore(sp,a.nextSibling)})(a,hr,kz[hr]);continue}if(!as){continue}al[as]=(al[as]||0)+1;'
            . 'if(a.hasAttribute("data-sab-asin")||a.closest("[data-sab-ord],#wpadminbar,.sab-karte,.sab-produkt")||!a.closest("article,.entry-content,.hentry,main,.post")){continue}cn[as]=(cn[as]||0)+1;'
            . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(t.indexOf("tauschen")>0){b.className="sab-tb";b.setAttribute("data-o","h"+nth+as)}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}'
            . 'kn("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};oeffne(0,as)});'
@@ -3400,6 +3401,7 @@ JS;
                         return '<' . $cm[1] . $cm[2] . '>' . (strpos($cm[3], '<') === false ? esc_html($neuer_name) : preg_replace('#>([^<>]{5,})<#u', '>' . str_replace(['\\', '$'], ['\\\\', '\\$'], esc_html($neuer_name)) . '<', $cm[3], 1)) . '</' . $cm[1] . '>';
                     }
                     if (!isset($spalten[$ci]) || !preg_match('#<a\b[^>]*href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/[^"\']*)\1[^>]*>(.*?)</a>#is', $cm[3], $k)) { return $cm[0]; }
+                    if (self::kurz_ok($k[2])) { return $cm[0]; }   // bewusst so gelassen
                     $u = self::umbau_url($k[2], true);
                     if (!$u) {
                         // nicht auflösbar (z. B. Amazon sperrt die Abfrage): steht in der Spalte nur dieses eine Produkt, gehört der Kurzlink zu ihm
@@ -4045,7 +4047,7 @@ JS;
             foreach ($zellen as $ri => $cs) {
                 foreach ($cs as $ci => $cell) {
                     if (empty($spalten[$ci]) || count($spalten[$ci]) !== 1 || !preg_match('#href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/[^"\']*)\1#i', $cell, $k)) { continue; }
-                    if (self::umbau_url($k[2], true)) { continue; }   // lässt sich selbst auflösen: nichts ändern
+                    if (self::kurz_ok($k[2]) || self::umbau_url($k[2], true)) { continue; }   // bewusst so gelassen oder lässt sich selbst auflösen: nichts ändern
                     [$asin, $land] = explode('|', array_key_first($spalten[$ci]));
                     $getauscht = array_merge(array_values(self::tausch_regeln()), array_column((array) get_option('sab_tausch_log', []), 'neu'));
                     if (in_array($asin, $getauscht, true)) { self::$umbau_abw[] = 'Kurzlink ' . html_entity_decode($k[2]) . ' steht in einer Spalte mit getauschtem Produkt ' . $asin . ', nicht geraten'; continue; }   // im Zweifel nichts ersetzen
@@ -4071,7 +4073,7 @@ JS;
             $pos = strpos($orig, $m[0]);
             if ($pos === false) { return $m[0]; }
             foreach ($tab as [$ts, $te]) { if ($pos >= $ts && $pos <= $te) { return $m[0]; } }
-            if (self::umbau_url($m[3], true)) { return $m[0]; }   // lässt sich selbst auflösen: nichts ändern
+            if (self::kurz_ok($m[3]) || self::umbau_url($m[3], true)) { return $m[0]; }   // bewusst so gelassen oder lässt sich selbst auflösen: nichts ändern
             $vor = substr($orig, max(0, $pos - 1200), min($pos, 1200));
             if (($hr = strripos($vor, '<hr')) !== false) { $vor = substr($vor, $hr); }
             if (!preg_match_all($re, $vor, $am, PREG_SET_ORDER)) { return $m[0]; }
@@ -4167,6 +4169,7 @@ JS;
                     $cell = $zs[$ci] ?? ''; $in = preg_replace('#^<t[dh]\b[^>]*>|</t[dh]>$#i', '', $cell);
                     if (strpos($in, '[') !== false && stripos($in, '[amz_') !== false) { return $t[0]; }
                     if (preg_match('#href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/[^"\']*)\1#i', $in, $k)) {
+                        if (self::kurz_ok($k[2])) { return $t[0]; }   // bewusst so gelassen
                         $u = self::umbau_url($k[2], true);
                         if ($u && $u[1] !== $asin) { self::$umbau_info[] = 'Bild bestimmt das Produkt: Kurzlink ' . preg_replace('#^https?://#', '', html_entity_decode($k[2])) . ' führte zu ' . self::kurzlink_ziel_text($k[2], $u[1]) . ', die Karte nimmt das Bildprodukt ' . self::produktbeschreibung($asin); }   // der Link folgt dem Bild
                         $text = trim(strip_tags($in));
@@ -4462,7 +4465,7 @@ JS;
             if (preg_match_all('/\[(?:aawp|amazon)\b[^\]]*\b(?:box|link|fields)=/i', $c, $mm)) { $fest += count($mm[0]); }   // AAWP- und [amazon]-Platzhalter zählen als umzubauen
             if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1#is', $c, $m)) {
                 foreach ($m[2] as $url) {
-                    if (self::umbau_url($url)) { $fest++; } elseif (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', html_entity_decode($url))) { $kurz++; }
+                    if (self::umbau_url($url)) { $fest++; } elseif (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', html_entity_decode($url)) && !self::kurz_ok($url)) { $kurz++; }
                 }
             }
             $gesichert = get_post_meta((int) $r['ID'], '_sab_umbau_backup', true) !== '';
@@ -4477,6 +4480,28 @@ JS;
     private static function kurzlink_ziel_asin(string $kurz): string {
         $z = self::kurzlink_aufloesen($kurz);
         return preg_match('#/(?:product-reviews|dp|gp/product|gp/aw/d|review/[^/]*/[^/]*)/([A-Z0-9]{10})(?![A-Za-z0-9])#i', $z, $m) || preg_match('#[?&]asin=([A-Z0-9]{10})#i', $z, $m) ? strtoupper($m[1]) : '';
+    }
+
+    /** Hat Shogen diesen Kurzlink als „so lassen“ bestätigt? Dann zählt er nicht als Problem und der Umbau lässt ihn aus. */
+    public static function kurz_ok(string $url): bool {
+        $l = (array) get_option('sab_kurz_ok', []);
+        return $l && in_array(html_entity_decode(trim($url)), $l, true);
+    }
+
+    public static function kurz_ok_setzen(string $url, bool $ok): void {
+        $url = html_entity_decode(trim($url));
+        if (!preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $url)) { return; }
+        $l = array_values(array_diff((array) get_option('sab_kurz_ok', []), [$url]));
+        if ($ok) { $l[] = $url; }
+        update_option('sab_kurz_ok', array_slice($l, -500), false);
+    }
+
+    public static function ajax_kurz_ok(): void {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0);
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        self::kurz_ok_setzen((string) wp_unslash($_POST['kurz'] ?? ''), (string) ($_POST['ok'] ?? '1') === '1');
+        wp_send_json_success(['ok' => (string) ($_POST['ok'] ?? '1') === '1']);
     }
 
     /** Warum lässt sich ein Kurzlink nicht auf ein Produkt umbauen? Nutzt nur das, was schon im Zwischenspeicher steht oder jetzt (mit Abrufgrenze) aufgelöst wird. */
@@ -4497,10 +4522,11 @@ JS;
         $post = get_post($id); if (!$post) { return ''; }
         $c = preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', (string) $post->post_content);
         if (!preg_match_all('#<a\b[^>]*href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/[^"\']*)\1[^>]*>(.*?)</a>#is', $c, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { return ''; }
-        $h = ''; $gesehen = [];
+        $h = ''; $gesehen = []; $ok_liste = '';
         foreach ($m as $x) {
             $u = html_entity_decode($x[2][0]);
             if (isset($gesehen[$u]) || self::umbau_url($u, true)) { continue; }
+            if (self::kurz_ok($u)) { $gesehen[$u] = 1; $ok_liste .= '<li><code style="word-break:break-all">' . esc_html($u) . '</code> <form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="kurzlink_ok"><input type="hidden" name="sab_aus" value="1"><input type="hidden" name="sab_kurz" value="' . esc_attr($u) . '">' . $rueck . '<button class="button button-small">Wieder prüfen</button></form></li>'; continue; }
             $gesehen[$u] = 1;
             $vor = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', substr($c, max(0, $x[0][1] - 500), min(500, $x[0][1])))))));
             $vor = mb_strlen($vor) > 140 ? '… ' . mb_substr($vor, -140) : $vor;
@@ -4512,9 +4538,11 @@ JS;
                 . ($kenn !== '' ? '<a href="' . esc_url(add_query_arg('sab_zeige', $kenn, (string) get_permalink($id))) . '" target="_blank" rel="noopener">Stelle im Frontend ansehen</a> · <a href="' . esc_url(admin_url('post.php?post=' . $id . '&action=edit&sab_zeige=' . rawurlencode($kenn))) . '" target="_blank" rel="noopener">Im Editor bearbeiten</a>' : '') . '</div>'
                 . '<div style="margin:4px 0 0">' . self::kurzlink_suche_html($vor, $lt) . '</div>'
                 . '<form method="post" style="margin:4px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="kurzlink_setzen"><input type="hidden" name="sab_id" value="' . $id . '"><input type="hidden" name="sab_kurz" value="' . esc_attr($u) . '">' . $rueck
-                . '<input type="text" name="sab_asin" value="' . esc_attr(self::kurzlink_ziel_asin($u)) . '" placeholder="ASIN oder Amazon-Produktlink (mit /dp/…)" style="width:340px" required> <button class="button button-small button-primary">Diesen Kurzlink ersetzen</button></form></li>';
+                . '<input type="text" name="sab_asin" value="' . esc_attr(self::kurzlink_ziel_asin($u)) . '" placeholder="ASIN oder Amazon-Produktlink (mit /dp/…)" style="width:340px" required> <button class="button button-small button-primary">Diesen Kurzlink ersetzen</button></form>'
+                . '<form method="post" style="margin:4px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="kurzlink_ok"><input type="hidden" name="sab_kurz" value="' . esc_attr($u) . '">' . $rueck . '<button class="button button-small" title="Das Plugin merkt sich: Dieser Link ist gewollt, zählt nicht mehr als Problem und wird beim Umbau ausgelassen.">Ist okay, so lassen</button></form></li>';
         }
-        return $h === '' ? '' : '<div style="background:#fff8e5;border:1px solid #dba617;padding:6px 12px;margin:8px 0;max-width:900px"><strong>Kurzlinks, die das Plugin nicht lösen kann:</strong> Mit ASIN oder Amazon-Link ersetzen, danach lässt sich der Artikel umbauen.<ul style="margin:6px 0 0 16px">' . $h . '</ul></div>';
+        $ok_html = $ok_liste !== '' ? '<details style="margin:6px 0"><summary>Als „so lassen“ bestätigte Kurzlinks in diesem Artikel</summary><ul style="margin:6px 0 0 16px">' . $ok_liste . '</ul></details>' : '';
+        return $ok_html . ($h === '' ? '' : '<div style="background:#fff8e5;border:1px solid #dba617;padding:6px 12px;margin:8px 0;max-width:900px"><strong>Kurzlinks, die das Plugin nicht lösen kann:</strong> Mit ASIN oder Amazon-Link ersetzen, danach lässt sich der Artikel umbauen.<ul style="margin:6px 0 0 16px">' . $h . '</ul></div>');
     }
 
     /** Suchfeld + Knopf „Bei Amazon suchen“ (neuer Tab): Begriff aus dem Text direkt vor dem Kurzlink, sonst der Linktext; steht eine ASIN im Eingabefeld darunter, wird nach ihr gesucht. */
@@ -6523,6 +6551,9 @@ JS;
                 }
             } elseif ($form === 'kurzlink_setzen') {
                 $meldung = self::kurzlink_setzen((int) ($_POST['sab_id'] ?? 0), esc_url_raw(html_entity_decode((string) wp_unslash($_POST['sab_kurz'] ?? ''))), sanitize_text_field(wp_unslash($_POST['sab_asin'] ?? '')));
+            } elseif ($form === 'kurzlink_ok') {
+                self::kurz_ok_setzen(esc_url_raw(html_entity_decode((string) wp_unslash($_POST['sab_kurz'] ?? ''))), empty($_POST['sab_aus']));
+                $meldung = empty($_POST['sab_aus']) ? 'Gemerkt: Dieser Kurzlink bleibt so und zählt nicht mehr als Problem.' : 'Der Kurzlink wird wieder geprüft.';
             } elseif ($form === 'claude_empf') {
                 update_option('sab_claude_empf', sanitize_textarea_field(wp_unslash($_POST['sab_claude_empf'] ?? '')), false);
                 $meldung = 'Empfehlungen gespeichert.';
