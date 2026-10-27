@@ -1337,4 +1337,13 @@ ok(SAB::ebay_host('de') === 'www.ebay.de' && SAB::ebay_host('uk') !== '', 'eBay-
 $bt = '<p>[amz_bild asin="B0AKKUALT1"] <a href="https://www.amazon.de/dp/B0AKKUALT1">Angebot bei Amazon</a></p><p>Später <a href="https://www.amazon.de/dp/B0AKKUALT1"><img src="x/B0AKKUALT1.jpg"></a></p><p>Noch einmal mit Satz davor [amz_link asin="B0AKKUALT1"]Angebot[/amz_link] und Ende.</p>';
 ok(SAB::stellen_gruppen($bt, 'B0AKKUALT1') === [1, 3, 5], 'Stellen: Bild+Text nebeneinander zählen einmal, ein Link mit zwei Treffern auch (' . json_encode(SAB::stellen_gruppen($bt, 'B0AKKUALT1')) . ')');
 ok(SAB::stellen_gruppen('<p>A <a href="https://www.amazon.de/dp/B0AKKUALT1">x</a> und mitten drin Text <a href="https://www.amazon.de/dp/B0AKKUALT1">y</a></p>', 'B0AKKUALT1') === [1, 2], 'Stellen: Text dazwischen = zwei Stellen');
+// 0.88.0: Länder-Umschaltung im Browser
+if (!function_exists('is_feed')) { function is_feed() { return false; } }
+if (!function_exists('is_admin')) { function is_admin() { return false; } }
+$GLOBALS['opt']['sab_geo'] = '0'; ob_start(); SAB::geo_skript(); $g0 = ob_get_clean();
+$GLOBALS['opt']['sab_geo'] = '1'; $GLOBALS['opt']['sab_tags'] = "co.uk=uk-21\ncom=us-20\nca=ca-20"; ob_start(); SAB::geo_skript(); $g1 = ob_get_clean(); unset($GLOBALS['opt']['sab_geo'], $GLOBALS['opt']['sab_tags']);
+ok($g0 === '' && strpos($g1, '"com":"us-20"') !== false && strpos($g1, 'sabGeoRun') !== false, 'Länder-Umschaltung: aus = nichts, an = Skript mit Partner-IDs');
+$gj = tempnam(sys_get_temp_dir(), 'gj') . '.js'; file_put_contents($gj, "var window={},document={readyState:'x',addEventListener:function(){}},navigator={},URL=URL;\n" . preg_replace('#^<script>|</script>$#', '', trim($g1)) . "\nvar r=[window.sabGeoPick('Europe/London','de-DE'),window.sabGeoPick('America/Toronto','en-US'),window.sabGeoPick('Asia/Tokyo','en-GB'),window.sabGeoPick('Asia/Tokyo','ja-JP')];console.log(JSON.stringify(r));");
+exec('node ' . escapeshellarg($gj) . ' 2>&1', $gout, $grc);
+ok($grc === 0 && trim(implode('', $gout)) === '["co.uk","ca","co.uk",null]', 'Länder-Erkennung: Zeitzone vor Sprache, unbekannt = null (' . implode(' ', $gout) . ')');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

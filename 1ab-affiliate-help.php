@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.87.2
+ * Version: 0.88.0
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.87.2';
+    const VERSION = '0.88.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -100,6 +100,7 @@ final class SAB {
         add_filter('the_content',          [__CLASS__, 'ord_reset'], 9);
         add_filter('the_content',          [__CLASS__, 'attr_reparieren'], 8);
         add_action('wp_footer',            [__CLASS__, 'stellen_skript'], 97);
+        add_action('wp_footer',            [__CLASS__, 'geo_skript'], 98);
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
         add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
@@ -1318,7 +1319,9 @@ final class SAB {
         self::$genutzt = true;
         self::$links++;
         // data-Attribute: die Mini-Statistik kann Klicks damit dem Produkt und der Ersatzliste zuordnen
-        return ' data-sab-asin="' . esc_attr($asin) . '"' . ($slot ? ' data-sab-slot="' . esc_attr($slot) . '"' : '') . ($var ? ' data-sab-var="' . esc_attr($var) . '"' : '')
+        $gt = '';
+        if (get_option('sab_geo') === '1') { $nm = (string) (self::produkte()[$asin] ?? ''); if ($nm === '') { $pp = self::produkt($asin, self::land('')); $nm = (string) ($pp['titel'] ?? ''); } $gt = $nm !== '' ? ' data-sab-t="' . esc_attr(mb_substr(trim(preg_replace('/\s*\|\s*/u', ' ', $nm)), 0, 80)) . '"' : ''; }   // Suchbegriff für die Länder-Umschaltung
+        return ' data-sab-asin="' . esc_attr($asin) . '"' . $gt . ($slot ? ' data-sab-slot="' . esc_attr($slot) . '"' : '') . ($var ? ' data-sab-var="' . esc_attr($var) . '"' : '')
              . ' target="_blank" rel="nofollow sponsored noopener"';
     }
 
@@ -1719,6 +1722,56 @@ final class SAB {
         if (!in_array($tag, self::ORD_TAGS, true) || !self::$ord_stack) { return $out; }
         $n = array_pop(self::$ord_stack);
         return str_replace('data-sab-asin="', 'data-sab-ord="' . (int) $n . '" data-sab-asin="', (string) $out);
+    }
+
+    // ---------- Besucherland im Browser erkennen (Zeitzone + Browsersprache, keine IP, kein Cookie, keine Übertragung) ----------
+
+    /** Vorgabe-IDs für Slughelp (aus dem bisherigen Seiten-Skript); auf anderen Seiten leer, dort zählen nur die eigenen Partner-IDs. */
+    private static function geo_ids(): array {
+        $vor = [];
+        if (function_exists('home_url') && stripos((string) home_url(), 'slughelp') !== false) {
+            $vor = ['co.uk' => 'schnectest08-21', 'com' => 'sh04a0-20', 'ca' => 'sh09cc-20', 'com.au' => 'slughelp00-22', 'de' => 'schnectest-21', 'fr' => 'schnectest03-21', 'it' => 'happy0be-21', 'es' => 'babosa-21'];
+        }
+        $out = [];
+        foreach (array_merge($vor, self::tags()) as $l => $t) { if (preg_match('/^(co\.uk|com\.au|com|ca|de|fr|it|es)$/', (string) $l) && preg_match('/^[A-Za-z0-9\-]{3,40}$/', (string) $t)) { $out[(string) $l] = (string) $t; } }
+        return $out;
+    }
+
+    public static function geo_skript(): void {
+        if (get_option('sab_geo') !== '1' || (function_exists('is_admin') && is_admin()) || (function_exists('is_feed') && is_feed())) { return; }
+        $ids = self::geo_ids(); if (count($ids) < 2) { return; }
+        $js = <<<'JS'
+(function(){try{
+var T=__T__;
+function pick(tz,lang){var r=(String(lang||'').split('-')[1]||'').toUpperCase();
+if(/^(Australia\/|Pacific\/Auckland)/.test(tz))return 'com.au';
+if(/^America\/(Toronto|Vancouver|Edmonton|Winnipeg|Halifax|St_Johns|Regina|Montreal|Moncton|Glace_Bay|Iqaluit|Whitehorse|Yellowknife|Cambridge_Bay|Rankin_Inlet|Resolute|Thunder_Bay|Nipigon|Dawson|Dawson_Creek|Fort_Nelson|Creston|Swift_Current|Goose_Bay|Atikokan|Blanc-Sablon|Inuvik|Pangnirtung|Rainy_River)$/.test(tz))return 'ca';
+if(/^(America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Detroit|Boise|Juneau|Sitka|Nome|Adak|Menominee|Yakutat|Metlakatla|Indiana\/.*|Kentucky\/.*|North_Dakota\/.*)|Pacific\/Honolulu)$/.test(tz))return 'com';
+if(/^America\//.test(tz))return 'com';
+if(/^Europe\/(London|Belfast|Dublin|Jersey|Guernsey|Isle_of_Man)$/.test(tz))return 'co.uk';
+if(/^Europe\/(Berlin|Vienna|Zurich|Busingen)$/.test(tz))return 'de';
+if(/^Europe\/Paris$/.test(tz))return 'fr';
+if(/^Europe\/Rome$/.test(tz))return 'it';
+if(/^(Europe\/Madrid|Atlantic\/Canary)$/.test(tz))return 'es';
+var m={US:'com',CA:'ca',AU:'com.au',NZ:'com.au',GB:'co.uk',IE:'co.uk',DE:'de',AT:'de',CH:'de',FR:'fr',IT:'it',ES:'es',MX:'com',BR:'com',AR:'com',CL:'com',CO:'com',PE:'com',VE:'com',EC:'com',UY:'com',PY:'com',BO:'com',CR:'com',PA:'com',GT:'com',DO:'com'};
+return m[r]||null}
+function run(tz,lang){var w=pick(tz,lang);if(!w||!T[w])return 0;var n=0,all=document.querySelectorAll('a[href*="amazon."]');
+for(var i=0;i<all.length;i++){var a=all[i],u;try{u=new URL(a.href)}catch(e){continue}
+var h=u.hostname.match(/(?:^|\.)amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)$/);if(!h||h[1]===w)continue;
+var tag=u.searchParams.get('tag'),ok=false;for(var k in T){if(T[k]===tag)ok=true}if(!ok)continue;
+var t=a.getAttribute('data-sab-t')||a.getAttribute('data-aawp-product-title')||a.getAttribute('title')||'';
+if(!t){t=(u.pathname.split('/')[1]||'').replace(/-/g,' ')}
+t=t.replace(/[^\wÀ-ɏ ]+/g,' ').replace(/\s+/g,' ').trim().split(' ').slice(0,8).join(' ');if(!t)continue;
+a.href='https://www.amazon.'+w+'/s?k='+encodeURIComponent(t)+'&tag='+T[w];
+if(a.hasAttribute('data-aawp-tracking-id'))a.setAttribute('data-aawp-tracking-id',T[w]);n++}
+return n}
+window.sabGeoPick=pick;window.sabGeoRun=run;
+function go(){try{var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}
+var l=(navigator.languages&&navigator.languages[0])||navigator.language||'';run(tz,l)}catch(e){}}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);else go();
+}catch(e){}})();
+JS;
+        echo '<script>' . str_replace('__T__', wp_json_encode($ids), $js) . '</script>';
     }
 
     /** Alle gezählten Platzhalter eines Artikeltexts in der Reihenfolge, in der WordPress sie ausführt. @return array<int,array{0:string,1:int}> [Text, Position] */
@@ -5853,6 +5906,7 @@ JS;
                 update_option('sab_tags_extra', sanitize_textarea_field(wp_unslash($_POST['sab_tags_extra'] ?? '')), false);
                 update_option('sab_ebay_ids', sanitize_textarea_field(wp_unslash($_POST['sab_ebay_ids'] ?? '')), false);
                 update_option('sab_default_land', sanitize_key(wp_unslash($_POST['sab_default_land'] ?? 'de')), false);
+                update_option('sab_geo', !empty($_POST['sab_geo']) ? '1' : '0', false);
                 update_option('sab_hinweis_auto', !empty($_POST['sab_hinweis_auto']) ? '1' : '0', false);
                 update_option('sab_karten_css', !empty($_POST['sab_karten_css']) ? '1' : '0', false);
                 update_option('sab_weg_umbauen', !empty($_POST['sab_weg_umbauen']) ? '1' : '0', false);
@@ -6220,6 +6274,7 @@ JS;
                . (get_option('sab_client_secret') ? 'gespeichert, leer lassen = unverändert' : '') . '"></td></tr>'
                . '<tr><th>Partner-IDs</th><td><textarea name="sab_tags" rows="3" class="regular-text code">' . esc_textarea((string) get_option('sab_tags', ''))
                . '</textarea><p class="description">Pro Zeile: <code>land=partner-id</code>, zum Beispiel <code>es=ayuba09-21</code></p></td></tr>'
+               . '<tr><th>Länder-Umschaltung</th><td><label><input type="checkbox" name="sab_geo" value="1"' . (get_option('sab_geo') === '1' ? ' checked' : '') . '> Amazon-Links für Besucher aus anderen Ländern auf deren Amazon-Shop (Suche nach dem Produktnamen) umstellen</label><p class="description">Erkennung nur im Browser aus Zeitzone und Browsersprache: keine IP, kein Cookie, nichts wird übertragen. Wirkt nur mit je einer Partner-ID pro Land (oben, Zeile <code>ca=…</code>, <code>com.au=…</code>); auf Slughelp sind die bisherigen IDs vorbelegt. Fehlt etwas, bleibt der normale Link.</p></td></tr>'
                . '<tr><th>Weitere Partner-IDs</th><td><textarea name="sab_tags_extra" rows="3" class="regular-text code">' . esc_textarea((string) get_option('sab_tags_extra', ''))
                . '</textarea><p class="description">Eine ID pro Zeile, zum Beispiel <code>cpflanzhilfe-21</code> (optional mit Notiz dahinter). Nur diese IDs darf ein Platzhalter mit <code>tag="…"</code> oder <code>tracking_id="…"</code> statt der Standard-ID benutzen. Der Umbau übernimmt sie so.</p></td></tr>'
                . '<tr><th>eBay-Kampagnen-IDs</th><td><textarea name="sab_ebay_ids" rows="3" class="regular-text code">' . esc_textarea((string) get_option('sab_ebay_ids', ''))
