@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.10
+ * Version: 0.88.11
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.10';
+    const VERSION = '0.88.11';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1856,11 +1856,14 @@ JS;
             return trim(implode(' ', array_slice(preg_split('/\s+/u', $t), 0, 10)), " :–-|");
         };
         $blk = '#</?(?:p|h[1-6]|div|li|td|th|tr|br|figure|figcaption|ul|ol|table)\b[^>]*>#i';
+        $zelle = '#</?(?:td|th|tr|table|tbody|thead)\b[^>]*>|<!--\s*/?wp:(?:column|columns|table)\b#i';   // Zellen-/Spaltengrenzen: Titel anderer Zellen zählen nie
         $kopf = substr($c, max(0, $pos - 700), min(700, $pos)); $nach = substr($c, $pos + $len, 700);
-        $td_offen = (strripos(substr($c, 0, $pos), '<td') !== false) && (strripos(substr($c, 0, $pos), '<td') > (int) strripos(substr($c, 0, $pos), '</td>'));
+        $in_zelle = false;
+        if (preg_match_all($zelle, $kopf, $zm, PREG_OFFSET_CAPTURE)) { $l_ = end($zm[0]); $kopf = substr($kopf, $l_[1] + strlen($l_[0])); $in_zelle = !preg_match('#^</(?:td|th|tr|table)#i', $l_[0]) || false; if (preg_match('#^<(?:td|th)\b#i', $l_[0]) || preg_match('#wp:column#i', $l_[0])) { $in_zelle = true; } }
+        if (preg_match($zelle, $nach, $zn, PREG_OFFSET_CAPTURE)) { $nach = substr($nach, 0, $zn[0][1]); }
         $vor = array_reverse(preg_split($blk, $kopf)); $dahinter = preg_split($blk, $nach);
-        $reihen = $td_offen ? [$dahinter, $vor] : [$vor, $dahinter];   // Tabellenzelle: Titel nach dem Bild; sonst davor
-        foreach ($reihen as $liste) { foreach (array_slice($liste, 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } if (preg_match('/<a\b|\[amz_/i', (string) $teil) && trim(strip_tags(preg_replace('/\[[^\]]*\]/', '', (string) $teil))) === '') { continue; } } }
+        $reihen = $in_zelle ? [$dahinter] : [$vor, $dahinter];   // Tabellen-/Spaltenzelle: Titel steht nach dem Bild; nur bei Einzelprodukten davor
+        foreach ($reihen as $liste) { foreach (array_slice($liste, 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } } }
         return '';
     }
 

@@ -1380,4 +1380,9 @@ $e3 = '<p>Text davor.</p><p>[amz_bild asin="B0LICHT003"]</p>';
 ok(SAB::titel_an_stelle($e1, $p1, 28) === 'Lichtwecker mit Sonnenaufgang' && SAB::titel_an_stelle($e2, $p2, 28) === 'Wake-up Light Pro 2' && SAB::titel_an_stelle($e3, strpos($e3, '[amz_bild'), 28) === 'Text davor.', 'Titel an der Stelle: Einzelbox davor, Tabellenzelle danach');
 // 0.88.8: Amazon-Link statt ASIN einfügen
 ok(SAB::asin_aus_text('https://www.amazon.de/Lichtwecker-Sonnenaufgang/dp/B0CX1ABCDE/ref=sr_1_3?crid=1&tag=x') === 'B0CX1ABCDE' && SAB::asin_aus_text('https://www.amazon.co.uk/gp/product/b0cx1abcde?th=1') === 'B0CX1ABCDE' && SAB::asin_aus_text(' b0cx1abcde ') === 'B0CX1ABCDE' && strlen(SAB::asin_aus_text('https://amzn.to/3abcdef')) !== 10 && strlen(SAB::asin_aus_text('quatsch')) !== 10, 'ASIN aus Amazon-Link, nackter ASIN; Kurzlink und Unsinn werden abgelehnt');
+// 0.88.11: Zweier-Tabelle: nie der Titel aus der Nachbarzelle
+$e4 = '<table><tr><td><h4>Erstes Produkt</h4>[amz_bild asin="B0A"]<br>Titel Erstes</td><td>[amz_bild asin="B0B"]</td></tr></table>'; $p4 = strpos($e4, '[amz_bild asin="B0B"');
+ok(SAB::titel_an_stelle($e4, $p4, 21) === '', 'Zweier-Tabelle: Zelle ohne eigenen Titel liefert keinen Titel der Nachbarzelle');
+$e5 = '<table><tr><td>[amz_bild asin="B0A"]<br>Titel Erstes</td><td>[amz_bild asin="B0B"]<br>Titel Zweites</td></tr></table>';
+ok(SAB::titel_an_stelle($e5, strpos($e5, '[amz_bild asin="B0B"'), 21) === 'Titel Zweites' && SAB::titel_an_stelle($e5, strpos($e5, '[amz_bild asin="B0A"'), 21) === 'Titel Erstes', 'Zweier-Tabelle: Titel steht unter dem Bild der eigenen Zelle');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
