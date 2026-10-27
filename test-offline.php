@@ -1617,4 +1617,10 @@ ok(strpos($o3, 'Mein%20Zaun%20Set') !== false || strpos($o3, 'Zaun%20Akku') !== 
 $gjs = new ReflectionMethod('SAB', 'geo_skript'); 
 $srcf = file_get_contents(__DIR__ . '/schlanke-amazon-box.php');
 ok(strpos($srcf, "u.pathname.split('/')[1]||'').replace(/-/g,' ')}\n") === false && strpos($srcf, "(dp|gp|product|s|exec|d|o|ref|stores|hz|b)") !== false, 'Geo-Skript: Pfadteil „dp“ wird nie Suchbegriff');
+// 0.89.33: alle_asins erfasst auch [amz_karte]/[amz_titel] und einfache Anführungszeichen
+$wpdb_vor = $GLOBALS['wpdb'];
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; public function get_col($q) { return ['[amz_karten][amz_karte asin="B0KARTE001" titel="X"][amz_karte asin=\'B0KARTE002\']</amz_karten] [amz_titel asin="B0TITEL001"] [amz_bild asin="B0BILD0001"][/amz_bild]']; } };
+delete_transient("sab_alle_asins"); $rm33 = new ReflectionMethod("SAB", "alle_asins"); $rm33->setAccessible(true); $al33 = $rm33->invoke(null);
+ok(in_array('B0KARTE001', $al33, true) && in_array('B0KARTE002', $al33, true) && in_array('B0TITEL001', $al33, true) && in_array('B0BILD0001', $al33, true), 'Alle ASINs der Seite: Karten, Titel, Bild, einfache Anführungszeichen');
+$GLOBALS['wpdb'] = $wpdb_vor; delete_transient('sab_alle_asins');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
