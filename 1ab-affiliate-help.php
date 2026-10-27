@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.9
+ * Version: 0.88.10
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.9';
+    const VERSION = '0.88.10';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1884,6 +1884,10 @@ JS;
         [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin] = self::stelle_pruefen();
         $neu = self::asin_aus_text((string) wp_unslash($_POST['neu'] ?? ''));
         if (strlen($neu) !== 10 || $neu === $asin) { wp_send_json_error('Bitte eine gültige, andere ASIN oder einen Amazon-Produktlink (mit /dp/…) angeben. Kurzlinks wie amzn.to enthalten keine ASIN.'); }
+        $ld_ = self::land(''); $pn_ = self::produkt($neu, $ld_, true, true);   // neues Produkt sofort bei Amazon holen: ohne Bild und Daten wird nicht getauscht, sonst steht dort nur „Bild fehlt“
+        if (!self::hat_bild($pn_)) { wp_send_json_error('Amazon liefert zu ' . $neu . ' gerade kein Bild oder keine Daten. Nicht getauscht. Bitte Link prüfen oder in ein paar Minuten noch einmal versuchen.'); }
+        self::bild_url($pn_, $neu, $ld_, 0, true);
+        $bf_ = (array) get_option('sab_bildfehler', []); foreach (array_keys($bf_) as $k_) { if (strpos((string) $k_, $neu . '|') === 0) { unset($bf_[$k_]); } } update_option('sab_bildfehler', $bf_, false);
         $namen = self::produkte(); $neuer = (string) ($namen[$neu] ?? '');
         $alte = array_filter([(string) ($namen[$asin] ?? ''), (string) ($namen[$quelle] ?? '')]);
         // gleiche Tabellenzelle: alle zählenden Platzhalter desselben Produkts mitnehmen (Bild, Titel, Link)
@@ -2070,6 +2074,7 @@ JS;
         $nr = max(1, (int) ($_GET['sab_nr'] ?? 1));
         $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch')]) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
         echo '<script>(function(){var KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
+           . 's=(function(l){var o=[],bk="p,div,td,li,figure,h1,h2,h3,h4,h5,h6,section",last=null;for(var i=0;i<l.length;i++){var b=l[i].closest(bk)||l[i].parentNode;if(last&&b===last){continue}last=b;o.push(l[i])}return o})(Array.prototype.slice.call(s));'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:10px 16px;font:600 15px sans-serif;text-align:center";'
            . 'var t=document.createElement("span");b.appendChild(t);document.body.appendChild(b);'
            . 'function btn(x,f){var e=document.createElement("a");e.textContent=x;e.href="#";e.style.cssText="margin-left:12px;background:#fff;color:#d63638;padding:4px 10px;border-radius:4px;text-decoration:none";e.onclick=function(ev){ev.preventDefault();f(e)};b.appendChild(e);return e}'
