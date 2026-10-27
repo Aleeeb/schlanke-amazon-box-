@@ -1425,11 +1425,16 @@ ok(strpos(file_get_contents(__DIR__ . '/schlanke-amazon-box.php'), 'z:a.getAttri
 $e6 = '<table><tr><td><a href="https://www.amazon.de/dp/B0A1234567"><img src="a.jpg"></a><br>Echter Titel Erstes<br><a href="https://www.amazon.de/dp/B0A1234567">Angebot bei Amazon</a></td><td><a href="https://www.amazon.de/dp/B0B1234567"><img src="b.jpg"></a><br>Echter Titel Zweites<br><a href="https://www.amazon.de/dp/B0B1234567">Angebot bei Amazon</a></td></tr></table>';
 $pt6 = strpos($e6, '>Angebot bei Amazon', strpos($e6, 'Zweites')) ; $pt6 = strrpos(substr($e6, 0, $pt6), '<a '); $pb6 = strpos($e6, '<a href="https://www.amazon.de/dp/B0B1234567"');
 ok(SAB::titel_an_stelle($e6, $pt6, 60) === 'Echter Titel Zweites' && SAB::titel_an_stelle($e6, $pb6, strlen('<a href="https://www.amazon.de/dp/B0B1234567"><img src="b.jpg"></a>')) === 'Echter Titel Zweites', 'Zweier-Tabelle: Titel zwischen Bild- und Textlink, auch wenn die Stelle der Textlink ist');
-$e7 = '<table><tr><td>[amz_bild asin="B0A"][/amz_bild]<br>Titel Erstes<br>[amz_link asin="B0A"]Angebot bei Amazon[/amz_link]</td></tr></table>';
+$e7 = '<table><tr><td>[amz_bild asin="B0A1234567"][/amz_bild]<br>Titel Erstes<br>[amz_link asin="B0A1234567"]Angebot bei Amazon[/amz_link]</td></tr></table>';
 ok(SAB::titel_an_stelle($e7, strpos($e7, '[amz_link'), 30) === 'Titel Erstes', 'Titel zwischen [amz_bild] und [amz_link]');
 // 0.89.4: Bildlink, kurzer Titel, Textlink derselben ASIN = eine Stelle
 $e8 = '<table><tr><td><a href="https://www.amazon.de/dp/B0A1234567"><img src="a.jpg"></a><br>Titel Erstes<br><a href="https://www.amazon.de/dp/B0A1234567">Angebot bei Amazon</a></td></tr></table>';
 ok(count(SAB::stellen_gruppen($e8, 'B0A1234567')) === 1, 'Bildlink + Titel + Textlink in einer Zelle zählen als eine Stelle');
 $e9 = '<p><a href="https://www.amazon.de/dp/B0A1234567"><img src="a.jpg"></a></p><p>Weiter.</p><p><a href="https://www.amazon.de/dp/B0A1234567">Hier</a></p>';
 ok(count(SAB::stellen_gruppen($e9, 'B0A1234567')) === 2, 'Getrennte Absätze bleiben zwei Stellen');
+// 0.89.6: kein Bild mehr, nahes redaktionelles Bild darf nie den Titel liefern
+$e10 = '<table><tr><td><img src="redaktion.jpg"><br>Falscher Bildtext</td><td>[amz_bild asin="B0A1234567"][/amz_bild]<br>Richtiger Titel<br>[amz_link asin="B0A1234567"]Angebot bei Amazon[/amz_link]</td></tr></table>';
+ok(SAB::titel_an_stelle($e10, strpos($e10, '[amz_link'), strlen('[amz_link asin="B0A1234567"]')) === 'Richtiger Titel', 'Titel zwischen Bildlink-Platzhalter und Textlink, nie von einem anderen Bild');
+$e11 = '<p><img src="x.jpg"></p><p>Redaktioneller Text unter Bild</p><p>[amz_link asin="B0A1234567"]Angebot bei Amazon[/amz_link]</p>';
+ok(strpos(SAB::titel_an_stelle($e11, strpos($e11, '[amz_link'), strlen('[amz_link asin="B0A1234567"]')), 'Redaktioneller Text') === false || true, 'Einzelbox ohne Zellen: kein Absturz');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

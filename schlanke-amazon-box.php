@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.5
+ * Version: 0.89.6
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.5';
+    const VERSION = '0.89.6';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1875,10 +1875,12 @@ JS;
         $in_zelle = false;
         if (preg_match_all($zelle, $kopf, $zm, PREG_OFFSET_CAPTURE)) { $l_ = end($zm[0]); $kopf = substr($kopf, $l_[1] + strlen($l_[0])); $in_zelle = !preg_match('#^</(?:td|th|tr|table)#i', $l_[0]) || false; if (preg_match('#^<(?:td|th)\b#i', $l_[0]) || preg_match('#wp:column#i', $l_[0])) { $in_zelle = true; } }
         if (preg_match($zelle, $nach, $zn, PREG_OFFSET_CAPTURE)) { $nach = substr($nach, 0, $zn[0][1]); }
-        // Steht die Stelle hinter einem Bildlink (z. B. Textlink unter dem Bild), gilt zuerst der Text zwischen Bildlink und dieser Stelle (Zweier-Tabelle: Titel zwischen Bild- und Textlink)
-        if (preg_match_all('#\[/amz_bild\]|<a\b[^>]*>\s*<img\b[^>]*>\s*</a>|<img\b[^>]*>#i', $kopf, $im, PREG_OFFSET_CAPTURE)) {
-            $l_ = end($im[0]);
-            foreach (array_slice(preg_split($blk, substr($kopf, $l_[1] + strlen($l_[0]))), 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } }
+        // Steht vor der Stelle ein Link/Platzhalter desselben Produkts (Bild- oder Produktlink, auch wenn Amazon kein Bild mehr liefert), gilt zuerst der Text dazwischen (Zweier-Tabelle: Titel zwischen Bild- und Textlink). Andere Bilder in der Nähe zählen nie.
+        if (preg_match('/\b([A-Z0-9]{10})\b/', substr($c, $pos, $len), $am)) {
+            $as = preg_quote($am[1], '#'); $ende = -1;
+            if (preg_match_all('#<a\b[^>]*' . $as . '[^>]*>.*?</a>#is', $kopf, $m1, PREG_OFFSET_CAPTURE)) { $l_ = end($m1[0]); $ende = max($ende, $l_[1] + strlen($l_[0])); }
+            if (preg_match_all('#\[amz_[a-z]+\b[^\]]*' . $as . '[^\]]*\](?:(?:(?!\[amz_).){0,600}?\[/amz_[a-z]+\])?#is', $kopf, $m2, PREG_OFFSET_CAPTURE)) { $l_ = end($m2[0]); $ende = max($ende, $l_[1] + strlen($l_[0])); }
+            if ($ende >= 0) { foreach (array_slice(preg_split($blk, substr($kopf, $ende)), 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } } }
         }
         $vor = array_reverse(preg_split($blk, $kopf)); $dahinter = preg_split($blk, $nach);
         $reihen = $in_zelle ? [$dahinter] : [$vor, $dahinter];   // Tabellen-/Spaltenzelle: Titel steht nach dem Bild; nur bei Einzelprodukten davor
@@ -5410,7 +5412,7 @@ JS;
         if (self::$tk_warte) {
             $h .= '<h3 style="margin-top:2em">Wartet auf Amazon-Suche (' . count(self::$tk_warte) . ')</h3><p class="description">Für diese Produkte gibt es noch keinen einzigen Kandidaten. Sie stehen im Suchauftrag unten; sobald die Treffer eingetragen sind, erscheinen sie oben als Karte.</p><ul>';
             foreach (self::$tk_warte as $z) { $h .= '<li><code>' . esc_html($z['alt']) . '</code> ' . esc_html($z['name'] !== '' ? $z['name'] : 'Name unbekannt') . ' <small>(' . esc_html($z['grund']) . '; ' . (int) $z['seiten'] . ' Seite' . ($z['seiten'] === 1 ? '' : 'n') . ')</small>' . (!empty($z['aus']) ? ' <small style="color:#8a5a00">· ' . count($z['aus']) . ' Kandidaten aussortiert' . (!empty($z['aus'][0]['grund']) ? ' (' . esc_html($z['aus'][0]['grund']) . ')' : ' (passen nicht zum Satz/Produkt)') . ', z. B. ' . esc_html(mb_substr((string) $z['aus'][0]['titel'], 0, 50)) . '</small>' : '') . ' <a href="' . esc_url(self::such_link(self::suchtext_aus_satz((string) $z['name'], (string) $z['alt'], self::text_vor_stelle((string) $z['alt'], (array) $z['f'])))) . '" target="_blank" rel="noopener">bei Amazon suchen ↗</a>';
-                $nr = 0; foreach ((array) $z['f'] as $pid => $f) { if (++$nr > 3) { break; } $h .= ' · <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $z['alt'])) . '" target="_blank" rel="noopener">' . esc_html($f['titel'] ?: ('Beitrag ' . $pid)) . '</a>'; }
+                $nr = 0; foreach ((array) $z['f'] as $pid => $f) { if (++$nr > 3) { break; } $h .= ' · <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $z['alt'])) . '" target="_blank" rel="noopener">' . esc_html($f['titel'] ?: ('Beitrag ' . $pid)) . '</a>' . ' (<a href="' . esc_url(add_query_arg('sab_zeige', $z['alt'], (string) get_permalink((int) $pid))) . '" target="_blank" rel="noopener"><strong>im Frontend tauschen</strong></a>)'; }
                 $h .= '</li>'; }
             $h .= '</ul>';
         }
@@ -5418,7 +5420,7 @@ JS;
             $h .= '<h3 style="margin-top:2em;color:#8a1f1f">Tierschädlich, Entscheidung nötig: ersetzen, löschen oder lassen (' . count(self::$tk_toet) . ')</h3><p class="description">Diese Produkte können Tiere töten oder verletzen. Sie werden nie automatisch ersetzt oder vorgeschlagen; du entscheidest je Produkt.</p><ul>';
             foreach (self::$tk_toet as $z) {
                 $li = ''; $nr = 0;
-                foreach ((array) $z['f'] as $pid => $f) { if (++$nr > 6) { break; } $li .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $z['alt'])) . '" target="_blank" rel="noopener">' . esc_html($f['titel'] ?: ('Beitrag ' . $pid)) . '</a>'; }
+                foreach ((array) $z['f'] as $pid => $f) { if (++$nr > 6) { break; } $li .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $z['alt'])) . '" target="_blank" rel="noopener">' . esc_html($f['titel'] ?: ('Beitrag ' . $pid)) . '</a>' . ' (<a href="' . esc_url(add_query_arg('sab_zeige', $z['alt'], (string) get_permalink((int) $pid))) . '" target="_blank" rel="noopener"><strong>im Frontend tauschen</strong></a>)'; }
                 $h .= '<li><code>' . esc_html($z['alt']) . '</code> ' . esc_html($z['name'] !== '' ? $z['name'] : 'Name unbekannt') . ' <small>(' . esc_html($z['grund']) . ')</small><br><small>Artikel:' . $li . '</small></li>';
             }
             $h .= '</ul>';
