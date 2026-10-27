@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.8
+ * Version: 0.88.9
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.8';
+    const VERSION = '0.88.9';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -105,6 +105,7 @@ final class SAB {
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
         add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
+        add_action('wp_ajax_sab_stelle_ok',      [__CLASS__, 'ajax_stelle_ok']);
         add_action('wp_footer',      [__CLASS__, 'fuss'], 5);
         add_filter('pre_set_site_transient_update_plugins', [__CLASS__, 'update_pruefen']);
         add_action('sab_update_check', [__CLASS__, 'update_cron']);
@@ -1908,6 +1909,22 @@ JS;
         wp_send_json_success(['n' => $n, 'nr' => substr_count(substr($c2, 0, $von), $neu) + 1, 'neu' => $neu]);
     }
 
+    /** Kontrolleinträge einer Frontend-Tausch-Stelle (Artikel + neue ASIN) in der Kontrollliste. @return string[] Schlüssel */
+    private static function kontrolle_stellen_ids(int $pid, string $neu): array {
+        $out = [];
+        foreach ((array) get_option('sab_kontrolle', []) as $id => $e) { if (($e['art'] ?? '') === 'stelle' && (int) ($e['pid'] ?? 0) === $pid && (string) ($e['neu'] ?? '') === $neu) { $out[] = (string) $id; } }
+        return $out;
+    }
+
+    public static function ajax_stelle_ok(): void {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0); $neu = self::asin((string) ($_POST['neu'] ?? ''));
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $kk = (array) get_option('sab_kontrolle', []); foreach (self::kontrolle_stellen_ids($pid, $neu) as $id) { unset($kk[$id]); }
+        update_option('sab_kontrolle', $kk, false);
+        wp_send_json_success(['weiter' => admin_url('admin.php?page=sab-austausch')]);
+    }
+
     public static function ajax_stelle_zurueck(): void {
         check_ajax_referer('sab_stelle', 'n');
         $pid = (int) ($_POST['post'] ?? 0);
@@ -1918,7 +1935,8 @@ JS;
         if (md5((string) $post->post_content) !== ($l['hash'] ?? '')) { wp_send_json_error('Der Artikel wurde seitdem geändert; Rückgängig ist zu riskant. Bitte über „Bearbeiten“ prüfen.'); }
         wp_update_post(['ID' => $pid, 'post_content' => wp_slash((string) $l['vorher'])]);
         array_pop($b); update_post_meta($pid, '_sab_stelle_backup', wp_slash($b));
-        wp_send_json_success(['alt' => $l['alt'] ?? '', 'neu' => $l['neu'] ?? '']);
+        $kk = (array) get_option('sab_kontrolle', []); foreach (self::kontrolle_stellen_ids($pid, (string) ($l['neu'] ?? '')) as $id) { unset($kk[$id]); } update_option('sab_kontrolle', $kk, false);
+        wp_send_json_success(['alt' => $l['alt'] ?? '', 'neu' => $l['neu'] ?? '', 'weiter' => admin_url('admin.php?page=sab-austausch')]);
     }
 
     public static function stellen_skript(): void {
@@ -2050,7 +2068,8 @@ JS;
         $eid = function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0;
         $ed = $eid && current_user_can('edit_post', $eid) ? admin_url('post.php?post=' . $eid . '&action=edit&sab_zeige=' . rawurlencode($a)) : '';
         $nr = max(1, (int) ($_GET['sab_nr'] ?? 1));
-        echo '<script>(function(){var ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
+        $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch')]) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
+        echo '<script>(function(){var KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:10px 16px;font:600 15px sans-serif;text-align:center";'
            . 'var t=document.createElement("span");b.appendChild(t);document.body.appendChild(b);'
            . 'function btn(x,f){var e=document.createElement("a");e.textContent=x;e.href="#";e.style.cssText="margin-left:12px;background:#fff;color:#d63638;padding:4px 10px;border-radius:4px;text-decoration:none";e.onclick=function(ev){ev.preventDefault();f(e)};b.appendChild(e);return e}'
@@ -2061,6 +2080,8 @@ JS;
            . 'for(var i=0;i<s.length;i++){s[i].style.outlineColor=i===idx?"#000":"#d63638"}s[idx].scrollIntoView({block:"center"});if(le){le.href=ed+"&sab_nr="+(idx+1)}}'
            . 'if(s.length>1){btn("◀ vorige",function(){zeige(idx-1)});btn("nächste ▶",function(){zeige(idx+1)})}'
            . 'btn("⇄ Hier tauschen",function(){var o=s[idx].closest("[data-sab-ord]"),q=o?document.querySelector("button.sab-tb[data-o=\""+o.getAttribute("data-sab-ord")+"\"]"):null;if(!q){var bx=s[idx].closest(".sab-karte,.sab-produkt,td")||s[idx].parentNode;q=bx&&bx.querySelector("button.sab-tb")}if(q){q.scrollIntoView({block:"center"});q.click()}else{t.textContent="Hier gibt es keinen Tauschen-Knopf (feste Stelle im Text): bitte im Editor bearbeiten."}});'
+           . 'function kpost(act,f){var fd=new FormData();fd.append("action",act);fd.append("n",KC.n);fd.append("post",KC.p);fd.append("neu",KC.a);fetch(KC.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){t.textContent="Verbindungsfehler"})}'
+           . 'if(KC){var ok=btn("✓ Kontrolliert, passt",function(){kpost("sab_stelle_ok",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});ok.style.fontWeight="700";btn("✗ Passt nicht, rückgängig",function(){kpost("sab_stelle_zurueck",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})})}'
            . 'if(ed){le=btn("Im Editor bearbeiten",function(e){window.open(e.href,"_blank")});le.href=ed+"&sab_nr="+(idx+1);le.target="_blank";le.onclick=null}'
            . 'var x=btn("×",function(){b.remove()});setTimeout(function(){zeige(idx)},300)})();</script>';
     }
