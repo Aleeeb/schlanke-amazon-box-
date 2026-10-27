@@ -1448,4 +1448,11 @@ $rm = new ReflectionMethod('SAB', 'kontrolle_stellen_ids'); $rm->setAccessible(t
 $rt = new ReflectionMethod('SAB', 'kontrolle_tab_id'); $rt->setAccessible(true);
 ok($rm->invoke(null, 77, 'B0NEU00001') === ['k1'] && $rm->invoke(null, 78, 'B0NEU00001') === [] && $rt->invoke(null, 77, 'B0NEU00001') === 'k1', 'Kontrolle an der Stelle auch nach Tausch aus dem Reiter');
 unset($GLOBALS['opt']['sab_kontrolle']);
+// 0.89.10: Produkt weg, Zweiertabelle: Titel zwischen ehemaligem Bildlink und Textlink, nie nach dem eBay-Link oder unter der Tabelle
+$pad = str_repeat(' style="padding:0;margin:0;border:1px solid #ddd;background:#fff"', 8);
+$e14 = '<table><tr><td' . $pad . '>[amz_bild asin="B0A1234567"][/amz_bild]<br>Richtiger Titel Erstes<br>[amz_link asin="B0A1234567"]Bei Amazon ansehen[/amz_link]<br>[amz_ebay asin="B0A1234567" suche="x"]bei eBay[/amz_ebay]</td><td' . $pad . '>[amz_bild asin="B0B1234567"][/amz_bild]<br>[amz_link asin="B0B1234567"]Bei Amazon ansehen[/amz_link]<br>[amz_ebay asin="B0B1234567" suche="y"]bei eBay[/amz_ebay]</td></tr></table><h3>Nächster Abschnitt</h3><p>Text.</p>';
+$tl = '[amz_link asin="B0A1234567"]'; $tl2 = '[amz_link asin="B0B1234567"]';
+ok(SAB::titel_an_stelle($e14, strpos($e14, $tl), strlen($tl)) === 'Richtiger Titel Erstes' && SAB::$tas_zelle === true, 'Produkt weg: Titel zwischen Bildlink und Textlink der Zelle');
+ok(SAB::titel_an_stelle($e14, strpos($e14, $tl2), strlen($tl2)) === '' && SAB::$tas_zelle === true, 'Zelle ohne Titel: nie Text hinter dem eBay-Link oder die nächste Überschrift');
+ok(SAB::titel_an_stelle($e14, strpos($e14, '[amz_bild asin="B0B'), 28) === '', 'Bildlink-Stelle ohne Titel in der Zelle: leer');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

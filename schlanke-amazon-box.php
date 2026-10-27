@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.9
+ * Version: 0.89.10
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.9';
+    const VERSION = '0.89.10';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1862,6 +1862,9 @@ JS;
     }
 
     /** Produkttitel direkt an der Stelle: bei einer Einzelbox steht er vor dem Bildlink (Überschrift/Zeile), bei einer Tabellen-Box in der Zelle nach dem Bildlink. Leer, wenn nichts Brauchbares dasteht. */
+    /** Nach titel_an_stelle(): lag die Stelle in einer Tabellen-/Spaltenzelle? */
+    public static bool $tas_zelle = false;
+
     public static function titel_an_stelle(string $c, int $pos, int $len): string {
         $zeile = function (string $t): string {
             $t = preg_replace('/\[[^\]]*\]/', ' ', $t); $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($t), ENT_QUOTES, 'UTF-8')));
@@ -1871,10 +1874,12 @@ JS;
         };
         $blk = '#</?(?:p|h[1-6]|div|li|td|th|tr|br|figure|figcaption|ul|ol|table)\b[^>]*>#i';
         $zelle = '#</?(?:td|th|tr|table|tbody|thead)\b[^>]*>|<!--\s*/?wp:(?:column|columns|table)\b#i';   // Zellen-/Spaltengrenzen: Titel anderer Zellen zählen nie
-        $kopf = substr($c, max(0, $pos - 700), min(700, $pos)); $nach = substr($c, $pos + $len, 700);
-        $in_zelle = false;
+        $kopf = substr($c, max(0, $pos - 3000), min(3000, $pos)); $nach = substr($c, $pos + $len, 3000);   // weit genug, damit Anfang und Ende der Zelle auch bei viel Markup gefunden werden
+        $in_zelle = false; self::$tas_zelle = false;
         if (preg_match_all($zelle, $kopf, $zm, PREG_OFFSET_CAPTURE)) { $l_ = end($zm[0]); $kopf = substr($kopf, $l_[1] + strlen($l_[0])); $in_zelle = !preg_match('#^</(?:td|th|tr|table)#i', $l_[0]) || false; if (preg_match('#^<(?:td|th)\b#i', $l_[0]) || preg_match('#wp:column#i', $l_[0])) { $in_zelle = true; } }
         if (preg_match($zelle, $nach, $zn, PREG_OFFSET_CAPTURE)) { $nach = substr($nach, 0, $zn[0][1]); }
+        self::$tas_zelle = $in_zelle;
+        if ($in_zelle) { $kopf = substr($kopf, -1500); if (preg_match('#<a\b|\[amz_#i', $nach, $nl, PREG_OFFSET_CAPTURE)) { $nach = substr($nach, 0, $nl[0][1]); } }   // in der Zelle steht der Titel zwischen Bildlink und Textlink, nie hinter dem nächsten Link (eBay) und nie außerhalb der Zelle
         // Steht vor der Stelle ein Link/Platzhalter desselben Produkts (Bild- oder Produktlink, auch wenn Amazon kein Bild mehr liefert), gilt zuerst der Text dazwischen (Zweier-Tabelle: Titel zwischen Bild- und Textlink). Andere Bilder in der Nähe zählen nie.
         if (preg_match('/\b([A-Z0-9]{10})\b/', substr($c, $pos, $len), $am)) {
             $as = preg_quote($am[1], '#'); $ende = -1;
@@ -1889,7 +1894,8 @@ JS;
     }
 
     /** Suchtitel für „Bei Amazon suchen“: derselbe wie im Reiter Austausch (bekannter Produktname), sonst der Titel an der Stelle, sonst Schlüsselbegriffe aus dem Satz davor. */
-    private static function suche_titel(string $asin, array $d, array $fund, string $an_stelle): string {
+    private static function suche_titel(string $asin, array $d, array $fund, string $an_stelle, bool $zelle = false): string {
+        if ($zelle && $an_stelle !== '') { return $an_stelle; }   // Tabellenzelle: Titel zwischen Bildlink und Textlink derselben Zelle ist maßgeblich
         $nm = self::anzeige_name($asin, $d, $fund);
         if (trim($nm) !== '' && !self::generischer_linktext($nm)) { return $nm; }
         return $an_stelle !== '' ? $an_stelle : self::suchtext_aus_satz('', $asin, self::text_vor_stelle($asin, $fund[$asin] ?? []));
@@ -1908,7 +1914,7 @@ JS;
             $out[] = ['asin' => $c['asin'], 'name' => ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? '')), 'score' => $c['score'], 'preis' => (string) ($x['preis'] ?? ''), 'img' => $img, 'quelle' => $c['quelle'], 'ok' => (bool) $c['ok']];
         }
         $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
-        wp_send_json_success(['alt' => $name ?: $asin, 'asin' => $asin, 'suche' => self::suche_titel($asin, (array) $d, $fund, self::titel_an_stelle($c_, $pos_, strlen($tag_))), 'host' => self::LAENDER[$land][0], 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
+        wp_send_json_success(['alt' => $name ?: $asin, 'asin' => $asin, 'suche' => self::suche_titel($asin, (array) $d, $fund, $ts_ = self::titel_an_stelle($c_, $pos_, strlen($tag_)), self::$tas_zelle), 'host' => self::LAENDER[$land][0], 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
     }
 
     public static function ajax_stelle_tausch(): void {
