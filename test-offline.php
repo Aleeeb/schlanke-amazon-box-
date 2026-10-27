@@ -1488,4 +1488,9 @@ ok(strpos($u1, 'amzn.to/3xyzabc') !== false && !SAB::$umbau_abw, 'Umbau lässt b
 SAB::kurz_ok_setzen('https://amzn.to/3xyzabc', false);
 ok(!SAB::kurz_ok('https://amzn.to/3xyzabc'), 'Wieder prüfen: Bestätigung entfernt');
 unset($GLOBALS['pc']);
+// 0.89.16: „Alle prüfen“ nimmt auch Produkte aus den Artikeln, nicht nur die Produktliste
+set_transient('sab_alle_asins', ['B0ARTIKEL01'], 600);
+$rp = new ReflectionMethod('SAB', 'pruef_liste'); $rp->setAccessible(true);
+ok(in_array('B0ARTIKEL01', $rp->invoke(null), true), 'Prüfliste enthält Produkte aus Artikeln');
+delete_transient('sab_alle_asins');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

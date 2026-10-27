@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.15
+ * Version: 0.89.16
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.15';
+    const VERSION = '0.89.16';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1091,7 +1091,8 @@ final class SAB {
         foreach (self::slots() as $liste) { $alle = array_merge($alle, $liste); }
         foreach (self::tests() as $liste) { $alle = array_merge($alle, $liste); }
         $alle = array_merge($alle, array_values(self::tausch_regeln()));
-        return array_values(array_unique($alle));
+        $alle = array_merge($alle, self::alle_asins());   // auch alle Produkte, die in Artikeln stehen (feste Links, Platzhalter, AAWP), nicht nur die der Produktliste
+        return array_values(array_unique(array_map('strval', $alle)));
     }
 
     /** Ein Produkt frisch holen und als Ausfall eintragen oder löschen; zählt im Lauf mit. */
@@ -1155,7 +1156,9 @@ final class SAB {
     public static function ajax_pruef_start(): void {
         self::pruef_ajax_ok();
         self::alte_bilder_loeschen();
+        delete_transient('sab_alle_asins');
         $lauf = self::pruef_neuer_lauf();
+        if (!$lauf['liste']) { wp_send_json_error(['text' => 'Es wurden keine Produkte zum Prüfen gefunden. Geprüft wird Amazon ' . self::LAENDER[$lauf['land']][0] . ' (Standardland in den Einstellungen): In den Artikeln müssen Links zu diesem Shop stehen oder Produkte in der Produktliste. Bitte Standardland und Partner-IDs prüfen.']); }
         update_option('sab_pruef_lauf', $lauf, false);
         wp_send_json_success(self::pruef_stand($lauf));
     }
@@ -2388,7 +2391,7 @@ JS;
         foreach (self::auch_gekauft() as $l) { $alle = array_merge($alle, $l['liste']); }   // Mitgekauftes mit abfragen (Score)
         foreach (self::claude_empfehlungen() as $l) { $alle[] = $l[0]; }
         global $wpdb;
-        if (isset($wpdb)) {
+        if (isset($wpdb) && method_exists($wpdb, 'get_col')) {
             $host = preg_quote(preg_replace('#^www\.#', '', self::LAENDER[self::land('')][0]), '#');   // nur Links ins Land dieser Webseite, sonst sähen Produkte anderer Länder „unbekannt“ aus
             $rows = $wpdb->get_col("SELECT post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%amazon.%')");
             foreach ((array) $rows as $c) {
