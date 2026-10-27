@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.6
+ * Version: 0.88.7
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.6';
+    const VERSION = '0.88.7';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1846,8 +1846,25 @@ JS;
         return [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin];
     }
 
+    /** Produkttitel direkt an der Stelle: bei einer Einzelbox steht er vor dem Bildlink (Überschrift/Zeile), bei einer Tabellen-Box in der Zelle nach dem Bildlink. Leer, wenn nichts Brauchbares dasteht. */
+    public static function titel_an_stelle(string $c, int $pos, int $len): string {
+        $zeile = function (string $t): string {
+            $t = preg_replace('/\[[^\]]*\]/', ' ', $t); $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($t), ENT_QUOTES, 'UTF-8')));
+            if ($t === '' || mb_strlen($t) > 140 || mb_strlen($t) < 3) { return ''; }
+            if (preg_match('/^(angebot|jetzt|zum angebot|preis|bei amazon|ansehen|hier|mehr|link|button|ab\s+[\d.,]+|[\d.,\s€$£]+$)/iu', $t) || self::generischer_linktext($t)) { return ''; }
+            return trim(implode(' ', array_slice(preg_split('/\s+/u', $t), 0, 10)), " :–-|");
+        };
+        $blk = '#</?(?:p|h[1-6]|div|li|td|th|tr|br|figure|figcaption|ul|ol|table)\b[^>]*>#i';
+        $kopf = substr($c, max(0, $pos - 700), min(700, $pos)); $nach = substr($c, $pos + $len, 700);
+        $td_offen = (strripos(substr($c, 0, $pos), '<td') !== false) && (strripos(substr($c, 0, $pos), '<td') > (int) strripos(substr($c, 0, $pos), '</td>'));
+        $vor = array_reverse(preg_split($blk, $kopf)); $dahinter = preg_split($blk, $nach);
+        $reihen = $td_offen ? [$dahinter, $vor] : [$vor, $dahinter];   // Tabellenzelle: Titel nach dem Bild; sonst davor
+        foreach ($reihen as $liste) { foreach (array_slice($liste, 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } if (preg_match('/<a\b|\[amz_/i', (string) $teil) && trim(strip_tags(preg_replace('/\[[^\]]*\]/', '', (string) $teil))) === '') { continue; } } }
+        return '';
+    }
+
     public static function ajax_stelle_kand(): void {
-        [$post, , , , , , , $asin] = self::stelle_pruefen();
+        [$post, $c_, , , $tag_, $pos_, , $asin] = self::stelle_pruefen();
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []);
         $fund = self::fundstellen([$asin]); $namen = self::produkte();
         $name = ($namen[$asin] ?? '') ?: self::kurzname_aus_titel((string) ($d['items'][$asin]['titel'] ?? ''));
@@ -1859,7 +1876,7 @@ JS;
             $out[] = ['asin' => $c['asin'], 'name' => ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? '')), 'score' => $c['score'], 'preis' => (string) ($x['preis'] ?? ''), 'img' => $img, 'quelle' => $c['quelle'], 'ok' => (bool) $c['ok']];
         }
         $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
-        wp_send_json_success(['alt' => $name ?: $asin, 'asin' => $asin, 'suche' => self::suchtext_aus_satz((string) $name, $asin, ''), 'host' => self::LAENDER[$land][0], 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
+        wp_send_json_success(['alt' => $name ?: $asin, 'asin' => $asin, 'suche' => self::titel_an_stelle($c_, $pos_, strlen($tag_)) ?: self::suchtext_aus_satz((string) $name, $asin, ''), 'host' => self::LAENDER[$land][0], 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
     }
 
     public static function ajax_stelle_tausch(): void {
@@ -1918,7 +1935,7 @@ JS;
            . 'var lst=el("div","");bx.appendChild(lst);'
            . 'function tausche(neu){inf.textContent="Tausche …";post("sab_stelle_tausch",{ord:o,asin:asin,neu:neu},function(r){if(r.success){inf.textContent="Getauscht. Seite wird neu geladen …";location.reload()}else{inf.textContent="Nicht möglich: "+r.data;inf.style.color="#a00"}})}'
            . 'post("sab_stelle_kand",{ord:o,asin:asin},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}'
-           . 'inf.textContent="Jetzt: "+r.data.alt+". Nur diese Stelle im Artikel wird getauscht (mit Sicherung).";var H="https://"+r.data.host,lk=function(t,u){var a=el("a","display:inline-block;margin:4px 12px 0 0;color:#2271b1",t);a.href=u;a.target="_blank";a.rel="noopener";return a};var ar=el("div","");ar.appendChild(lk("Dieses Produkt bei Amazon ansehen ↗",H+"/dp/"+r.data.asin));ar.appendChild(lk("Bei Amazon nach dem Titel suchen ↗",H+"/s?k="+encodeURIComponent(r.data.suche||r.data.alt)));inf.parentNode.insertBefore(ar,inf.nextSibling);'
+           . 'inf.textContent="Jetzt: "+r.data.alt+". Nur diese Stelle im Artikel wird getauscht (mit Sicherung).";var H="https://"+r.data.host,lk=function(t,u){var a=el("a","display:inline-block;margin:4px 12px 0 0;color:#2271b1",t);a.href=u;a.target="_blank";a.rel="noopener";return a};var ar=el("div","");ar.appendChild(lk("Dieses Produkt bei Amazon ansehen ↗",H+"/dp/"+r.data.asin));ar.appendChild(lk("Bei Amazon suchen: „"+(r.data.suche||r.data.alt)+"“ ↗",H+"/s?k="+encodeURIComponent(r.data.suche||r.data.alt)));inf.parentNode.insertBefore(ar,inf.nextSibling);'
            . 'r.data.liste.forEach(function(c){var row=el("div","display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eee");'
            . 'if(c.img){var im=el("img","width:56px;height:56px;object-fit:contain;flex:none");im.src=c.img;row.appendChild(im)}'
            . 'var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555","Score "+(c.score===null?"?":c.score)+(c.preis?" · "+c.preis:"")+" · "+c.quelle+(c.ok?"":" · nicht lieferbar")));tx.appendChild(lk("bei Amazon ansehen ↗",H+"/dp/"+c.asin));row.appendChild(tx);'

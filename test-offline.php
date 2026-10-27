@@ -1319,7 +1319,7 @@ $GLOBALS['admin'] = true; $GLOBALS['loggedin'] = true; ob_start(); SAB::stellen_
 ok(strpos($stj, 'bearbeiten') !== false && strpos($stj, 'Im Bestand suchen') !== false && strpos($stj, 'action=edit') !== false, 'Frontend-Tauschfenster: Bestandssuche und Bearbeiten-Knopf');
 ok(strpos($stj, 'a[href]') !== false && strpos($stj, 'cn[as]') !== false, 'Frontend: auch fest eingetragene Textlinks bekommen Tauschen/Bearbeiten');
 $tmpj = tempnam(sys_get_temp_dir(), 'sj'); file_put_contents($tmpj . '.js', preg_replace('#^<script>|</script>$#', '', trim($stj))); exec('node --check ' . escapeshellarg($tmpj . '.js') . ' 2>&1', $nout, $nrc);
-ok($nrc === 0 && strpos($stj, 'bei Amazon ansehen') !== false && strpos($stj, 'nach dem Titel suchen') !== false, 'Frontend-Skript: JavaScript-Syntax ok, Amazon-Suche und -Ansehen im Tauschfenster ' . implode(' ', $nout));
+ok($nrc === 0 && strpos($stj, 'bei Amazon ansehen') !== false && strpos($stj, 'Bei Amazon suchen') !== false, 'Frontend-Skript: JavaScript-Syntax ok, Amazon-Suche und -Ansehen im Tauschfenster ' . implode(' ', $nout));
 $GLOBALS['opt']['sab_kontrolle'] = ['2' => ['ts' => time(), 'alt' => 'B0A', 'neu' => 'B0AKKUNEU1', 'stellen' => [['pid' => 7, 'titel' => 'Zaun', 'satz' => '', 'n' => 2]]]];
 $ko2 = $mKo->invoke(null, 'austausch'); unset($GLOBALS['opt']['sab_kontrolle']);
 ok(strpos($ko2, 'Stelle 1 ansehen') !== false && strpos($ko2, 'Stelle 2 bearbeiten') !== false && strpos($ko2, 'sab_nr=2') !== false, 'Kontrollliste: zwei Stellen im Artikel, je Stelle ansehen und bearbeiten');
@@ -1373,4 +1373,9 @@ ok($mLa->invoke(null, '') === 'co.uk', 'Standardland „couk“ gespeichert => c
 $mPf = new ReflectionMethod('SAB', 'partner_felder_html'); $mPf->setAccessible(true); $pf = $mPf->invoke(null);
 ok(strpos($pf, 'sab_tag_f[co.uk]') !== false && strpos($pf, 'value="uk-21"') !== false && strpos($pf, 'sab_tag_f[com.au]') !== false, 'Partner-ID-Felder je Shop, Wert vorbelegt');
 unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
+// 0.88.7: Titel an der Stelle (Einzelbox: davor, Tabellenzelle: danach)
+$e1 = '<h3>Lichtwecker mit Sonnenaufgang</h3>[amz_bild asin="B0LICHT001"]'; $p1 = strpos($e1, '[amz_bild');
+$e2 = '<table><tr><td>[amz_bild asin="B0LICHT002"]<br>Wake-up Light Pro 2</td><td>[amz_bild asin="B0X"]<br>Anderes</td></tr></table>'; $p2 = strpos($e2, '[amz_bild');
+$e3 = '<p>Text davor.</p><p>[amz_bild asin="B0LICHT003"]</p>'; 
+ok(SAB::titel_an_stelle($e1, $p1, 28) === 'Lichtwecker mit Sonnenaufgang' && SAB::titel_an_stelle($e2, $p2, 28) === 'Wake-up Light Pro 2' && SAB::titel_an_stelle($e3, strpos($e3, '[amz_bild'), 28) === 'Text davor.', 'Titel an der Stelle: Einzelbox davor, Tabellenzelle danach');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
