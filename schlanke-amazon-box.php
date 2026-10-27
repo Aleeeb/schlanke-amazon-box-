@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.4
+ * Version: 0.89.5
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.4';
+    const VERSION = '0.89.5';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -5536,7 +5536,7 @@ JS;
         $schwelle = (int) get_option('sab_auto_schwelle', 55); $ladeLimit = min(60, $nb + 10);
         $h .= self::austausch_skript($d, $trotz, $namen, $land);
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="austausch_viele">'
-            . '<h3>Zu tauschen (' . count($zeilen) . '), wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
+            . '<h3>Zu tauschen <!--SAB_ZZ-->, wichtigste zuerst</h3><p class="description">Vorausgewählt ist der beste Kandidat ab Score ' . $schwelle . ' mit lieferbarem Angebot. „Nichts tauschen“ lässt das Produkt unverändert. Reihenfolge: zuerst alles, was nicht lieferbar ist, keinen Preis oder kein Bild hat, nach Seitenzahl; danach lieferbare Produkte mit schwachem Score. Es werden immer die ' . $ladeLimit . ' obersten gezeigt; jedes getauschte Produkt rückt das nächste nach, bis nur noch gute Produkte übrig sind.</p>';
         $zaehler = 0; $kopf_a = $kopf_b = $kopf_c = false; $lq = self::lernen_quote(); $ohneVorschlag = [];
         $h .= '<p><button class="button button-primary button-hero" name="sab_form" value="ersatz_suchen">Ersatz suchen</button> <span class="description">Bewertet Bestand und eingetragene Amazon-Treffer neu (nach Titel, Kategorie und Text davor), bis zu 12 Vorschläge je Produkt, 4 auf einmal. Wo zu wenig gefunden wird, steht der Prompt für die Sitzung ganz unten.</span></p><!--SAB_HINWEIS-->';
         $h .= '<!--SAB_H-->';
@@ -5554,6 +5554,8 @@ JS;
             self::$tk_sammeln = true; $kh = self::austausch_karte_html($z, $d, $trotz, $namen, $land, $fund, $lq, $ohneVorschlag); self::$tk_sammeln = false;
             if ($kh === '') { $zaehler--; } else { $h .= $kh; }
         }
+        $n_karten = max(0, min($zaehler, $ladeLimit)); $n_warte = count(self::$tk_warte); $n_toet = count(self::$tk_toet);
+        $h = str_replace('<!--SAB_ZZ-->', '(' . count($zeilen) . ' Produkte: ' . $n_karten . ' als Karte' . ($n_warte ? ', ' . $n_warte . ' warten auf die Amazon-Suche' : '') . ($n_toet ? ', ' . $n_toet . ' tierschädlich mit Entscheidung nötig' : '') . (count($zeilen) > $ladeLimit ? ', Rest später' : '') . '; ein Produkt zählt einmal, egal wie viele Bild- und Textlinks es hat)', $h);
         $h .= self::austausch_abschnitte_html($d, $land);
         $h .= ($zeilen ? '<p><button class="button button-primary button-hero">Auswahl tauschen (jeweils mit Sicherung)</button> <span class="description">Der Tausch gilt in allen Artikeln, Titel und Textlinks folgen dem neuen Bildprodukt. Bis zu 10 pro Klick.</span></p>' : '<p>Nichts zu tauschen.</p>') . '</form>';
         $pr_ = self::ersatz_prompt_html($ohneVorschlag); $no_ = self::name_offen_html();   // Hilfsmittel für die Suche-Sitzung stehen unten, damit die Tauschliste oben beginnt

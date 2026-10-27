@@ -923,7 +923,7 @@ $GLOBALS['tr']['sab_uebersicht_es'] = $GLOBALS['opt']['sab_uebersicht_stand_es']
 $wpdb_x = $GLOBALS['wpdb'] ?? null;
 $GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 20, 'post_title' => 'Seite X', 'post_content' => '<p>[amz_bild asin="B0DEAD0001" land="es"][/amz_bild]</p>']]; } function get_col($q) { return []; } function esc_like($s) { return $s; } function prepare($q, ...$a) { return $q; } };
 $mAh = new ReflectionMethod('SAB', 'austausch_html'); $ah = $mAh->invoke(null);
-ok(strpos($ah, 'Zu tauschen (1)') !== false && strpos($ah, 'B0ALT00001') !== false && strpos($ah, 'Amazon-Alternative 1') !== false && strpos($ah, 'name="sab_a[B0DEAD0001]"') !== false, 'Austausch-Reiter: totes Produkt mit Amazons Alternative als bestem Kandidaten');
+ok(strpos($ah, 'Zu tauschen (1 Produkte: 1 als Karte') !== false && strpos($ah, 'B0ALT00001') !== false && strpos($ah, 'Amazon-Alternative 1') !== false && strpos($ah, 'name="sab_a[B0DEAD0001]"') !== false, 'Austausch-Reiter: totes Produkt mit Amazons Alternative als bestem Kandidaten');
 ok(strpos($ah, 'Dringend tauschen: Produkte ohne Bild (1)') !== false && strpos($ah, 'weder Titel noch Bild') !== false && strpos($ah, 'ASIN bei Amazon suchen') !== false && strpos($ah, 'ohne Bild</span>') !== false, 'Austausch: Produkte ohne Bild als eigene Dringend-Liste mit Hinweis und Suchsprüngen');
 $GLOBALS['opt']['sab_auto_tausch'] = '1'; $GLOBALS['opt']['sab_auto_schwelle'] = 0;
 $mAu = new ReflectionMethod('SAB', 'auto_tausch'); $mAu->invoke(null);
