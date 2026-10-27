@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.3
+ * Version: 0.89.4
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.3';
+    const VERSION = '0.89.4';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2100,20 +2100,20 @@ JS;
         $nr = max(1, (int) ($_GET['sab_nr'] ?? 1));
         $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch'), 'v' => self::kontrolle_code($eid, strtoupper($a))]) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
         echo '<script>(function(){var KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
-           . 's=(function(l){var o=[],bk="p,div,td,li,figure,h1,h2,h3,h4,h5,h6,section",last=null;for(var i=0;i<l.length;i++){var b=l[i].closest(bk)||l[i].parentNode;if(last&&b===last){continue}last=b;o.push(l[i])}return o})(Array.prototype.slice.call(s));'
-           . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:10px 16px;font:600 15px sans-serif;text-align:center";'
-           . 'var t=document.createElement("span");b.appendChild(t);document.body.appendChild(b);'
-           . 'function btn(x,f){var e=document.createElement("a");e.textContent=x;e.href="#";e.style.cssText="margin-left:12px;background:#fff;color:#d63638;padding:4px 10px;border-radius:4px;text-decoration:none";e.onclick=function(ev){ev.preventDefault();f(e)};b.appendChild(e);return e}'
+           . 's=(function(l){var o=[],bk="p,div,td,li,figure,h1,h2,h3,h4,h5,h6,section",ck="td,li,.sab-karte,.sab-produkt,.wp-block-column",last=null,lc=null;for(var i=0;i<l.length;i++){var b=l[i].closest(bk)||l[i].parentNode,c=l[i].closest(ck);if(last&&(b===last||(c&&c===lc))){continue}last=b;lc=c;o.push(l[i])}return o})(Array.prototype.slice.call(s));'
+           . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px/1.4 sans-serif;text-align:center;display:flex;flex-wrap:wrap;gap:8px 10px;justify-content:center;align-items:center;max-height:45vh;overflow:auto;box-sizing:border-box";'
+           . 'var t=document.createElement("span");t.style.cssText="flex:1 1 100%";b.appendChild(t);document.body.appendChild(b);'
+           . 'function btn(x,f){var e=document.createElement("a");e.textContent=x;e.href="#";e.style.cssText="background:#fff;color:#d63638;padding:5px 12px;border-radius:4px;text-decoration:none;white-space:nowrap";e.onclick=function(ev){ev.preventDefault();f(e)};b.appendChild(e);return e}'
            . 'if(!s.length){t.textContent="Im sichtbaren Text steht "+a+" nicht"+(ed?"; ich öffne den Editor an der Stelle ...":" (vielleicht in einem Bild oder Code-Block).");if(ed){setTimeout(function(){location.href=ed},1200)}return}'
            . 'if(idx>=s.length){idx=0}'
            . 'for(var i=0;i<s.length;i++){s[i].style.outline="4px solid #d63638";s[i].style.background="#fde8e8";}'
-           . 'var le=null;function zeige(n){idx=(n+s.length)%s.length;t.textContent="Hier steht "+a+(s.length>1?" (Stelle "+(idx+1)+" von "+s.length+", alle rot markiert)":" (1 Stelle, rot markiert)");'
+           . 'var le=null;function zeige(n){idx=(n+s.length)%s.length;t.textContent="Hier steht "+a+(s.length>1?" (Stelle "+(idx+1)+" von "+s.length+")":" (1 Stelle)");'
            . 'for(var i=0;i<s.length;i++){s[i].style.outlineColor=i===idx?"#000":"#d63638"}s[idx].scrollIntoView({block:"center"});if(le){le.href=ed+"&sab_nr="+(idx+1)}}'
            . 'if(s.length>1){btn("◀ vorige",function(){zeige(idx-1)});btn("nächste ▶",function(){zeige(idx+1)})}'
            . 'btn("⇄ Hier tauschen",function(){var o=s[idx].closest("[data-sab-ord]"),q=o?document.querySelector("button.sab-tb[data-o=\""+o.getAttribute("data-sab-ord")+"\"]"):null;if(!q){var bx=s[idx].closest(".sab-karte,.sab-produkt,td")||s[idx].parentNode;q=bx&&bx.querySelector("button.sab-tb")}if(q){q.scrollIntoView({block:"center"});q.click()}else{t.textContent="Hier gibt es keinen Tauschen-Knopf (feste Stelle im Text): bitte im Editor bearbeiten."}});'
            . 'function kpost(act,f){var fd=new FormData();fd.append("action",act);fd.append("n",KC.n);fd.append("post",KC.p);fd.append("neu",KC.a);fetch(KC.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){t.textContent="Verbindungsfehler"})}'
            . 'if(KC&&KC.v&&KC.v.nachher){btn("Code anzeigen",function(e){var d=document.getElementById("sab-code");if(d){d.remove();return}d=document.createElement("textarea");d.id="sab-code";d.readOnly=true;d.style.cssText="position:fixed;left:8px;right:8px;top:56px;height:42vh;z-index:99998;font:12px monospace;padding:8px";d.value="VORHER:\n"+KC.v.vorher+"\n\nNACHHER:\n"+KC.v.nachher;document.body.appendChild(d);d.select()})}'
-           . 'if(KC){var ok=btn("✓ Kontrolliert, passt",function(){kpost("sab_stelle_ok",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});ok.style.fontWeight="700";btn("✗ Passt nicht, rückgängig",function(){kpost("sab_stelle_zurueck",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})})}'
+           . 'if(KC){var ok=btn("✓ Kontrolliert, passt",function(){kpost("sab_stelle_ok",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});ok.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2";var rg=btn("✗ Passt nicht, rückgängig",function(){kpost("sab_stelle_zurueck",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});rg.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2"}'
            . 'if(ed){le=btn("Im Editor bearbeiten",function(e){window.open(e.href,"_blank")});le.href=ed+"&sab_nr="+(idx+1);le.target="_blank";le.onclick=null}'
            . 'var x=btn("×",function(){b.remove()});setTimeout(function(){zeige(idx)},300)})();</script>';
     }
@@ -3372,7 +3372,7 @@ JS;
     /** Alle Textlink-Stellen eines Produkts in einem Artikel (höchstens 8), jede mit Satz. @return array<int,array> */
     /** Fundstellen einer ASIN im Artikel als Liste der laufenden Nummern (1, 2 …) des jeweils ersten Vorkommens. Bild- und Textlink direkt nebeneinander (nur Tags/Leerraum dazwischen, kein Absatz-/Listenwechsel) sind eine Stelle. */
     public static function stellen_gruppen(string $c, string $asin): array {
-        $ords = []; $ab = 0; $nr = 0; $prev_end = -1; $gruppe_offen = false;
+        $ords = []; $ab = 0; $nr = 0; $prev_end = -1; $gruppe_offen = false; $prev_bild = false;
         while (($p = strpos($c, $asin, $ab)) !== false) {
             $nr++; $ab = $p + 1;
             if ($p < $prev_end) { continue; }   // steht im selben Link/Platzhalter wie das vorige Vorkommen
@@ -3384,12 +3384,17 @@ JS;
                 if (preg_match('/^\[(amz_[a-z_]+)/', substr($c, $a1, 30), $nm)) { $zu = strpos($c, '[/' . $nm[1] . ']', $e); if ($zu !== false && $zu - $e < 600 && strpos(substr($c, $e, $zu - $e), '[') === false) { $e = $zu + strlen($nm[1]) + 3; } }
             }
             $gleich = false;
+            $teil = substr($c, $s, $e - $s); $ist_bild = stripos($teil, '<img') !== false || preg_match('/^\[amz_(?:bild|produkt)\b/', $teil);
             if ($prev_end >= 0 && $s >= $prev_end) {
                 $gap = substr($c, $prev_end, $s - $prev_end);
-                if (strlen($gap) < 400 && !preg_match('#</p>|<p[\s>]|</?li\b|<h[1-6]\b|</?t[rdh]\b#i', $gap) && trim(str_replace("\xC2\xA0", ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', '', $gap))))) === '') { $gleich = true; }
+                if (strlen($gap) < 400 && !preg_match('#</p>|<p[\s>]|</?li\b|<h[1-6]\b|</?t[rdh]\b#i', $gap)) {
+                    $txt = trim(str_replace("\xC2\xA0", ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', '', $gap)))));
+                    // Bildlink, kurzer Titel (nur durch <br> getrennt), Textlink derselben Zelle: eine Stelle
+                    if ($txt === '' || ($prev_bild && !$ist_bild && mb_strlen($txt) <= 160 && !preg_match('#[.!?]\s*$#u', $txt))) { $gleich = true; }
+                }
             }
             if (!$gleich) { $ords[] = $nr; }
-            $prev_end = $e;
+            $prev_end = $e; $prev_bild = $ist_bild;
         }
         return $ords;
     }
