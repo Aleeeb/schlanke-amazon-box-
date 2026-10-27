@@ -1385,4 +1385,5 @@ $e4 = '<table><tr><td><h4>Erstes Produkt</h4>[amz_bild asin="B0A"]<br>Titel Erst
 ok(SAB::titel_an_stelle($e4, $p4, 21) === '', 'Zweier-Tabelle: Zelle ohne eigenen Titel liefert keinen Titel der Nachbarzelle');
 $e5 = '<table><tr><td>[amz_bild asin="B0A"]<br>Titel Erstes</td><td>[amz_bild asin="B0B"]<br>Titel Zweites</td></tr></table>';
 ok(SAB::titel_an_stelle($e5, strpos($e5, '[amz_bild asin="B0B"'), 21) === 'Titel Zweites' && SAB::titel_an_stelle($e5, strpos($e5, '[amz_bild asin="B0A"'), 21) === 'Titel Erstes', 'Zweier-Tabelle: Titel steht unter dem Bild der eigenen Zelle');
+ok(SAB::land_schluessel('.co.uk') === 'co.uk' && SAB::land_schluessel('www.amazon.co.uk') === 'co.uk' && SAB::land_schluessel('amazon.de') === 'de' && SAB::land_schluessel('https://www.amazon.com/') === 'com' && SAB::land_schluessel('.de') === 'de', 'Ländercode: „.co.uk“, „amazon.co.uk“, „www.amazon.de“ werden erkannt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

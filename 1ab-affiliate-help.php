@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.11
+ * Version: 0.88.12
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.11';
+    const VERSION = '0.88.12';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -128,7 +128,7 @@ final class SAB {
 
     /** Ländercode tolerant lesen: „couk“, „co-uk“, „UK“, „GB“ => co.uk; „comau“, „AU“ => com.au; „us“ => com; „.de“ => de. */
     public static function land_schluessel(string $k): string {
-        $k = strtolower(trim($k, " \t.\"'")); $n = preg_replace('/[^a-z]/', '', $k);
+        $k = strtolower(trim($k, " \t.\"'")); $k = preg_replace('/^(?:https?:\/\/)?(?:www\.)?(?:amazon\.)?/', '', $k); $k = trim($k, "./ "); $n = preg_replace('/[^a-z]/', '', $k);   // auch „.co.uk“, „amazon.co.uk“, „www.amazon.de“
         $m = ['couk' => 'co.uk', 'uk' => 'co.uk', 'gb' => 'co.uk', 'comau' => 'com.au', 'au' => 'com.au', 'us' => 'com', 'usa' => 'com'];
         return $m[$n] ?? $k;
     }
