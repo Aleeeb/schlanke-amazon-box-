@@ -1596,4 +1596,13 @@ $GLOBALS['opt']['sab_lern_w'] = ['w' => ['titel' => 1.0], 'runden' => 10, 'log' 
 ok($iok && abs($li['w']['titel'] - 1.5) < 0.001 && $li['w']['score'] === 3.0 && $li['runden'] === 20, 'Import mischt nach Rundenzahl, Grenzen bleiben');
 unset($GLOBALS['opt']['sab_lern_w']);
 ok(SAB::lern_abruf() === '', 'Ohne Haken kein Abruf');
+// 0.89.31: „-“ im Prime-Feld = Prime unsicher (neutral), „nv“ = nicht verfügbar
+$GLOBALS['opt']['sab_manuell'] = "B0PRIMEUN1 | 4,5 | 100 | - | London 1 | 2026-10-27 | 5 | gratis\nB0PRIMENV1 | 4,5 | 100 | nv | London 1 | 2026-10-27 | 5 | gratis";
+$mdp = new ReflectionMethod('SAB', 'manuell_daten'); $mdp->setAccessible(true); $mp = $mdp->invoke(null);
+ok($mp['B0PRIMEUN1']['prime'] === null && $mp['B0PRIMEUN1']['prime_unsicher'] === true && $mp['B0PRIMEUN1']['gelesen_weg'] === false, '„-“ = Prime unsicher, nicht „weg“');
+ok($mp['B0PRIMENV1']['gelesen_weg'] === true && $mp['B0PRIMENV1']['prime_unsicher'] === false, '„nv“ = bei Amazon nicht verfügbar');
+$scp = new ReflectionMethod('SAB', 'score'); $scp->setAccessible(true);
+$su = $scp->invoke(null, array_merge($mp['B0PRIMEUN1'], ['preis' => '10 €', 'lieferbar' => true]))[0]; $sn = $scp->invoke(null, array_merge($mp['B0PRIMEUN1'], ['prime' => false, 'preis' => '10 €', 'lieferbar' => true]))[0];
+ok($su > $sn, 'Prime unsicher wird nicht abgezogen wie „kein Prime“');
+unset($GLOBALS['opt']['sab_manuell']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

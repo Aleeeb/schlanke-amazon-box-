@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.30
+ * Version: 0.89.31
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.30';
+    const VERSION = '0.89.31';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -430,7 +430,7 @@ final class SAB {
                 $x = $d['items'][$e['asin']] ?? null; $sc = $x ? self::score(array_merge($x, ['trotz' => isset($trotz[$e['asin']])]))[0] : null; $t = [];
                 if ($x) {
                     if (isset($x['sterne']) && $x['sterne'] !== null) { $t[] = '&#9733; ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')'; } else { $t[] = 'Sterne fehlen'; }
-                    $t[] = self::prime_zeichen($x['prime'] ?? null);
+                    $t[] = self::prime_zeichen($x['prime'] ?? null, !empty($x['prime_unsicher']));
                     $t[] = isset($x['liefertage']) && $x['liefertage'] !== null ? '&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : 'Lieferzeit fehlt';
                     $t[] = isset($x['lieferkosten']) && $x['lieferkosten'] !== null ? ((float) $x['lieferkosten'] <= 0 ? 'Versand gratis' : 'Versand ' . esc_html(str_replace('.', ',', (string) $x['lieferkosten']))) : 'Versand ?';
                     $pv = self::provision_satz($x); $t[] = $pv !== null ? esc_html(str_replace('.', ',', (string) $pv)) . ' % Prov.' : 'Provision fehlt';
@@ -931,9 +931,9 @@ final class SAB {
             $p = mb_strtolower($t[3] ?? '');
             $out[$a] = [
                 'sterne' => $zahl($t[1] ?? ''), 'anzahl' => isset($t[2]) && $t[2] !== '' ? (int) preg_replace('/\D/', '', $t[2]) : null,
-                'prime' => $p === '' || in_array($p, ['-', '?', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true) ? null : in_array($p, ['ja', 'yes', 'j', '1', 'prime'], true),   // ja = Prime, nein = gelesen und kein Prime, „-“ = bei Amazon nicht verfügbar, leer = unbekannt/ungeprüft
+                'prime' => $p === '' || in_array($p, ['-', '?', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true) ? null : in_array($p, ['ja', 'yes', 'j', '1', 'prime'], true),   // ja = Prime, nein = gelesen und kein Prime, „-“ = nicht von Amazon versendet, Prime über Händler möglich (unsicher, neutral gewertet), „nv“/„weg“ = bei Amazon nicht verfügbar, leer = unbekannt/ungeprüft
                 'ohne_bewertung' => trim((string) ($t[1] ?? '')) === '' && trim((string) ($t[2] ?? '')) === '' && trim((string) ($t[5] ?? '')) !== '',
-                'gelesen_weg' => in_array($p, ['-', 'nv', 'n/v', 'weg', 'nicht verfügbar'], true), 'liefertage' => $tage,
+                'gelesen_weg' => in_array($p, ['nv', 'n/v', 'weg', 'nicht verfügbar'], true), 'prime_unsicher' => $p === '-', 'liefertage' => $tage,
                 'lieferkosten' => self::lieferkosten_wert((string) ($t[7] ?? '')), 'liefertext' => $t[4] ?? '', 'manuell_stand' => $t[5] ?? '', 'provision' => isset($t[6]) && preg_match('/\\d/', $t[6]) ? (float) str_replace(',', '.', preg_replace('/[^\\d,.]/', '', $t[6])) : null,
             ];
         }
@@ -1033,7 +1033,7 @@ final class SAB {
     private static function potenzial(array $x, int $score, int $seiten, bool $fav): array {
         $nicht = empty($x['trotz']) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK' || ($x['preis'] ?? '') === '');
         if ($nicht || $score < 60) { return [0, '']; }
-        if (array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null) { return [0, '']; }
+        if (array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null && empty($x['prime_unsicher'])) { return [0, '']; }
         if (isset($x['liefertage']) && $x['liefertage'] !== null && (float) $x['liefertage'] > 7) { return [0, '']; }
         if ($seiten >= 10) { return [0, 'kommt schon auf ' . $seiten . ' Seiten vor']; }
         $p = (int) round(($score - 50) * (10 - $seiten) / 10 * ($fav ? 1.5 : 1));
@@ -1084,7 +1084,7 @@ final class SAB {
         $t = [];
         $t[] = ($x['preis'] ?? '') !== '' ? esc_html((string) $x['preis']) : '<span style="color:#a00">kein Preis</span>';
         if (isset($x['sterne']) && $x['sterne'] !== null) { $t[] = '&#9733; ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')'; }
-        $t[] = self::prime_zeichen(isset($x['prime']) ? $x['prime'] : null);
+        $t[] = self::prime_zeichen(isset($x['prime']) ? $x['prime'] : null, !empty($x['prime_unsicher']));
         if (isset($x['liefertage']) && $x['liefertage'] !== null) { $t[] = '&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T'; }
         if (isset($x['lieferkosten']) && $x['lieferkosten'] !== null) { $t[] = (float) $x['lieferkosten'] <= 0 ? 'Versand gratis' : 'Versand ' . esc_html(str_replace('.', ',', (string) round((float) $x['lieferkosten'], 2))); }
         if (isset($x['rang']) && $x['rang'] !== null) { $t[] = 'Rang ' . number_format((int) $x['rang'], 0, ',', '.'); }
@@ -1093,8 +1093,9 @@ final class SAB {
     }
 
     /** Prime als Schildchen: blau mit Haken, bei „kein Prime“ grau und durchgestrichen, bei unbekannt gestrichelt (eigene Gestaltung, nicht das Amazon-Logo). */
-    private static function prime_zeichen($prime): string {
+    private static function prime_zeichen($prime, bool $unsicher = false): string {
         $b = 'display:inline-block;padding:0 7px;border-radius:4px;font-size:11px;font-weight:700;font-style:italic;line-height:17px;vertical-align:baseline;';
+        if ($prime === null && $unsicher) { return '<span style="' . $b . 'border:1px dashed #b36b00;color:#b36b00" title="Nicht von Amazon versendet; Prime über den Händler ist möglich, aber nicht sicher">prime unsicher</span>'; }
         if ($prime === null) { return '<span style="' . $b . 'border:1px dashed #999;color:#888" title="Prime unbekannt">prime ?</span>'; }
         return $prime
             ? '<span style="' . $b . 'background:#0a6fb7;color:#fff" title="Prime">&#10003; prime</span>'
@@ -4157,9 +4158,9 @@ JS;
                    . (isset($x['lieferkosten']) && $x['lieferkosten'] !== null ? '<span class="sab-chip ' . ((float) $x['lieferkosten'] <= 0 ? 'ok' : ((float) $x['lieferkosten'] >= 5 ? 'bad' : 'warn')) . '" title="Lieferkosten laut Handdaten (8. Feld)">' . ((float) $x['lieferkosten'] <= 0 ? 'Versand gratis' : 'Versand ' . esc_html(str_replace('.', ',', (string) round((float) $x['lieferkosten'], 2)))) . '</span>' : '')
                    . (!empty($x['deal']) ? '<span class="sab-chip warn">' . esc_html($x['deal']) . '</span>' : '')
                    . (isset($x['sterne']) && $x['sterne'] !== null ? '<span class="sab-chip" title="von Hand gepflegt' . (!empty($x['manuell_stand']) ? ', Stand ' . esc_attr($x['manuell_stand']) : '') . '">★ ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')</span>' : '')
-                   . '<span class="sab-chip" style="padding:0;background:none">' . self::prime_zeichen(isset($x['prime']) ? $x['prime'] : null) . '</span>'
+                   . '<span class="sab-chip" style="padding:0;background:none">' . self::prime_zeichen(isset($x['prime']) ? $x['prime'] : null, !empty($x['prime_unsicher'])) . '</span>'
                    . (isset($x['liefertage']) && $x['liefertage'] !== null ? '<span class="sab-chip ' . ($x['liefertage'] <= 3 ? 'ok' : ($x['liefertage'] >= 7 ? 'bad' : 'warn')) . '" title="Lieferzeit Ø in Tagen: ' . esc_attr((string) ($x['liefertext'] ?? '')) . '">&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T</span>' : '');
-            if (((!isset($x['sterne']) || $x['sterne'] === null) && empty($x['ohne_bewertung']) || !isset($x['prime']) || $x['prime'] === null || !isset($x['liefertage']) || $x['liefertage'] === null) && !(!empty($x['manuell_stand']) && ($lief[0] === 'bad' || !empty($x['gelesen_weg'])))) { $chips .= '<span class="sab-chip warn" title="Sterne, Prime oder Lieferzeit fehlen (Reiter Score, Handdaten)">Handdaten fehlen</span>'; }
+            if (((!isset($x['sterne']) || $x['sterne'] === null) && empty($x['ohne_bewertung']) || ((!isset($x['prime']) || $x['prime'] === null) && empty($x['prime_unsicher'])) || !isset($x['liefertage']) || $x['liefertage'] === null) && !(!empty($x['manuell_stand']) && ($lief[0] === 'bad' || !empty($x['gelesen_weg'])))) { $chips .= '<span class="sab-chip warn" title="Sterne, Prime oder Lieferzeit fehlen (Reiter Score, Handdaten)">Handdaten fehlen</span>'; }
             $sp = (array) ($x['spar'] ?? []);
             $preis = ($x['preis'] ?? '') !== '' ? '<strong>' . esc_html($x['preis']) . '</strong>' . (!empty($sp['streich']) ? '<br><small><s>' . esc_html($sp['streich']) . '</s>' . (isset($sp['prozent']) ? ' &minus;' . (int) $sp['prozent'] . ' %' : '') . '</small>' : '') : '–';
             $rang = isset($x['rang']) && $x['rang'] !== null ? '<span title="' . esc_attr((string) ($x['kategorie'] ?? '')) . '">' . number_format((int) $x['rang'], 0, ',', '.') . '</span>' : '–';
