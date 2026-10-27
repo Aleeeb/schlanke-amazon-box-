@@ -45,6 +45,10 @@ $GLOBALS['opt'] += ['sab_client_id' => 'i', 'sab_client_secret' => 's', 'sab_tag
 $GLOBALS['http']['B000000001'] = item('B000000001');
 $r = new ReflectionClass('SAB');
 $m = fn($n) => (function () use ($r, $n) { $x = $r->getMethod($n); $x->setAccessible(true); return $x; })();
+$GLOBALS['http']['B000000002'] = item('B000000002');
+$p2 = $m('produkt')->invoke(null, 'B000000002', 'es');
+ok(is_array($p2) && ($p2['titel'] ?? '') === 'TB000000002' && !$GLOBALS['sched'], 'leerer Speicher: erste Produkte werden sofort geholt, kein Bild fehlt');
+define('SAB_KEIN_SOFORT', true);   // ab hier den Hintergrundweg prüfen
 $GLOBALS['posts'] = 0;
 $p = $m('produkt')->invoke(null, 'B000000001', 'es');
 ok($p === null, 'leerer Speicher: Besucher bekommt sofort null, kein Amazon-Aufruf');
