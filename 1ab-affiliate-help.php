@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.2
+ * Version: 0.89.3
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.2';
+    const VERSION = '0.89.3';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1875,6 +1875,11 @@ JS;
         $in_zelle = false;
         if (preg_match_all($zelle, $kopf, $zm, PREG_OFFSET_CAPTURE)) { $l_ = end($zm[0]); $kopf = substr($kopf, $l_[1] + strlen($l_[0])); $in_zelle = !preg_match('#^</(?:td|th|tr|table)#i', $l_[0]) || false; if (preg_match('#^<(?:td|th)\b#i', $l_[0]) || preg_match('#wp:column#i', $l_[0])) { $in_zelle = true; } }
         if (preg_match($zelle, $nach, $zn, PREG_OFFSET_CAPTURE)) { $nach = substr($nach, 0, $zn[0][1]); }
+        // Steht die Stelle hinter einem Bildlink (z. B. Textlink unter dem Bild), gilt zuerst der Text zwischen Bildlink und dieser Stelle (Zweier-Tabelle: Titel zwischen Bild- und Textlink)
+        if (preg_match_all('#\[/amz_bild\]|<a\b[^>]*>\s*<img\b[^>]*>\s*</a>|<img\b[^>]*>#i', $kopf, $im, PREG_OFFSET_CAPTURE)) {
+            $l_ = end($im[0]);
+            foreach (array_slice(preg_split($blk, substr($kopf, $l_[1] + strlen($l_[0]))), 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } }
+        }
         $vor = array_reverse(preg_split($blk, $kopf)); $dahinter = preg_split($blk, $nach);
         $reihen = $in_zelle ? [$dahinter] : [$vor, $dahinter];   // Tabellen-/Spaltenzelle: Titel steht nach dem Bild; nur bei Einzelprodukten davor
         foreach ($reihen as $liste) { foreach (array_slice($liste, 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } } }

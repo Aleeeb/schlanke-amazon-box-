@@ -1421,4 +1421,10 @@ unset($GLOBALS['opt']['sab_laender_map']);
 $GLOBALS['opt']['sab_geo'] = '1'; $GLOBALS['opt']['sab_tags'] = "co.uk=uk-21\ncom=us-20"; ob_start(); SAB::geo_skript(); $g3 = ob_get_clean(); unset($GLOBALS['opt']['sab_geo'], $GLOBALS['opt']['sab_tags']);
 ok(strpos($g3, "data-sab-z") !== false, 'Länder-Umschaltung markiert umgeleitete Links für die Statistik');
 ok(strpos(file_get_contents(__DIR__ . '/schlanke-amazon-box.php'), 'z:a.getAttribute("data-sab-z")') !== false, 'Klickmessung sendet das Umschalt-Ziel mit (ohne IP)');
+// 0.89.3: Zweier-Tabelle, Titel zwischen Bildlink und Textlink (Stelle = Textlink bzw. Bildlink)
+$e6 = '<table><tr><td><a href="https://www.amazon.de/dp/B0A1234567"><img src="a.jpg"></a><br>Echter Titel Erstes<br><a href="https://www.amazon.de/dp/B0A1234567">Angebot bei Amazon</a></td><td><a href="https://www.amazon.de/dp/B0B1234567"><img src="b.jpg"></a><br>Echter Titel Zweites<br><a href="https://www.amazon.de/dp/B0B1234567">Angebot bei Amazon</a></td></tr></table>';
+$pt6 = strpos($e6, '>Angebot bei Amazon', strpos($e6, 'Zweites')) ; $pt6 = strrpos(substr($e6, 0, $pt6), '<a '); $pb6 = strpos($e6, '<a href="https://www.amazon.de/dp/B0B1234567"');
+ok(SAB::titel_an_stelle($e6, $pt6, 60) === 'Echter Titel Zweites' && SAB::titel_an_stelle($e6, $pb6, strlen('<a href="https://www.amazon.de/dp/B0B1234567"><img src="b.jpg"></a>')) === 'Echter Titel Zweites', 'Zweier-Tabelle: Titel zwischen Bild- und Textlink, auch wenn die Stelle der Textlink ist');
+$e7 = '<table><tr><td>[amz_bild asin="B0A"][/amz_bild]<br>Titel Erstes<br>[amz_link asin="B0A"]Angebot bei Amazon[/amz_link]</td></tr></table>';
+ok(SAB::titel_an_stelle($e7, strpos($e7, '[amz_link'), 30) === 'Titel Erstes', 'Titel zwischen [amz_bild] und [amz_link]');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
