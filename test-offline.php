@@ -1346,4 +1346,11 @@ ok($g0 === '' && strpos($g1, '"com":"us-20"') !== false && strpos($g1, 'sabGeoRu
 $gj = tempnam(sys_get_temp_dir(), 'gj') . '.js'; file_put_contents($gj, "var window={},document={readyState:'x',addEventListener:function(){}},navigator={},URL=URL;\n" . preg_replace('#^<script>|</script>$#', '', trim($g1)) . "\nvar r=[window.sabGeoPick('Europe/London','de-DE'),window.sabGeoPick('America/Toronto','en-US'),window.sabGeoPick('Asia/Tokyo','en-GB'),window.sabGeoPick('Asia/Tokyo','ja-JP')];console.log(JSON.stringify(r));");
 exec('node ' . escapeshellarg($gj) . ' 2>&1', $gout, $grc);
 ok($grc === 0 && trim(implode('', $gout)) === '["co.uk","ca","co.uk",null]', 'Länder-Erkennung: Zeitzone vor Sprache, unbekannt = null (' . implode(' ', $gout) . ')');
+// 0.88.1: Bildwarnung klickbar, kurze Titel, Sprung; frisch eingetragene Produkte nicht sofort melden
+foreach (['get_edit_post_link' => 'https://example.test/wp-admin/post.php?post=5&action=edit', 'get_the_title' => 'Elektrozaun Akku Weidezaun Test', 'get_post_field' => '<p>[amz_link asin="B0BILDFEH2"]x[/amz_link]</p>'] as $fn_ => $rv_) { if (!function_exists($fn_)) { eval('function ' . $fn_ . '(...$a) { return ' . var_export($rv_, true) . '; }'); } }
+$GLOBALS['opt']['sab_bildfehler'] = ['B0BILDFEH2|5' => ['asin' => 'B0BILDFEH2', 'post' => 5, 'ts' => 1, 'art' => 'Bild'], 'B0BILDNEU3|5' => ['asin' => 'B0BILDNEU3', 'post' => 5, 'ts' => time(), 'art' => 'Bild']];
+$mBh = new ReflectionMethod('SAB', 'bildfehler_html'); $mBh->setAccessible(true); $bh = $mBh->invoke(null);
+ok(strpos($bh, '/dp/B0BILDFEH2') !== false && (new ReflectionMethod('SAB', 'kurz_wort'))->invoke(null, 'Elektrozaun Akku Weidezaun Test') === 'Elektrozaun Akku Weidezaun …' && strpos($bh, 'sab_zeige=B0BILDFEH2') !== false && strpos($bh, 'Editor') !== false, 'Bildwarnung: ASIN klickbar, Artikelname nur drei Wörter, Sprung zur Stelle');
+ok(strpos($bh, 'B0BILDNEU3') === false && isset(((array) get_option('sab_bildfehler', []))['B0BILDNEU3|5']), 'Bildwarnung: gerade erst eingetragenes Produkt wird nicht gemeldet, aber gemerkt');
+unset($GLOBALS['opt']['sab_bildfehler']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

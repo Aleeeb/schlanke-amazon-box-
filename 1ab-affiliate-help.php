@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.0
+ * Version: 0.88.1
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.0';
+    const VERSION = '0.88.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -936,13 +936,30 @@ final class SAB {
         return '<div class="notice notice-warning inline"><p><strong>Kurzname prüfen (' . count($rest) . '):</strong> Diese neu getauschten Produkte haben noch keinen eigenen Kurznamen (Stil „Produktart | Merkmal“). Die Mac-Sitzung trägt ihn bei „Produkte und Ersatzlisten“ ein.</p><ul style="margin-left:18px;list-style:disc">' . implode('', array_slice($zeilen, 0, 40)) . '</ul></div>';
     }
 
+    /** Steht dieses Produktbild wirklich noch aus? Frisch eingetragene Produkte werden zuerst sofort abgerufen (höchstens $budget je Aufruf, je ASIN nur alle 5 Minuten), nie nur wegen eines noch fehlenden Zwischenspeichers gemeldet. */
+    private static function bild_noch_offen(array $e, string $land, int &$budget): ?bool {   // true = fehlt, false = behoben, null = Abruf läuft noch (merken, nicht melden)
+        $asin = (string) $e['asin']; $p = get_transient("sab_{$land}_" . $asin); $p = is_array($p) ? $p : null;
+        if (self::hat_bild($p)) { return false; }
+        if ($p === null) {
+            $v = "sab_bf_{$land}_" . $asin;
+            if ($budget > 0 && !get_transient($v)) { $budget--; set_transient($v, 1, 5 * MINUTE_IN_SECONDS); $p = self::produkt($asin, $land, false, true); if (self::hat_bild($p)) { return false; } }
+            if ($p === null && time() - (int) ($e['ts'] ?? 0) < 15 * MINUTE_IN_SECONDS) { return null; }   // gerade erst eingetragen, Abruf läuft noch: noch kein Alarm
+        }
+        return true;
+    }
+
+    private static function kurz_wort(string $t, int $n = 3): string {
+        $w = preg_split('/\s+/u', trim(strip_tags($t)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return implode(' ', array_slice($w, 0, $n)) . (count($w) > $n ? ' …' : '');
+    }
+
     /** Rote Warnung über fehlenden Produktbildern (Priorität vor allem anderen). Behobene Fälle verschwinden von selbst. */
     private static function bildfehler_html(): string {
         $l = (array) get_option('sab_bildfehler', []); if (!$l) { return ''; }
-        $land = self::land(''); $rest = []; $nach = [];
+        $land = self::land(''); $rest = []; $nach = []; $budget = 4;
         foreach ($l as $k => $e) {
-            $p = get_transient("sab_{$land}_" . $e['asin']); if (!is_array($p)) { $p = null; }   // get_transient liefert false, wenn nichts da ist
-            if (self::hat_bild($p)) { continue; }   // Bild ist inzwischen da
+            $of_ = self::bild_noch_offen($e, $land, $budget); if ($of_ === false) { continue; }   // Bild ist inzwischen da
+            if ($of_ === null) { $rest[$k] = $e; continue; }   // Abruf läuft noch: behalten, aber noch nicht melden
             if ((int) $e['post'] <= 0 || get_post_status((int) $e['post']) !== 'publish') { continue; }   // Vorschau außerhalb eines Artikels oder Artikel nicht mehr veröffentlicht: keine Warnung
             $rest[$k] = $e; $nach[$e['asin']][] = (int) $e['post'];
         }
@@ -952,8 +969,13 @@ final class SAB {
         $zeilen = [];
         foreach (array_slice($nach, 0, 40, true) as $asin => $posts) {
             $links = [];
-            foreach (array_slice($posts, 0, 4) as $pid) { $links[] = '<a href="' . esc_url(get_edit_post_link($pid)) . '">' . esc_html(get_the_title($pid) ?: ('Beitrag ' . $pid)) . '</a>'; }
-            $zeilen[] = '<li><code>' . esc_html($asin) . '</code> auf ' . count($posts) . ' Seite(n): ' . implode(', ', $links) . (count($posts) > 4 ? ' …' : '') . '</li>';
+            foreach (array_slice($posts, 0, 4) as $pid) {
+                $c_ = (string) get_post_field('post_content', $pid); $o_ = self::stellen_gruppen($c_, (string) $asin); $nr = (int) ($o_[0] ?? 1);
+                $tt = self::kurz_wort((string) (get_the_title($pid) ?: ('Beitrag ' . $pid)));
+                $links[] = '<a href="' . esc_url(add_query_arg(['sab_zeige' => $asin, 'sab_nr' => $nr], (string) get_permalink($pid))) . '" target="_blank" rel="noopener" title="Seite ansehen, springt zur Stelle">' . esc_html($tt) . '</a> (<a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . rawurlencode((string) $asin) . '&sab_nr=' . $nr)) . '" target="_blank" rel="noopener">Editor</a>)';
+            }
+            $alt_ = get_option("sab_alt_{$land}_{$asin}"); $ti = (string) (self::produkte()[$asin] ?? '') ?: (string) (is_array($alt_) ? ($alt_['titel'] ?? '') : '');
+            $zeilen[] = '<li><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a>' . ($ti !== '' ? ' ' . esc_html(self::kurz_wort($ti, 8)) : '') . ' auf ' . count($posts) . ' Seite(n): ' . implode(', ', $links) . (count($posts) > 4 ? ' …' : '') . '</li>';
         }
         return '<div class="notice notice-error" style="border-left-width:8px"><p><strong>Produktbilder fehlen (' . count($nach) . ' Produkte):</strong> An diesen Stellen bekommen Besucher kein Bild. Das hat Vorrang vor allem anderen: Produkt ersetzen oder Bild bei Amazon prüfen.</p><ul style="margin-left:18px;list-style:disc">' . implode('', $zeilen) . '</ul><p><a class="button button-primary" href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Zum Austausch: dringend tauschen</a></p></div>';
     }
@@ -961,9 +983,9 @@ final class SAB {
     /** Fehlende Produktbilder zählen (nur Artikel, die noch veröffentlicht sind und deren Bild noch fehlt): [Produkte, Stellen]. */
     public static function bildfehler_zaehlen(): array {
         $l = (array) get_option('sab_bildfehler', []); if (!$l) { return [0, 0]; }
-        $land = self::land(''); $asins = []; $stellen = 0;
+        $land = self::land(''); $asins = []; $stellen = 0; $budget = 1;
         foreach ($l as $e) {
-            $p = get_transient("sab_{$land}_" . $e['asin']); if (self::hat_bild(is_array($p) ? $p : null)) { continue; }
+            if (self::bild_noch_offen($e, $land, $budget) !== true) { continue; }
             if ((int) $e['post'] <= 0 || get_post_status((int) $e['post']) !== 'publish') { continue; }
             $asins[$e['asin']] = 1; $stellen++;
         }
