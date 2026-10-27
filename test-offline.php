@@ -108,7 +108,7 @@ ok(strpos($f, 'afiliado de Amazon') !== false, 'Hinweis automatisch (es)');
 ok(strpos($f, 'Partnerlinks auf dieser Seite') === false, 'Warnbox nur für Admins');
 ok(($GLOBALS['opt']['sab_linkwarnung'][42]['n'] ?? 0) === 15, 'Warnung in Verwaltung gemerkt');
 $GLOBALS['admin'] = true; ob_start(); SAB::fuss(); $f = ob_get_clean();
-ok(strpos($f, '15 Partnerlinks') !== false, 'Warnbox für Admin');
+ok(strpos($f, '15 Partnerlinks') === false, 'Gelbe Warnbox im Frontend entfernt (auch für Admin)');
 $h = $GLOBALS['sc']['amz_hinweis'](['land' => 'co.uk']);
 ok(strpos($h, 'Amazon Associate') !== false, 'amz_hinweis land=co.uk');
 
