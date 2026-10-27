@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.0
+ * Version: 0.89.1
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.0';
+    const VERSION = '0.89.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1811,7 +1811,7 @@ var t=a.getAttribute('data-sab-t')||a.getAttribute('data-aawp-product-title')||a
 if(!t){t=(u.pathname.split('/')[1]||'').replace(/-/g,' ')}
 t=t.replace(/[^\wÀ-ɏ ]+/g,' ').replace(/\s+/g,' ').trim().split(' ').slice(0,8).join(' ');if(!t)continue;
 var ma=null,lm=a.getAttribute('data-sab-l');if(lm){lm.split(',').forEach(function(x){var q=x.split(':');if(q[0]===w&&/^[A-Z0-9]{10}$/.test(q[1]||''))ma=q[1]})}
-a.href=ma?'https://www.amazon.'+w+'/dp/'+ma+'?tag='+T[w]:'https://www.amazon.'+w+'/s?k='+encodeURIComponent(t)+'&tag='+T[w];
+a.setAttribute('data-sab-z',w+':'+(ma?'a':'s'));a.href=ma?'https://www.amazon.'+w+'/dp/'+ma+'?tag='+T[w]:'https://www.amazon.'+w+'/s?k='+encodeURIComponent(t)+'&tag='+T[w];
 if(a.hasAttribute('data-aawp-tracking-id'))a.setAttribute('data-aawp-tracking-id',T[w]);n++}
 return n}
 window.sabGeoPick=pick;window.sabGeoRun=run;
@@ -2132,7 +2132,7 @@ JS;
 
     public static function tabelle(): void {
         global $wpdb;
-        if (!isset($wpdb) || get_option('sab_db_version') === '3') { return; }
+        if (!isset($wpdb) || get_option('sab_db_version') === '4') { return; }
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $t = self::klicktabelle();
         dbDelta("CREATE TABLE $t (
@@ -2145,12 +2145,13 @@ JS;
             var CHAR(1) NOT NULL DEFAULT '',
             pfad VARCHAR(190) NOT NULL DEFAULT '',
             anker VARCHAR(80) NOT NULL DEFAULT '',
+            ziel VARCHAR(10) NOT NULL DEFAULT '',
             zurueck_s INT UNSIGNED NULL,
             PRIMARY KEY (id),
             KEY asin (asin),
             KEY kid (kid)
         ) {$wpdb->get_charset_collate()};");
-        update_option('sab_db_version', '3', false);
+        update_option('sab_db_version', '4', false);
     }
 
     public static function rest(): void {
@@ -2193,6 +2194,7 @@ JS;
                     'var' => substr(preg_replace('/[^A-D]/', '', (string) ($d['var'] ?? '')), 0, 1),
                     'typ' => $typ, 'pfad' => substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190),
                     'anker' => substr(preg_replace('/[^A-Za-z0-9_.:-]/', '', (string) ($d['anker'] ?? '')), 0, 80),
+                    'ziel' => preg_match('/^(com|ca|com\.au):[as]$/', (string) ($d['z'] ?? '')) ? (string) $d['z'] : '',   // Länder-Umschaltung: Zielstore und a = ASIN im Land, s = Suche
                 ]);
             }
         }
@@ -2208,7 +2210,7 @@ JS;
            . 'function H(a){var r="",h=document.querySelectorAll("h2[id],h3[id],h4[id]"),i;for(i=0;i<h.length;i++){if(h[i].compareDocumentPosition(a)&4)r=h[i].id}return r}'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
-           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a)});'
+           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||""});'
            . 'p={id:id,t:Date.now(),h:false}},true);'
            . 'document.addEventListener("visibilitychange",function(){if(!p)return;'
            . 'if(document.visibilityState==="hidden"){p.h=true;return}'
@@ -2558,6 +2560,13 @@ JS;
         $svg .= '</svg><p id="sab-bal-info" style="margin:6px 0 0;font-weight:600;min-height:1.5em">Balken antippen: Klicks dieses Tages</p>'
             . '<script>(function(){var s=document.getElementById("sab-bal"),i=document.getElementById("sab-bal-info");if(!s)return;s.addEventListener("click",function(e){var g=e.target.closest&&e.target.closest(".sab-b");if(g)i.textContent=g.getAttribute("data-t")})})();</script>';
 
+        $ziel_h = '';
+        $zr = (array) $wpdb->get_results($wpdb->prepare("SELECT ziel, COUNT(*) n FROM $t WHERE ts >= %s AND ziel <> '' GROUP BY ziel ORDER BY n DESC", $ab), ARRAY_A);
+        if ($zr) {
+            $zn = ['com' => 'USA', 'ca' => 'Kanada', 'com.au' => 'Australien/Neuseeland']; $zs = 0; $zz = '';
+            foreach ($zr as $r) { [$lz, $art] = explode(':', (string) $r['ziel']) + ['', '']; $zs += (int) $r['n']; $zz .= '<tr><td>' . esc_html($zn[$lz] ?? $lz) . '</td><td>' . ($art === 'a' ? 'direkt zur ASIN im Land' : 'zur Suche im Land') . '</td><td>' . (int) $r['n'] . '</td></tr>'; }
+            $ziel_h = '<h3 style="margin-top:1.5em">Umgeleitete Klicks (Besucher aus anderen Ländern)</h3><p class="description">' . $zs . ' von ' . $summe . ' Klicks (' . ($summe ? round(100 * $zs / $summe) : 0) . ' %) gingen über die Länder-Umschaltung zum Amazon des Besucherlandes.</p><table class="widefat striped" style="max-width:560px"><thead><tr><th>Ziel</th><th>wohin</th><th>Klicks</th></tr></thead><tbody>' . $zz . '</tbody></table>';
+        } elseif (get_option('sab_geo') === '1') { $ziel_h = '<h3 style="margin-top:1.5em">Umgeleitete Klicks</h3><p class="description">Die Länder-Umschaltung ist an, in diesem Zeitraum gab es aber noch keine umgeleiteten Klicks.</p>'; }
         // Daten je Produkt und je Seite
         $zeilen = (array) $wpdb->get_results($wpdb->prepare("SELECT asin, COUNT(*) n, SUM(typ='bild') b, SUM(typ<>'bild') x, SUM(zurueck_s IS NOT NULL) z, AVG(zurueck_s) m FROM $t WHERE ts >= %s GROUP BY asin ORDER BY n DESC", $ab), ARRAY_A);
         $seiten = [];
@@ -2573,7 +2582,7 @@ JS;
         $h = '<h2>Statistik</h2><style>.sab-st-k{display:flex;gap:10px;align-items:center;padding:10px;cursor:pointer;list-style:none}.sab-st-k::-webkit-details-marker{display:none}.sab-st-p{background:#fff;border:1px solid #dcdcde;border-radius:8px;margin:0 0 8px}.sab-st-p[open]{border-color:#2271b1}.sab-st-z{flex:1;min-width:0}.sab-st-z b{display:block;overflow-wrap:anywhere}.sab-st-z small{color:#50575e}.sab-st-n{font-size:20px;font-weight:700;text-align:right;min-width:48px}.sab-st-n small{display:block;font-size:11px;font-weight:400;color:#50575e}.sab-st-s{padding:0 10px 10px 10px;border-top:1px solid #f0f0f1}.sab-st-s li{margin:6px 0;overflow-wrap:anywhere}.sab-sc{display:inline-block;padding:1px 7px;border-radius:10px;background:#f0f6fc;color:#0a4b78;font-size:12px;font-weight:600}</style>'
           . '<p>Zeitraum: ';
         foreach ([7, 30, 90] as $z) { $h .= ($z === $tage ? '<strong>' . $z . ' Tage</strong>' : '<a href="' . esc_url(add_query_arg(['page' => 'sab-statistik', 'tage' => $z], admin_url('admin.php'))) . '">' . $z . ' Tage</a>') . ' · '; }
-        $h .= '<strong>' . $summe . '</strong> Klicks gesamt. Gezählt werden Klicks auf Plugin-Links; Bots und angemeldete Redakteure werden ausgelassen.</p>' . $svg
+        $h .= '<strong>' . $summe . '</strong> Klicks gesamt. Gezählt werden Klicks auf Plugin-Links; Bots und angemeldete Redakteure werden ausgelassen.</p>' . $svg . $ziel_h
           . '<p class="description">Update-Prüfung: ' . ($us ? esc_html(wp_date('d.m.Y H:i', (int) $us['ts']) . ', Antwort ' . $us['code'] . ', Version im Repo ' . ($us['version'] ?: '–')) : 'noch nicht gelaufen') . '</p>';
         $h .= '<h3 style="margin-top:1.5em">Meistgeklickte Produkte</h3><p class="description">Auf ein Produkt tippen: darunter stehen die Seiten, von denen die Klicks kamen (mit Sprung zur Stelle im Artikel, soweit die Stelle erfasst ist). '
           . '<strong>Zurück</strong> = Besucher kam nach dem Klick in den Tab der Webseite zurück. Das wird nur gemessen, wenn der Besucher später zurückkehrt; wer Amazon im selben Tab weiterbenutzt oder den Tab schließt, zählt nicht mit. '

@@ -1418,4 +1418,7 @@ $mLz = new ReflectionMethod('SAB', 'laender_zeile'); $mLz->setAccessible(true);
 $lz = $mLz->invoke(null, 'B0UKPROD01', ['titel' => 'Lichtwecker Sonnenaufgang', 'prime' => true, 'sterne' => 4.4, 'anzahl' => 800, 'preis' => '24,99 €'], 'Lichtwecker | Sonnenaufgang', $GLOBALS['opt']['sab_laender_map']['B0UKPROD01'], ['ca' => [['asin' => 'B0CAPROD01', 'titel' => 'CA Wecker', 'sterne' => '4,0', 'anzahl' => '50', 'prime' => 'nein', 'liefer' => '', 'preis' => '', 'ts' => 1]]]);
 ok(strpos($lz, 'freigegeben') !== false && strpos($lz, 'Nach UK-Titel suchen') !== false && strpos($lz, 'amazon.ca/s?k=Lichtwecker%20Sonnenaufgang') !== false && strpos($lz, 'value="ok|B0CAPROD01"') !== false && strpos($lz, 'amazon.com.au') !== false, 'Länder: Zeile zeigt freigegeben, Vorschlag mit Knöpfen, Suche je Land');
 unset($GLOBALS['opt']['sab_laender_map']);
+$GLOBALS['opt']['sab_geo'] = '1'; $GLOBALS['opt']['sab_tags'] = "co.uk=uk-21\ncom=us-20"; ob_start(); SAB::geo_skript(); $g3 = ob_get_clean(); unset($GLOBALS['opt']['sab_geo'], $GLOBALS['opt']['sab_tags']);
+ok(strpos($g3, "data-sab-z") !== false, 'Länder-Umschaltung markiert umgeleitete Links für die Statistik');
+ok(strpos(file_get_contents(__DIR__ . '/schlanke-amazon-box.php'), 'z:a.getAttribute("data-sab-z")') !== false, 'Klickmessung sendet das Umschalt-Ziel mit (ohne IP)');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

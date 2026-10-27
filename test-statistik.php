@@ -40,6 +40,7 @@ if (!function_exists('home_url')) { function home_url($p = '') { return 'http://
 if (!defined('ARRAY_A')) define('ARRAY_A', 'ARRAY_A');
 class FW { public $prefix = 'wp_'; function prepare($q, ...$a) { return $q; } function get_results($q, $o = null) {
   if (strpos($q, 'DATE(ts)') !== false) return [['d' => gmdate('Y-m-d'), 'n' => 5], ['d' => gmdate('Y-m-d', time() - 86400), 'n' => 2]];
+  if (strpos($q, "ziel <>") !== false) return [['ziel' => 'com:a', 'n' => 2], ['ziel' => 'ca:s', 'n' => 1]];
   return [['asin' => 'B000000001', 'n' => 5, 'b' => 3, 'x' => 2, 'z' => 1, 'm' => 120], ['asin' => 'B000000002', 'n' => 2, 'b' => 0, 'x' => 2, 'z' => 0, 'm' => null]]; } }
 $GLOBALS['wpdb'] = new FW;
 require __DIR__ . '/schlanke-amazon-box.php';
@@ -48,4 +49,5 @@ $h = $m->invoke(null);
 $fail = 0; function ok($c, $n) { global $fail; echo ($c ? 'OK   ' : 'FEHLER ') . $n . "\n"; if (!$c) $fail++; }
 ok(strpos($h, '<svg') !== false && strpos($h, '<strong>7</strong> Klicks gesamt') !== false, 'Statistik: Grafik und Summe');
 ok(strpos($h, 'B000000001') !== false && strpos($h, '2 Min.') !== false && strpos($h, 'zu wenig Daten') !== false && strpos($h, '71 %') !== false, 'Statistik: Liste mit Anteil und Zeit');
+ok(strpos($h, 'Umgeleitete Klicks') !== false && strpos($h, 'USA') !== false && strpos($h, 'direkt zur ASIN im Land') !== false && strpos($h, 'Kanada') !== false && strpos($h, '3 von 7 Klicks (43 %)') !== false, 'Statistik: umgeleitete Klicks nach Land und Art');
 echo $fail ? "$fail FEHLER\n" : "Alles bestanden\n";
