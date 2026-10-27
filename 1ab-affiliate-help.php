@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.29
+ * Version: 0.89.30
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.29';
+    const VERSION = '0.89.30';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -334,6 +334,39 @@ final class SAB {
         return $w;
     }
 
+    const LERN_URL = 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/lernen.json';
+
+    /** Export: nur Gewichte, Rundenzahl und Version, keine ASINs, Artikel oder Besucherdaten. */
+    public static function lern_export(): string {
+        $ld = self::lern_daten();
+        return (string) wp_json_encode(['format' => 1, 'stand' => gmdate('Y-m-d'), 'plugin' => self::VERSION, 'runden' => $ld['runden'], 'w' => array_map(fn($g) => round($g, 3), $ld['w'])]);
+    }
+
+    /** Import: Gewichte der anderen Seiten werden nach Rundenzahl gemischt (gewichteter Mittelwert), die Runden zählen zusammen. @return array{0:bool,1:string} */
+    public static function lern_import(string $json): array {
+        $in = json_decode($json, true);
+        if (!is_array($in) || (int) ($in['format'] ?? 0) !== 1 || !is_array($in['w'] ?? null)) { return [false, 'Das ist keine gültige Lerndatei.']; }
+        $r_in = max(0, min(1000, (int) ($in['runden'] ?? 0)));
+        if ($r_in < 1) { return [false, 'Die Lerndatei hat noch keine Runden.']; }
+        $ld = self::lern_daten(); $w = $ld['w']; $r0 = $ld['runden'];
+        foreach ($w as $k => $g) { if (isset($in['w'][$k]) && is_numeric($in['w'][$k])) { $w[$k] = max(0.0, min(3.0, ($g * max(1, $r0) + (float) $in['w'][$k] * $r_in) / (max(1, $r0) + $r_in))); } }
+        $log = $ld['log']; $log[] = ['t' => gmdate('Y-m-d'), 'import' => $r_in];
+        self::lern_speichern($w, $r0 + $r_in, $log);
+        return [true, 'Übernommen: ' . $r_in . ' Runden der anderen Seiten eingemischt.'];
+    }
+
+    /** Holt (nur mit Haken in den Einstellungen) die gemeinsame Lerndatei aus dem Repo; jede Fassung nur einmal. Es werden keine Daten gesendet. */
+    public static function lern_abruf(bool $erzwingen = false): string {
+        if (!$erzwingen && !get_option('sab_lern_repo')) { return ''; }
+        $r = wp_remote_get(self::LERN_URL, ['timeout' => 8]);
+        if (is_wp_error($r) || (int) wp_remote_retrieve_response_code($r) !== 200) { return 'Lerndatei nicht abrufbar.'; }
+        $body = (string) wp_remote_retrieve_body($r); $in = json_decode($body, true);
+        $marke = md5($body);
+        if (!is_array($in) || $marke === get_option('sab_lern_marke')) { return is_array($in) ? 'Diese Fassung wurde schon übernommen.' : 'Lerndatei ungültig.'; }
+        [$ok, $t] = self::lern_import($body); if ($ok) { update_option('sab_lern_marke', $marke, false); }
+        return $t;
+    }
+
     private static function lern_speichern(array $w, int $runden, array $log): void {
         update_option('sab_lern_w', ['w' => $w, 'runden' => $runden, 'log' => array_slice($log, -200)], false);
     }
@@ -347,6 +380,9 @@ final class SAB {
         $h .= '<p><strong>Runden:</strong> ' . $ld['runden'] . ' · <strong>Platz 1 gewählt (letzte ' . count($letzte) . '):</strong> ' . ($letzte ? round(100 * $e1 / count($letzte)) . ' %' : '–') . ' · <strong>Einfluss auf den Austausch:</strong> ' . (self::lern_aktiv() ? '<span style="color:#1a7f37">aktiv</span>' : 'noch nicht aktiv') . '</p><table class="widefat striped" style="max-width:560px"><tbody>';
         foreach ($w as $k => $g) { $h .= '<tr><td style="width:180px">' . esc_html(self::LERN_NAMEN[$k]) . '</td><td><span style="display:inline-block;height:12px;width:' . (int) round(100 * $g) . 'px;background:#2271b1"></span> ' . esc_html(str_replace('.', ',', (string) round($g, 2))) . '</td></tr>'; }
         $h .= '</tbody></table><form method="post" style="margin:8px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_reset"><button class="button button-small">Gewichte zurücksetzen</button></form>';
+        $h .= '<h3>Lernstand teilen</h3><p class="description">Export enthält nur die sechs Gewichte, die Rundenzahl und die Version, keine Produkte, Artikel oder Besucherdaten. Eine fremde Lerndatei einfügen mischt ihre Gewichte nach Rundenzahl ein.</p><textarea readonly rows="3" class="large-text code" onclick="this.select()">' . esc_textarea(self::lern_export()) . '</textarea>'
+            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_import"><textarea name="sab_lern_json" rows="3" class="large-text code" placeholder="Lerndatei der anderen Seite hier einfügen"></textarea><p><button class="button">Importieren</button></p></form>'
+            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_repo"><p><label><input type="checkbox" name="sab_lern_repo" value="1"' . (get_option('sab_lern_repo') ? ' checked' : '') . '> Gemeinsame Lerndatei aus dem Repo täglich abrufen (reiner Download, es werden keine Daten gesendet)</label> <button class="button">Speichern</button> <button class="button" name="sab_jetzt" value="1">Jetzt abrufen</button></p></form>';
         $fm = function (string $form, array $extra = [], string $text = '', string $klasse = 'button') { $i = ''; foreach ($extra as $k => $v) { $i .= '<input type="hidden" name="' . esc_attr($k) . '" value="' . esc_attr((string) $v) . '">'; } return '<form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="' . $form . '">' . $i . '<button class="' . $klasse . '">' . esc_html($text) . '</button></form> '; };
         if (empty($sim['alt'])) { return $h . '<p>' . $fm('lernen_start', [], 'Ausfall simulieren', 'button button-primary button-hero') . '</p>'; }
         $alt = (string) $sim['alt']; $liste = (array) $sim['liste']; $pos = (int) ($sim['pos'] ?? 0);
@@ -1371,6 +1407,7 @@ final class SAB {
         self::alte_bilder_loeschen();
         $land = self::land('');
         self::uebersicht_holen($land);   // hält den täglichen Score-Verlauf fest
+        try { self::lern_abruf(); } catch (\Throwable $e) { /* optional */ }
         try { self::alarm_berechnen(); } catch (\Throwable $e) { /* der Alarm darf die Prüfung nie stören */ }
         $lauf = self::pruef_neuer_lauf();
         foreach ($lauf['liste'] as $asin) { self::pruef_eins($asin, $lauf); }
@@ -6960,6 +6997,11 @@ JS;
             } elseif ($form === 'ersatz') {
                 update_option('sab_ersatz', sanitize_textarea_field(wp_unslash($_POST['sab_ersatz'] ?? '')), false); delete_transient('sab_alle_asins'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
                 $meldung = 'Ersatz-Datenbank gespeichert (' . count(self::ersatz_liste()) . ' Einträge).';
+            } elseif ($form === 'lernen_import') {
+                [, $meldung] = self::lern_import((string) wp_unslash($_POST['sab_lern_json'] ?? ''));
+            } elseif ($form === 'lernen_repo') {
+                update_option('sab_lern_repo', !empty($_POST['sab_lern_repo']) ? 1 : 0, false);
+                $meldung = !empty($_POST['sab_jetzt']) ? self::lern_abruf(true) : 'Einstellung gespeichert.';
             } elseif ($form === 'lernen_reset') {
                 delete_option('sab_lern_w'); delete_option('sab_lern_sim'); $meldung = 'Gewichte zurückgesetzt.';
             } elseif ($form === 'lernen_ende') {

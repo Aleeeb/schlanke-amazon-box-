@@ -1587,4 +1587,13 @@ ok(!SAB::lern_aktiv(), 'Lernen ohne Runden nicht aktiv');
 $GLOBALS['opt']['sab_lern_w'] = ['w' => ['titel' => 9, 'art' => 1], 'runden' => 12, 'log' => []]; $ldx = SAB::lern_daten(); ok(SAB::lern_aktiv() && $ldx['w']['titel'] === 3.0 && $ldx['w']['score'] === 1.0, 'Gespeicherte Gewichte begrenzt, Rest Standard');
 unset($GLOBALS['opt']['sab_lern_w']);
 $rl = new ReflectionMethod('SAB', 'lernen_html'); $rl->setAccessible(true); ok(strpos($rl->invoke(null), 'Ausfall simulieren') !== false, 'Reiter Lernen rendert');
+// 0.89.30: Lernen teilen
+$ex = SAB::lern_export(); $exd = json_decode($ex, true);
+ok($exd['format'] === 1 && isset($exd['w']['titel']) && count($exd) === 5 && strpos($ex, 'B0') === false, 'Export enthält nur Gewichte, Runden, Version');
+ok(!SAB::lern_import('Quatsch')[0] && !SAB::lern_import(json_encode(['format' => 1, 'w' => ['titel' => 2], 'runden' => 0]))[0], 'Import lehnt Ungültiges und Leeres ab');
+$GLOBALS['opt']['sab_lern_w'] = ['w' => ['titel' => 1.0], 'runden' => 10, 'log' => []];
+[$iok] = SAB::lern_import(json_encode(['format' => 1, 'w' => ['titel' => 2.0, 'score' => 99], 'runden' => 10])); $li = SAB::lern_daten();
+ok($iok && abs($li['w']['titel'] - 1.5) < 0.001 && $li['w']['score'] === 3.0 && $li['runden'] === 20, 'Import mischt nach Rundenzahl, Grenzen bleiben');
+unset($GLOBALS['opt']['sab_lern_w']);
+ok(SAB::lern_abruf() === '', 'Ohne Haken kein Abruf');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
