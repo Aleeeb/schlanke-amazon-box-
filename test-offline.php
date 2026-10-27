@@ -1442,4 +1442,10 @@ $e12 = '<h2>Schneckenschutz im Garten</h2><p>' . str_repeat('Langer Fließtext o
 ok(strpos(SAB::kontext_titel($e12, 'B0A1234567'), 'Schneckenschutz im Garten') === false, 'Kontexttitel: weit entfernte Überschrift wird nicht genommen');
 $e13 = '<p>Pflanzenhut 24er Set</p><p>[amz_bild asin="B0A1234567"][/amz_bild]</p><p>[amz_link asin="B0A1234567"]Angebot bei Amazon[/amz_link]</p>';
 ok(SAB::kontext_titel($e13, 'B0A1234567') === 'Pflanzenhut 24er Set', 'Kontexttitel: unmittelbarer Text vor der Stelle');
+// 0.89.9: Kontrolle auch für Tausch aus dem Reiter (Eintrag ohne art=stelle)
+$GLOBALS['opt']['sab_kontrolle'] = ['k1' => ['ts' => 1, 'alt' => 'B0ALT00001', 'neu' => 'B0NEU00001', 'stellen' => [['pid' => 77, 'titel' => 'X']]]];
+$rm = new ReflectionMethod('SAB', 'kontrolle_stellen_ids'); $rm->setAccessible(true);
+$rt = new ReflectionMethod('SAB', 'kontrolle_tab_id'); $rt->setAccessible(true);
+ok($rm->invoke(null, 77, 'B0NEU00001') === ['k1'] && $rm->invoke(null, 78, 'B0NEU00001') === [] && $rt->invoke(null, 77, 'B0NEU00001') === 'k1', 'Kontrolle an der Stelle auch nach Tausch aus dem Reiter');
+unset($GLOBALS['opt']['sab_kontrolle']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.8
+ * Version: 0.89.9
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.8';
+    const VERSION = '0.89.9';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1951,8 +1951,18 @@ JS;
     /** Kontrolleinträge einer Frontend-Tausch-Stelle (Artikel + neue ASIN) in der Kontrollliste. @return string[] Schlüssel */
     private static function kontrolle_stellen_ids(int $pid, string $neu): array {
         $out = [];
-        foreach ((array) get_option('sab_kontrolle', []) as $id => $e) { if (($e['art'] ?? '') === 'stelle' && (int) ($e['pid'] ?? 0) === $pid && (string) ($e['neu'] ?? '') === $neu) { $out[] = (string) $id; } }
+        foreach ((array) get_option('sab_kontrolle', []) as $id => $e) {
+            if (($e['art'] ?? '') === 'stelle' && (int) ($e['pid'] ?? 0) === $pid && (string) ($e['neu'] ?? '') === $neu) { $out[] = (string) $id; }
+            elseif (($e['art'] ?? '') !== 'stelle' && (string) ($e['neu'] ?? '') === $neu && in_array($pid, array_map('intval', array_column((array) ($e['stellen'] ?? []), 'pid')), true)) { $out[] = (string) $id; }   // Tausch aus dem Reiter Austausch (eigene ASIN/Link): gleiche Kontrolle an der Stelle
+        }
         return $out;
+    }
+
+    /** Ist die Kontrolle ein Tausch aus dem Reiter (gilt für mehrere Artikel)? Dann gilt „Rückgängig“ für den ganzen Tausch. */
+    private static function kontrolle_tab_id(int $pid, string $neu): string {
+        $kk = (array) get_option('sab_kontrolle', []);
+        foreach (self::kontrolle_stellen_ids($pid, $neu) as $id) { if (($kk[$id]['art'] ?? '') !== 'stelle') { return (string) $id; } }
+        return '';
     }
 
     public static function ajax_stelle_ok(): void {
@@ -1968,6 +1978,13 @@ JS;
         check_ajax_referer('sab_stelle', 'n');
         $pid = (int) ($_POST['post'] ?? 0);
         if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $tab = self::kontrolle_tab_id($pid, self::asin((string) ($_POST['neu'] ?? '')));
+        if ($tab !== '') {   // Tausch aus dem Reiter Austausch: ganzen Tausch zurücknehmen (alle betroffenen Artikel)
+            [$ok, $skip] = self::tausch_zurueck($tab);
+            if ($ok < 1) { wp_send_json_error('Nichts zurückgesetzt: ' . ($skip ? 'die Artikel wurden seitdem geändert (bitte unter „Versionen“ zurückgehen).' : 'keine Sicherung gefunden.')); }
+            $kk = (array) get_option('sab_kontrolle', []); unset($kk[$tab]); update_option('sab_kontrolle', $kk, false);
+            wp_send_json_success(['weiter' => admin_url('admin.php?page=sab-austausch')]);
+        }
         $b = (array) get_post_meta($pid, '_sab_stelle_backup', true); $post = get_post($pid);
         $l = end($b);
         if (!$post || !$l) { wp_send_json_error('Es gibt nichts rückgängig zu machen.'); }
@@ -2107,7 +2124,7 @@ JS;
         $eid = function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0;
         $ed = $eid && current_user_can('edit_post', $eid) ? admin_url('post.php?post=' . $eid . '&action=edit&sab_zeige=' . rawurlencode($a)) : '';
         $nr = max(1, (int) ($_GET['sab_nr'] ?? 1));
-        $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch'), 'v' => self::kontrolle_code($eid, strtoupper($a))]) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
+        $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch'), 'v' => self::kontrolle_code($eid, strtoupper($a)), 't' => self::kontrolle_tab_id($eid, strtoupper($a)) !== '']) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
         echo '<script>(function(){var KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
            . 's=(function(l){var o=[],bk="p,div,td,li,figure,h1,h2,h3,h4,h5,h6,section",ck="td,li,.sab-karte,.sab-produkt,.wp-block-column",last=null,lc=null;for(var i=0;i<l.length;i++){var b=l[i].closest(bk)||l[i].parentNode,c=l[i].closest(ck);if(last&&(b===last||(c&&c===lc))){continue}last=b;lc=c;o.push(l[i])}return o})(Array.prototype.slice.call(s));'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px/1.4 sans-serif;text-align:center;display:flex;flex-wrap:wrap;gap:8px 10px;justify-content:center;align-items:center;max-height:45vh;overflow:auto;box-sizing:border-box";'
@@ -2122,7 +2139,7 @@ JS;
            . 'btn("⇄ Hier tauschen",function(){var o=s[idx].closest("[data-sab-ord]"),q=o?document.querySelector("button.sab-tb[data-o=\""+o.getAttribute("data-sab-ord")+"\"]"):null;if(!q){var bx=s[idx].closest(".sab-karte,.sab-produkt,td")||s[idx].parentNode;q=bx&&bx.querySelector("button.sab-tb")}if(q){q.scrollIntoView({block:"center"});q.click()}else{t.textContent="Hier gibt es keinen Tauschen-Knopf (feste Stelle im Text): bitte im Editor bearbeiten."}});'
            . 'function kpost(act,f){var fd=new FormData();fd.append("action",act);fd.append("n",KC.n);fd.append("post",KC.p);fd.append("neu",KC.a);fetch(KC.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){t.textContent="Verbindungsfehler"})}'
            . 'if(KC&&KC.v&&KC.v.nachher){btn("Code anzeigen",function(e){var d=document.getElementById("sab-code");if(d){d.remove();return}d=document.createElement("textarea");d.id="sab-code";d.readOnly=true;d.style.cssText="position:fixed;left:8px;right:8px;top:56px;height:42vh;z-index:99998;font:12px monospace;padding:8px";d.value="VORHER:\n"+KC.v.vorher+"\n\nNACHHER:\n"+KC.v.nachher;document.body.appendChild(d);d.select()})}'
-           . 'if(KC){var ok=btn("✓ Kontrolliert, passt",function(){kpost("sab_stelle_ok",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});ok.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2";var rg=btn("✗ Passt nicht, rückgängig",function(){kpost("sab_stelle_zurueck",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});rg.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2"}'
+           . 'if(KC){var ok=btn("✓ Kontrolliert, passt",function(){kpost("sab_stelle_ok",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});ok.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2";var rg=btn("✗ Passt nicht, rückgängig"+(KC.t?" (alle Artikel dieses Tauschs)":""),function(){kpost("sab_stelle_zurueck",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});rg.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2"}'
            . 'if(ed){le=btn("Im Editor bearbeiten",function(e){window.open(e.href,"_blank")});le.href=ed+"&sab_nr="+(idx+1);le.target="_blank";le.onclick=null}'
            . 'var x=btn("×",function(){b.remove()});setTimeout(function(){zeige(idx)},300)})();</script>';
     }
