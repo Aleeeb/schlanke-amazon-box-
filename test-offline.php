@@ -1378,4 +1378,6 @@ $e1 = '<h3>Lichtwecker mit Sonnenaufgang</h3>[amz_bild asin="B0LICHT001"]'; $p1 
 $e2 = '<table><tr><td>[amz_bild asin="B0LICHT002"]<br>Wake-up Light Pro 2</td><td>[amz_bild asin="B0X"]<br>Anderes</td></tr></table>'; $p2 = strpos($e2, '[amz_bild');
 $e3 = '<p>Text davor.</p><p>[amz_bild asin="B0LICHT003"]</p>'; 
 ok(SAB::titel_an_stelle($e1, $p1, 28) === 'Lichtwecker mit Sonnenaufgang' && SAB::titel_an_stelle($e2, $p2, 28) === 'Wake-up Light Pro 2' && SAB::titel_an_stelle($e3, strpos($e3, '[amz_bild'), 28) === 'Text davor.', 'Titel an der Stelle: Einzelbox davor, Tabellenzelle danach');
+// 0.88.8: Amazon-Link statt ASIN einfügen
+ok(SAB::asin_aus_text('https://www.amazon.de/Lichtwecker-Sonnenaufgang/dp/B0CX1ABCDE/ref=sr_1_3?crid=1&tag=x') === 'B0CX1ABCDE' && SAB::asin_aus_text('https://www.amazon.co.uk/gp/product/b0cx1abcde?th=1') === 'B0CX1ABCDE' && SAB::asin_aus_text(' b0cx1abcde ') === 'B0CX1ABCDE' && strlen(SAB::asin_aus_text('https://amzn.to/3abcdef')) !== 10 && strlen(SAB::asin_aus_text('quatsch')) !== 10, 'ASIN aus Amazon-Link, nackter ASIN; Kurzlink und Unsinn werden abgelehnt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
