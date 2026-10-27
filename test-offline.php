@@ -1366,4 +1366,11 @@ ok($zj !== '' && $zrc === 0 && strpos($zj, 'Hier tauschen') !== false, 'Sprung-B
 $GLOBALS['opt']['sab_tags'] = "couk=uk-21"; $GLOBALS['opt']['sab_default_land'] = 'de';
 ok($mSl->invoke(null) === 'co.uk' && SAB::land_schluessel('CO.UK') === 'co.uk' && SAB::land_schluessel('comau') === 'com.au' && SAB::land_schluessel('de') === 'de', 'Ländercode „couk“ ohne Punkt wird als co.uk erkannt');
 unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
+// 0.88.6: Standardland „couk“ (von sanitize_key ohne Punkt gespeichert) + Felder je Shop
+$GLOBALS['opt']['sab_tags'] = "co.uk=uk-21"; $GLOBALS['opt']['sab_default_land'] = 'couk';
+$mLa = new ReflectionMethod('SAB', 'land'); $mLa->setAccessible(true);
+ok($mLa->invoke(null, '') === 'co.uk', 'Standardland „couk“ gespeichert => co.uk (nicht de)');
+$mPf = new ReflectionMethod('SAB', 'partner_felder_html'); $mPf->setAccessible(true); $pf = $mPf->invoke(null);
+ok(strpos($pf, 'sab_tag_f[co.uk]') !== false && strpos($pf, 'value="uk-21"') !== false && strpos($pf, 'sab_tag_f[com.au]') !== false, 'Partner-ID-Felder je Shop, Wert vorbelegt');
+unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

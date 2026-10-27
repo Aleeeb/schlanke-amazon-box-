@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.5
+ * Version: 0.88.6
  * Requires PHP: 7.4
  */
 
@@ -43,11 +43,12 @@ final class SAB {
         'co.uk' => ['www.amazon.co.uk', 'https://api.amazon.co.uk/auth/o2/token'],
         'com'   => ['www.amazon.com',   'https://api.amazon.com/auth/o2/token'],
     ];
+    const PARTNER_SHOPS = ['de' => 'Amazon.de', 'co.uk' => 'Amazon.co.uk', 'com' => 'Amazon.com (USA)', 'ca' => 'Amazon.ca (Kanada)', 'com.au' => 'Amazon.com.au (Australien)', 'fr' => 'Amazon.fr', 'es' => 'Amazon.es', 'it' => 'Amazon.it'];
     const API      = 'https://creatorsapi.amazon/catalog/v1/getItems';
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.5';
+    const VERSION = '0.88.6';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -146,7 +147,7 @@ final class SAB {
     }
 
     private static function standardland_roh(): string {
-        return defined('SAB_DEFAULT_LAND') ? SAB_DEFAULT_LAND : (string) get_option('sab_default_land', 'de');
+        return self::land_schluessel(defined('SAB_DEFAULT_LAND') ? SAB_DEFAULT_LAND : (string) get_option('sab_default_land', 'de'));   // „couk“ (früher ohne Punkt gespeichert) wird zu co.uk
     }
 
     private static function standardland(): string {
@@ -5897,6 +5898,19 @@ JS;
         return $h;
     }
 
+    /** Eingabefelder: je Shop eine Partner-ID (statt Textzeilen, die man falsch schreiben kann). */
+    private static function partner_felder_html(): string {
+        $t = self::tags(); $h = '<table>';
+        foreach (self::PARTNER_SHOPS as $k => $n) { $h .= '<tr><td style="padding:2px 10px 2px 0">' . esc_html($n) . '</td><td><input type="text" name="sab_tag_f[' . esc_attr($k) . ']" class="regular-text code" value="' . esc_attr((string) ($t[$k] ?? '')) . '" placeholder="z. B. meinname-21"></td></tr>'; }
+        return $h . '</table>';
+    }
+
+    private static function land_auswahl_html(): string {
+        $akt = self::standardland_roh(); $h = '<select name="sab_default_land">';
+        foreach (self::LAENDER as $k => $v) { $h .= '<option value="' . esc_attr($k) . '"' . ($k === $akt ? ' selected' : '') . '>' . esc_html($v[0]) . '</option>'; }
+        return $h . '</select>';
+    }
+
     public static function seite(): void {
         if (!current_user_can('manage_options')) { return; }
         $tabs = self::TABS;
@@ -5943,10 +5957,15 @@ JS;
                 update_option('sab_client_id', sanitize_text_field(wp_unslash($_POST['sab_client_id'] ?? '')), false);
                 $geheim = sanitize_text_field(wp_unslash($_POST['sab_client_secret'] ?? ''));
                 if ($geheim !== '') { update_option('sab_client_secret', $geheim, false); } // leer = unverändert
-                update_option('sab_tags', sanitize_textarea_field(wp_unslash($_POST['sab_tags'] ?? '')), false);
+                if (isset($_POST['sab_tag_f']) && is_array($_POST['sab_tag_f'])) {   // ein Feld je Shop; andere, früher von Hand eingetragene Länder bleiben erhalten
+                    $feld = []; foreach (self::PARTNER_SHOPS as $k_ => $n_) { $v_ = trim(sanitize_text_field(wp_unslash((string) ($_POST['sab_tag_f'][$k_] ?? ''))), " \t\"'"); if ($v_ !== '') { $feld[$k_] = $v_; } }
+                    $zeilen_ = []; foreach (self::tags() as $k_ => $v_) { if (!isset(self::PARTNER_SHOPS[$k_])) { $zeilen_[] = $k_ . '=' . $v_; } }
+                    foreach ($feld as $k_ => $v_) { $zeilen_[] = $k_ . '=' . $v_; }
+                    update_option('sab_tags', implode("\n", $zeilen_), false);
+                } else { update_option('sab_tags', sanitize_textarea_field(wp_unslash($_POST['sab_tags'] ?? '')), false); }
                 update_option('sab_tags_extra', sanitize_textarea_field(wp_unslash($_POST['sab_tags_extra'] ?? '')), false);
                 update_option('sab_ebay_ids', sanitize_textarea_field(wp_unslash($_POST['sab_ebay_ids'] ?? '')), false);
-                update_option('sab_default_land', sanitize_key(wp_unslash($_POST['sab_default_land'] ?? 'de')), false);
+                $dl_ = self::land_schluessel(sanitize_text_field(wp_unslash($_POST['sab_default_land'] ?? 'de'))); update_option('sab_default_land', isset(self::LAENDER[$dl_]) ? $dl_ : 'de', false);
                 update_option('sab_geo', !empty($_POST['sab_geo']) ? '1' : '0', false);
                 update_option('sab_hinweis_auto', !empty($_POST['sab_hinweis_auto']) ? '1' : '0', false);
                 update_option('sab_karten_css', !empty($_POST['sab_karten_css']) ? '1' : '0', false);
@@ -6313,8 +6332,7 @@ JS;
                . esc_attr((string) get_option('sab_client_id', '')) . '"></td></tr>'
                . '<tr><th>Credential Secret</th><td><input type="password" name="sab_client_secret" class="regular-text" autocomplete="new-password" value="" placeholder="'
                . (get_option('sab_client_secret') ? 'gespeichert, leer lassen = unverändert' : '') . '"></td></tr>'
-               . '<tr><th>Partner-IDs</th><td><textarea name="sab_tags" rows="3" class="regular-text code">' . esc_textarea((string) get_option('sab_tags', ''))
-               . '</textarea><p class="description">Pro Zeile: <code>land=partner-id</code>, zum Beispiel <code>es=ayuba09-21</code></p></td></tr>'
+               . '<tr><th>Partner-IDs</th><td>' . self::partner_felder_html() . '<p class="description">Pro Shop eine ID, leer lassen = dort keine. Nicht genutzte Länder einfach leer lassen.</p></td></tr>'
                . '<tr><th>Länder-Umschaltung</th><td><label><input type="checkbox" name="sab_geo" value="1"' . (get_option('sab_geo') === '1' ? ' checked' : '') . '> Amazon-Links für Besucher aus anderen Ländern auf deren Amazon-Shop (Suche nach dem Produktnamen) umstellen</label><p class="description">Erkennung nur im Browser aus Zeitzone und Browsersprache: keine IP, kein Cookie, nichts wird übertragen. Wirkt nur mit je einer Partner-ID pro Land (oben, Zeile <code>ca=…</code>, <code>com.au=…</code>); auf Slughelp sind die bisherigen IDs vorbelegt. Fehlt etwas, bleibt der normale Link.</p></td></tr>'
                . '<tr><th>Weitere Partner-IDs</th><td><textarea name="sab_tags_extra" rows="3" class="regular-text code">' . esc_textarea((string) get_option('sab_tags_extra', ''))
                . '</textarea><p class="description">Eine ID pro Zeile, zum Beispiel <code>cpflanzhilfe-21</code> (optional mit Notiz dahinter). Nur diese IDs darf ein Platzhalter mit <code>tag="…"</code> oder <code>tracking_id="…"</code> statt der Standard-ID benutzen. Der Umbau übernimmt sie so.</p></td></tr>'
@@ -6335,8 +6353,7 @@ JS;
                . '<tr><th>Button-Test</th><td><input type="text" name="sab_btn_a" class="regular-text" placeholder="Text A, z. B. Ver oferta en Amazon" value="' . esc_attr((string) get_option('sab_btn_a', '')) . '"> '
                . '<input type="text" name="sab_btn_b" class="regular-text" placeholder="Text B, z. B. Ver precio en Amazon" value="' . esc_attr((string) get_option('sab_btn_b', '')) . '">'
                . '<p class="description">Beide ausfüllen = A/B-Test der Button-Texte (jeder Artikel bekommt fest einen Text; Auswertung unter A/B-Tests als „button-test“). Leer lassen = Standardtext. Gilt nur für Boxen ohne eigenen Text.</p></td></tr>'
-               . '<tr><th>Standardland</th><td><input type="text" name="sab_default_land" size="6" value="' . esc_attr(self::standardland())
-               . '"> <span class="description">de, es, fr, it, co.uk oder com</span></td></tr></table>'
+               . '<tr><th>Standardland</th><td>' . self::land_auswahl_html() . ' <span class="description">Fehlt dort die Partner-ID, nimmt das Plugin automatisch das erste Land mit ID.</span></td></tr></table>'
                . '<p class="description">Hinweis: Das Secret wird in der Datenbank gespeichert (und taucht in Datenbank-Sicherungen auf). Sicherer ist die wp-config.php.</p>'
                . '<p><button class="button button-primary">Speichern</button></p></form>';
         } else {
