@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.27
+ * Version: 0.89.28
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.27';
+    const VERSION = '0.89.28';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -83,6 +83,7 @@ final class SAB {
         add_shortcode('amazon',      [__CLASS__, 'sc_aawp']);   // Alias wie bei AAWP (AAWP gewinnt, solange es aktiv ist)
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
         add_action('sab_auffrischen', [__CLASS__, 'auffrischen']);
+        add_action('admin_notices', [__CLASS__, 'alarm_hinweis']);
         add_action('wp_ajax_sab_pruef_start',   [__CLASS__, 'ajax_pruef_start']);
         add_action('wp_ajax_sab_pruef_schritt', [__CLASS__, 'ajax_pruef_schritt']);
         add_action('sab_holen',      [__CLASS__, 'holen'], 10, 2);
@@ -656,6 +657,45 @@ final class SAB {
         }
         if ($neu) { update_option('sab_verlauf', $v, false); }
         return $d;
+    }
+
+    const ALARM_FALL = 20;   // so viele Score-Punkte unter dem Mittel der Vortage gelten als Absturz
+
+    /** Absturz im Score-Verlauf: letzter Wert mindestens ALARM_FALL unter dem Mittel der bis zu 7 Tage davor (mindestens 2 Vortage nötig). @param array<string,int> $reihe Datum => Score @return array{0:int,1:int}|null [Mittel davor, jetzt] */
+    public static function alarm_fall(array $reihe): ?array {
+        ksort($reihe); $jetzt = end($reihe); if ($jetzt === false) { return null; }
+        $davor = array_slice(array_slice($reihe, 0, -1, true), -7, null, true);
+        if (count($davor) < 2) { return null; }
+        $m = (int) round(array_sum($davor) / count($davor));
+        return $m - (int) $jetzt >= self::ALARM_FALL ? [$m, (int) $jetzt] : null;
+    }
+
+    /** Prüft alle verwendeten Produkte auf Absturz oder Nicht-Lieferbarkeit und merkt sich die Alarme samt bereitstehendem Ersatz. @return array<string,array> */
+    public static function alarm_berechnen(): array {
+        $land = self::land(''); $d = (array) self::uebersicht_daten($land, false); $v = (array) get_option('sab_verlauf', []); $trotz = (array) get_option('sab_trotz', []); $alt = (array) get_option('sab_alarm', []); $neu = [];
+        foreach (self::alle_asins() as $a) {
+            $x = $d['items'][$a] ?? null; if (!$x || !empty($d['fehler'])) { continue; }
+            $grund = '';
+            if (empty($trotz[$a]) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') && !self::unklar($x)) { $grund = 'nicht mehr lieferbar'; }
+            elseif (($f = self::alarm_fall((array) ($v[$a] ?? []))) !== null) { $grund = 'Score von ' . $f[0] . ' auf ' . $f[1] . ' gefallen'; }
+            if ($grund === '') { continue; }
+            $er = self::ersatz_fuer($a, $land); arsort($er); $er = array_keys($er);   // „neu“ vor „geprüft“ sortiert alphabetisch, daher unten gezielt geprüfte zuerst
+            $ge = array_values(array_filter($er, fn($b) => (self::ersatz_fuer($a, $land)[$b] ?? '') === 'geprüft'));
+            $neu[$a] = ['seit' => $alt[$a]['seit'] ?? time(), 'grund' => $grund, 'ersatz' => array_slice(array_merge($ge, array_diff($er, $ge)), 0, 3)];
+        }
+        update_option('sab_alarm', $neu, false);
+        return $neu;
+    }
+
+    /** Roter Hinweis auf den Seiten des Plugins, solange Alarme offen sind. */
+    public static function alarm_hinweis(): void {
+        if (!function_exists('current_user_can') || !current_user_can('manage_options') || strpos((string) ($_GET['page'] ?? ''), 'sab') !== 0) { return; }
+        $al = (array) get_option('sab_alarm', []); if (!$al) { return; }
+        $namen = self::produkte(); $li = '';
+        foreach (array_slice($al, 0, 10, true) as $a => $e) {
+            $li .= '<li><code>' . esc_html((string) $a) . '</code> ' . esc_html((string) ($namen[$a] ?? '')) . ': <strong>' . esc_html((string) $e['grund']) . '</strong> · ' . ($e['ersatz'] ? 'Ersatz bereit: ' . esc_html(implode(', ', $e['ersatz'])) : '<span style="color:#a00">kein Ersatz in der Datenbank</span>') . '</li>';
+        }
+        echo '<div class="notice notice-error"><p><strong>Alarm: ' . count($al) . ' Produkt(e) mit starkem Score-Absturz oder nicht lieferbar.</strong> Tausch unter <a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Austausch</a> (mit Freigabe und Rückgängig).</p><ul style="margin-left:18px;list-style:disc">' . $li . '</ul></div>';
     }
 
     /** Produkte ohne Handdaten oder mit Handdaten älter als 30 Tage: [ASIN => Hinweis]. */
@@ -1256,6 +1296,7 @@ final class SAB {
         self::alte_bilder_loeschen();
         $land = self::land('');
         self::uebersicht_holen($land);   // hält den täglichen Score-Verlauf fest
+        try { self::alarm_berechnen(); } catch (\Throwable $e) { /* der Alarm darf die Prüfung nie stören */ }
         $lauf = self::pruef_neuer_lauf();
         foreach ($lauf['liste'] as $asin) { self::pruef_eins($asin, $lauf); }
         self::pruef_abschluss($lauf);

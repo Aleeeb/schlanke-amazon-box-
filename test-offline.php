@@ -1567,4 +1567,11 @@ unset($GLOBALS['opt']['sab_ersatz'], $GLOBALS['opt']['sab_gruppen']);
 ok(SAB::ersatz_auftraege(['A' => 30, 'B' => 20, 'C' => 70, 'D' => 10, 'E' => 40], ['A' => 3, 'B' => 2, 'C' => 5, 'D' => 1], 50) === ['B', 'A'], 'Auftragsliste: mehr als eine Seite, Score niedrig, schwächste zuerst');
 $rh2 = new ReflectionMethod('SAB', 'ersatz_auftrag_html'); $rh2->setAccessible(true);
 ok(strpos($rh2->invoke(null, ['items' => []]), 'Gezielte Ersatzsuche') !== false, 'Ersatz-Auftrag rendert ohne Daten');
+// 0.89.28: Alarm bei Score-Absturz
+ok(SAB::alarm_fall(['2026-10-20' => 70, '2026-10-21' => 72, '2026-10-22' => 68, '2026-10-27' => 40]) === [70, 40], 'Alarm: starker Absturz erkannt');
+ok(SAB::alarm_fall(['2026-10-20' => 70, '2026-10-21' => 72, '2026-10-27' => 60]) === null && SAB::alarm_fall(['2026-10-26' => 70, '2026-10-27' => 10]) === null, 'Kein Alarm bei kleinem Rückgang oder zu wenig Verlauf');
+$GLOBALS['opt']['sab_alarm'] = ['B0ALARM001' => ['seit' => 1, 'grund' => 'nicht mehr lieferbar', 'ersatz' => ['B0ERSATZ01']]];
+$_GET['page'] = 'sab-austausch'; $adm0 = $GLOBALS['admin']; $GLOBALS['admin'] = true; ob_start(); SAB::alarm_hinweis(); $ah = ob_get_clean(); unset($_GET['page']); $GLOBALS['admin'] = $adm0;
+ok(strpos($ah, 'B0ALARM001') !== false && strpos($ah, 'Ersatz bereit') !== false, 'Alarm-Hinweis zeigt Produkt und Ersatz');
+unset($GLOBALS['opt']['sab_alarm']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
