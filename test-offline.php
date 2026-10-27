@@ -1,6 +1,8 @@
 <?php
 // Offline-Test ohne WordPress: php test-offline.php  (Stubs für die benötigten WP-Funktionen)
 define('SAB_SYNC', 1); define('ABSPATH', __DIR__ . '/');
+if (!function_exists('get_post_status')) { function get_post_status($i) { return 'publish'; } }
+if (!function_exists('get_post_field')) { function get_post_field($f, $i) { $a = []; foreach ((array) ($GLOBALS['opt']['sab_bildfehler'] ?? []) as $e) { if (!in_array($e['asin'], (array) ($GLOBALS['absent'] ?? []), true)) { $a[] = '[amz_bild asin="' . $e['asin'] . '"]'; } } return '<p>' . implode(' ', $a) . '</p>'; } }
 const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
 $GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
@@ -1387,7 +1389,7 @@ $e5 = '<table><tr><td>[amz_bild asin="B0A"]<br>Titel Erstes</td><td>[amz_bild as
 ok(SAB::titel_an_stelle($e5, strpos($e5, '[amz_bild asin="B0B"'), 21) === 'Titel Zweites' && SAB::titel_an_stelle($e5, strpos($e5, '[amz_bild asin="B0A"'), 21) === 'Titel Erstes', 'Zweier-Tabelle: Titel steht unter dem Bild der eigenen Zelle');
 ok(SAB::land_schluessel('.co.uk') === 'co.uk' && SAB::land_schluessel('www.amazon.co.uk') === 'co.uk' && SAB::land_schluessel('amazon.de') === 'de' && SAB::land_schluessel('https://www.amazon.com/') === 'com' && SAB::land_schluessel('.de') === 'de', 'Ländercode: „.co.uk“, „amazon.co.uk“, „www.amazon.de“ werden erkannt');
 // 0.88.15: veraltete Bildwarnungen verschwinden (ASIN nicht mehr im Artikel)
-$GLOBALS['opt']['sab_bildfehler'] = ['B0ALTWEG01|5' => ['asin' => 'B0ALTWEG01', 'post' => 5, 'ts' => 1, 'art' => 'Bild']];
-ok(SAB::bildfehler_zaehlen() === [0, 0], 'Bildwarnung: ASIN steht nicht mehr im Artikel => keine Meldung');
+$GLOBALS['absent'] = ['B0ALTWEG01']; $GLOBALS['opt']['sab_bildfehler'] = ['B0ALTWEG01|5' => ['asin' => 'B0ALTWEG01', 'post' => 5, 'ts' => 1, 'art' => 'Bild']];
+ok(SAB::bildfehler_zaehlen() === [0, 0], 'Bildwarnung: ASIN steht nicht mehr im Artikel => keine Meldung'); unset($GLOBALS['absent']);
 unset($GLOBALS['opt']['sab_bildfehler']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
