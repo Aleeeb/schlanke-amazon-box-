@@ -1468,7 +1468,12 @@ ok(!$o4, 'Zelle ohne Titel zwischen Bild und Textlink: unverändert');
 $GLOBALS['pc'] = '<p>Die Zeckenzange ist wichtig. <a href="https://amzn.to/3xyzabc">Zeckenzange ansehen</a></p>';
 $rk = new ReflectionMethod('SAB', 'kurzlink_liste_html'); $rk->setAccessible(true);
 $kh = $rk->invoke(null, 5);
-ok(strpos($kh, 'amzn.to/3xyzabc') !== false && strpos($kh, 'Zeckenzange ist wichtig') !== false && strpos($kh, 'sab_asin') !== false && strpos($kh, 'sab_zeige=3xyzabc') !== false, 'Kurzlink-Liste: Umgebung, Stelle ansehen, Eingabefeld');
+ok(strpos($kh, 'amzn.to/3xyzabc') !== false && strpos($kh, 'Zeckenzange ist wichtig') !== false && strpos($kh, 'sab_asin') !== false && strpos($kh, 'sab_zeige=3xyzabc') !== false && strpos($kh, 'Bei Amazon suchen') !== false && strpos($kh, 'value="Die Zeckenzange ist wichtig"') !== false && strpos($kh, 'Zeckenzange ist wichtig') !== false, 'Kurzlink-Liste: Umgebung, Stelle ansehen, Eingabefeld, Suchknopf');
 $GLOBALS['pc'] = '<p>Kein Kurzlink hier.</p>'; ok($rk->invoke(null, 5) === '', 'Kurzlink-Liste leer ohne Kurzlinks');
 unset($GLOBALS['pc']);
+// 0.89.14: Kurzlink zu Rezension wird erkannt
+set_transient('sab_kurz_' . md5('https://amzn.to/REZ1234'), 'https://www.amazon.de/product-reviews/B0ABCDEFGH/?tag=zeck-21', 3600);
+$rg = new ReflectionMethod('SAB', 'kurzlink_grund'); $rg->setAccessible(true);
+$gr = $rg->invoke(null, 'https://amzn.to/REZ1234');
+ok(strpos($gr, 'Rezensionen') !== false && strpos($gr, 'zeck-21') !== false && strpos($gr, 'B0ABCDEFGH') !== false, 'Kurzlink zu Rezension: erkannt, Partner-ID im Ziel angezeigt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

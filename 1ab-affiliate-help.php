@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.13
+ * Version: 0.89.14
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.13';
+    const VERSION = '0.89.14';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1899,7 +1899,32 @@ JS;
         return $an_stelle !== '' ? $an_stelle : self::suchtext_aus_satz('', $asin, self::text_vor_stelle($asin, $fund[$asin] ?? []));
     }
 
+    /** Frontend-Stelle mit nicht auflösbarem Kurzlink: n-ter Link mit genau dieser Adresse, Linktext muss stimmen. @return array{0:WP_Post,1:string,2:string,3:int,4:string} [Beitrag, Inhalt, Link-HTML, Position, Adresse] */
+    private static function kurz_stelle(): array {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0);
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $kurz = html_entity_decode((string) wp_unslash($_POST['kurz'] ?? '')); $nth = max(1, (int) ($_POST['nth'] ?? 1));
+        if (!preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $kurz)) { wp_send_json_error('Das ist kein Kurzlink.'); }
+        $post = get_post($pid); if (!$post) { wp_send_json_error('Artikel nicht gefunden.'); }
+        $c = (string) $post->post_content; $hit = [];
+        if (preg_match_all('#<a\b[^>]*\bhref=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $hm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { foreach ($hm as $h) { if (html_entity_decode($h[2][0]) === $kurz) { $hit[] = $h; } } }
+        if (!isset($hit[$nth - 1])) { wp_send_json_error('Der Link passt nicht mehr zum Artikeltext. Bitte die Seite neu laden.'); }
+        $h = $hit[$nth - 1]; $norm = fn($t) => trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string) $t))));
+        if ($norm($h[3][0]) !== $norm(wp_unslash((string) ($_POST['txt'] ?? '')))) { wp_send_json_error('Der Link passt nicht mehr zum Artikeltext. Bitte die Seite neu laden.'); }
+        return [$post, $c, $h[0][0], (int) $h[0][1], $kurz];
+    }
+
     public static function ajax_stelle_kand(): void {
+        if (!empty($_POST['kurz'])) {
+            [$post, $c_, $tag_, $pos_] = self::kurz_stelle();
+            $land = self::land(''); $d = self::uebersicht_daten($land, false); $namen = self::produkte(); $trotz = (array) get_option('sab_trotz', []);
+            $vor = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', substr($c_, max(0, $pos_ - 500), min(500, $pos_)))))));
+            $teile = preg_split('/(?<=[.!?:;])\s+/u', $vor); $w = array_values(array_filter(preg_split('/\s+/u', trim((string) end($teile), " .!?:;–-"))));
+            $suche = count($w) >= 2 ? implode(' ', array_slice($w, -8)) : trim(html_entity_decode(strip_tags($tag_)));
+            $ps = []; foreach (self::alle_asins() as $a_) { $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
+            wp_send_json_success(['alt' => 'Kurzlink „' . mb_substr(trim(strip_tags($tag_)), 0, 40) . '“', 'asin' => '', 'suche' => $suche, 'host' => self::LAENDER[$land][0], 'liste' => [], 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
+        }
         [$post, $c_, , , $tag_, $pos_, , $asin] = self::stelle_pruefen();
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []);
         $fund = self::fundstellen([$asin]); $namen = self::produkte();
@@ -1936,6 +1961,26 @@ JS;
     }
 
     public static function ajax_stelle_tausch(): void {
+        if (!empty($_POST['kurz'])) {
+            [$post, $c, $tag, $pos, $kurz] = self::kurz_stelle();
+            $neu = self::asin_aus_text((string) wp_unslash($_POST['neu'] ?? ''));
+            if (strlen($neu) !== 10) { wp_send_json_error('Bitte eine gültige ASIN oder einen Amazon-Produktlink (mit /dp/…) angeben. Kurzlinks wie amzn.to enthalten keine ASIN.'); }
+            if (!self::neues_produkt_vorladen($neu)) { wp_send_json_error('Amazon liefert zu ' . $neu . ' gerade kein Bild oder keine Daten. Nicht getauscht. Bitte Link prüfen oder in ein paar Minuten noch einmal versuchen.'); }
+            $u = self::umbau_url((string) wp_unslash($_POST['neu'] ?? '')); $land = $u ? $u[0] : self::land('');
+            if (!isset(self::LAENDER[$land])) { $land = self::land(''); }
+            $neu_tag = preg_replace('#(\bhref=(["\']))(.*?)(\2)#is', '${1}https://' . self::LAENDER[$land][0] . '/dp/' . $neu . '${4}', $tag, 1);
+            if ($neu_tag === null || $neu_tag === $tag) { wp_send_json_error('Nichts geändert.'); }
+            $c2 = substr($c, 0, $pos) . $neu_tag . substr($c, $pos + strlen($tag));
+            $b = (array) get_post_meta($post->ID, '_sab_stelle_backup', true);
+            $b = array_slice(array_merge($b, [['ts' => time(), 'hash' => md5($c2), 'vorher' => $c, 'alt' => 'Kurzlink', 'neu' => $neu]]), -5);
+            update_post_meta($post->ID, '_sab_stelle_backup', wp_slash($b));
+            wp_update_post(['ID' => $post->ID, 'post_content' => wp_slash($c2)]);
+            delete_transient('sab_alle_asins');
+            $kk = (array) get_option('sab_kontrolle', []);
+            $kk[(string) time() . substr(md5($kurz . $neu), 0, 4)] = ['ts' => time(), 'art' => 'stelle', 'pid' => (int) $post->ID, 'alt' => 'Kurzlink', 'neu' => $neu, 'vorher' => mb_substr($tag, 0, 900), 'nachher' => mb_substr($neu_tag, 0, 900), 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => '', 'n' => 1, 'ords' => []]]];
+            update_option('sab_kontrolle', array_slice($kk, -20, null, true), false);
+            wp_send_json_success(['n' => 1, 'nr' => 1, 'neu' => $neu, 'titel' => 'unverändert (Kurzlink)']);
+        }
         [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin] = self::stelle_pruefen();
         $neu = self::asin_aus_text((string) wp_unslash($_POST['neu'] ?? ''));
         if (strlen($neu) !== 10 || $neu === $asin) { wp_send_json_error('Bitte eine gültige, andere ASIN oder einen Amazon-Produktlink (mit /dp/…) angeben. Kurzlinks wie amzn.to enthalten keine ASIN.'); }
@@ -2032,7 +2077,7 @@ JS;
         $pid_ = (int) get_queried_object_id();
         $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $pid_, 'e' => $pid_ && current_user_can('edit_post', $pid_) ? admin_url('post.php?post=' . $pid_ . '&action=edit&sab_zeige=') : '']);
         echo '<script>(function(){var C=' . $cfg . ';var seen={};var cur={nth:0,txt:""};'
-           . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
+           . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);fd.append("kurz",cur.kurz||"");for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
            . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
            . 'function oeffne(o,asin){var ov=el("div","position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto");'
            . 'var bx=el("div","background:#fff;color:#222;max-width:640px;width:100%;border-radius:10px;padding:18px;font:14px/1.4 sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)");ov.appendChild(bx);'
@@ -2041,7 +2086,7 @@ JS;
            . 'var lst=el("div","");bx.appendChild(lst);'
            . 'function tausche(neu){inf.textContent="Tausche …";post("sab_stelle_tausch",{ord:o,asin:asin,neu:neu},function(r){if(r.success){inf.textContent="Getauscht. Seite wird neu geladen, die Stelle ist markiert …";location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.neu)+"&sab_nr="+r.data.nr}else{inf.textContent="Nicht möglich: "+r.data;inf.style.color="#a00"}})}'
            . 'post("sab_stelle_kand",{ord:o,asin:asin},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}'
-           . 'inf.textContent="Jetzt: "+r.data.alt+". Nur diese Stelle im Artikel wird getauscht (mit Sicherung).";var H="https://"+r.data.host,lk=function(t,u){var a=el("a","display:inline-block;margin:4px 12px 0 0;color:#2271b1",t);a.href=u;a.target="_blank";a.rel="noopener";return a};var ar=el("div","");ar.appendChild(lk("Dieses Produkt bei Amazon ansehen ↗",H+"/dp/"+r.data.asin));ar.appendChild(lk("Bei Amazon suchen: „"+(r.data.suche||r.data.alt)+"“ ↗",H+"/s?k="+encodeURIComponent(r.data.suche||r.data.alt)));inf.parentNode.insertBefore(ar,inf.nextSibling);'
+           . 'inf.textContent="Jetzt: "+r.data.alt+". Nur diese Stelle im Artikel wird getauscht (mit Sicherung)."+(r.data.asin?"":" Der Kurzlink wird durch die Produktadresse der eingegebenen ASIN ersetzt.");var H="https://"+r.data.host,lk=function(t,u){var a=el("a","display:inline-block;margin:4px 12px 0 0;color:#2271b1",t);a.href=u;a.target="_blank";a.rel="noopener";return a};var ar=el("div","");if(r.data.asin){ar.appendChild(lk("Dieses Produkt bei Amazon ansehen ↗",H+"/dp/"+r.data.asin))}ar.appendChild(lk("Bei Amazon suchen: „"+(r.data.suche||r.data.alt)+"“ ↗",H+"/s?k="+encodeURIComponent(r.data.suche||r.data.alt)));inf.parentNode.insertBefore(ar,inf.nextSibling);'
            . 'r.data.liste.forEach(function(c){var row=el("div","display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eee");'
            . 'if(c.img){var im=el("img","width:56px;height:56px;object-fit:contain;flex:none");im.src=c.img;row.appendChild(im)}'
            . 'var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555","Score "+(c.score===null?"?":c.score)+(c.preis?" · "+c.preis:"")+" · "+c.quelle+(c.ok?"":" · nicht lieferbar")));tx.appendChild(lk("bei Amazon ansehen ↗",H+"/dp/"+c.asin));row.appendChild(tx);'
@@ -2059,7 +2104,7 @@ JS;
            . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.className="sab-tb";b.setAttribute("data-o",o);b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b);'
            . 'if(C.e){var b3=el("button","position:absolute;top:30px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","✎ bearbeiten");b3.type="button";b3.title="Öffnet den Editor an dieser Stelle (neuer Tab)";b3.onclick=function(ev){ev.preventDefault();ev.stopPropagation();window.open(C.e+encodeURIComponent(e.getAttribute("data-sab-asin")),"_blank")};box.appendChild(b3)}}'
            . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}'
-           . 'var hs=document.querySelectorAll("a[href]"),cn={},al={};for(var j=0;j<hs.length;j++){var a=hs[j],m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(a.getAttribute("href")||"");var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as){continue}al[as]=(al[as]||0)+1;'
+           . 'var hs=document.querySelectorAll("a[href]"),cn={},al={},kz={};for(var j=0;j<hs.length;j++){var a=hs[j],hr=a.getAttribute("href")||"",m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(hr);var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as&&/^https?:\/\/(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)\//i.test(hr)&&!a.closest("#wpadminbar")&&a.closest("article,.entry-content,.hentry,main,.post")){kz[hr]=(kz[hr]||0)+1;(function(a,hr,nth){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn2(t,f,tb){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(tb){b.className="sab-tb"}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}kn2("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim(),kurz:hr};oeffne(0,"")},1);if(C.e){kn2("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(hr.replace(/[?#].*$/,"").replace(/\/+$/,"").split("/").pop()),"_blank")})}a.parentNode.insertBefore(sp,a.nextSibling)})(a,hr,kz[hr]);continue}if(!as){continue}al[as]=(al[as]||0)+1;'
            . 'if(a.hasAttribute("data-sab-asin")||a.closest("[data-sab-ord],#wpadminbar,.sab-karte,.sab-produkt")||!a.closest("article,.entry-content,.hentry,main,.post")){continue}cn[as]=(cn[as]||0)+1;'
            . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(t.indexOf("tauschen")>0){b.className="sab-tb";b.setAttribute("data-o","h"+nth+as)}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}'
            . 'kn("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};oeffne(0,as)});'
@@ -4428,6 +4473,25 @@ JS;
         return $out;
     }
 
+    /** ASIN aus der aufgelösten Zieladresse (Produkt-Rezensionsseite /product-reviews/ASIN, sonst jede Adresse mit ASIN). */
+    private static function kurzlink_ziel_asin(string $kurz): string {
+        $z = self::kurzlink_aufloesen($kurz);
+        return preg_match('#/(?:product-reviews|dp|gp/product|gp/aw/d|review/[^/]*/[^/]*)/([A-Z0-9]{10})(?![A-Za-z0-9])#i', $z, $m) || preg_match('#[?&]asin=([A-Z0-9]{10})#i', $z, $m) ? strtoupper($m[1]) : '';
+    }
+
+    /** Warum lässt sich ein Kurzlink nicht auf ein Produkt umbauen? Nutzt nur das, was schon im Zwischenspeicher steht oder jetzt (mit Abrufgrenze) aufgelöst wird. */
+    private static function kurzlink_grund(string $kurz): string {
+        $z = self::kurzlink_aufloesen($kurz);
+        if ($z === '') { return 'der Kurzlink lässt sich nicht auflösen (Amazon antwortet nicht oder gibt keine Zieladresse heraus).'; }
+        $tag = preg_match('/[?&]tag=([A-Za-z0-9\-]{3,40})/', $z, $tm) ? $tm[1] : '';
+        $pid = $tag !== '' ? 'Partner-ID im Ziel: <code>' . esc_html($tag) . '</code>.' : 'keine Partner-ID im Ziel erkennbar.';
+        if (preg_match('#/(?:gp/customer-reviews|gp/aw/cr|product-reviews|review/|customer-reviews)#i', $z)) {
+            $ra = self::kurzlink_ziel_asin($kurz);
+            return '<strong>Link zu den Rezensionen' . ($ra !== '' ? ' des Produkts ' . esc_html($ra) : '') . ', kein Produktlink.</strong> Das Plugin lässt ihn unverändert (keine Umwandlung, kein Tracking durch das Plugin). Entweder so lassen (der Partner-Tag steckt im Kurzlink), oder unten durch den Produktlink' . ($ra !== '' ? ' (ASIN schon eingetragen)' : '') . ' ersetzen; ' . $pid . ' Ziel: <code style="word-break:break-all">' . esc_html(mb_substr($z, 0, 140)) . '</code>';
+        }
+        return 'das Ziel ist keine Produktseite mit /dp/ASIN. ' . $pid . ' Ziel: <code style="word-break:break-all">' . esc_html(mb_substr($z, 0, 140)) . '</code>';
+    }
+
     /** Kurzlinks (amzn.to …) eines Artikels, die sich nicht als Produkt auflösen lassen: Textumgebung, Sprung zur Stelle und Feld für ASIN oder Amazon-Link. */
     private static function kurzlink_liste_html(int $id, string $rueck = ''): string {
         $post = get_post($id); if (!$post) { return ''; }
@@ -4444,12 +4508,23 @@ JS;
             $kenn = preg_match('#/([A-Za-z0-9]{5,12})$#', rtrim(explode('?', $u)[0], '/'), $kn) ? $kn[1] : '';
             $h .= '<li style="margin:6px 0"><div><code style="word-break:break-all">' . esc_html($u) . '</code> · Linktext „' . esc_html(mb_substr($lt, 0, 60)) . '“</div>'
                 . '<div class="description">Davor im Text: ' . esc_html($vor !== '' ? $vor : '(nichts)') . '</div>'
-                . '<div>Grund: der Kurzlink lässt sich nicht auf ein Produkt auflösen (Amazon antwortet nicht oder gibt keine Produktadresse heraus). '
+                . '<div>Grund: ' . self::kurzlink_grund($u) . ' '
                 . ($kenn !== '' ? '<a href="' . esc_url(add_query_arg('sab_zeige', $kenn, (string) get_permalink($id))) . '" target="_blank" rel="noopener">Stelle im Frontend ansehen</a> · <a href="' . esc_url(admin_url('post.php?post=' . $id . '&action=edit&sab_zeige=' . rawurlencode($kenn))) . '" target="_blank" rel="noopener">Im Editor bearbeiten</a>' : '') . '</div>'
+                . '<div style="margin:4px 0 0">' . self::kurzlink_suche_html($vor, $lt) . '</div>'
                 . '<form method="post" style="margin:4px 0 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="kurzlink_setzen"><input type="hidden" name="sab_id" value="' . $id . '"><input type="hidden" name="sab_kurz" value="' . esc_attr($u) . '">' . $rueck
-                . '<input type="text" name="sab_asin" placeholder="ASIN oder Amazon-Produktlink (mit /dp/…)" style="width:340px" required> <button class="button button-small button-primary">Diesen Kurzlink ersetzen</button></form></li>';
+                . '<input type="text" name="sab_asin" value="' . esc_attr(self::kurzlink_ziel_asin($u)) . '" placeholder="ASIN oder Amazon-Produktlink (mit /dp/…)" style="width:340px" required> <button class="button button-small button-primary">Diesen Kurzlink ersetzen</button></form></li>';
         }
         return $h === '' ? '' : '<div style="background:#fff8e5;border:1px solid #dba617;padding:6px 12px;margin:8px 0;max-width:900px"><strong>Kurzlinks, die das Plugin nicht lösen kann:</strong> Mit ASIN oder Amazon-Link ersetzen, danach lässt sich der Artikel umbauen.<ul style="margin:6px 0 0 16px">' . $h . '</ul></div>';
+    }
+
+    /** Suchfeld + Knopf „Bei Amazon suchen“ (neuer Tab): Begriff aus dem Text direkt vor dem Kurzlink, sonst der Linktext; steht eine ASIN im Eingabefeld darunter, wird nach ihr gesucht. */
+    private static function kurzlink_suche_html(string $vor, string $linktext): string {
+        $teile = preg_split('/(?<=[.!?:;])\s+/u', trim($vor)); $frag = trim((string) end($teile), " .!?:;–-");
+        $w = array_values(array_filter(preg_split('/\s+/u', $frag)));
+        $term = count($w) >= 2 ? implode(' ', array_slice($w, -8)) : '';
+        if ($term === '' && $linktext !== '' && !self::generischer_linktext($linktext)) { $term = $linktext; }
+        $base = 'https://' . self::LAENDER[self::land('')][0] . '/s?k=';
+        return '<input type="text" value="' . esc_attr($term) . '" style="width:340px" aria-label="Suchbegriff"> <button type="button" class="button button-small" onclick="var f=this.closest(\'li\'),a=f&&f.querySelector(\'input[name=sab_asin]\'),q=(a&&a.value.trim())||this.previousElementSibling.value;window.open(' . esc_attr(wp_json_encode($base)) . '+encodeURIComponent(q),\'_blank\',\'noopener\')">Bei Amazon suchen</button> <span class="description">(Begriff änderbar; steht unten eine ASIN, wird nach ihr gesucht)</span>';
     }
 
     /** Ersetzt einen Kurzlink im Artikel durch die Produktadresse zur eingegebenen ASIN (WordPress legt dabei eine Revision an). */
