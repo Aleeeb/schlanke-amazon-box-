@@ -1455,4 +1455,13 @@ $tl = '[amz_link asin="B0A1234567"]'; $tl2 = '[amz_link asin="B0B1234567"]';
 ok(SAB::titel_an_stelle($e14, strpos($e14, $tl), strlen($tl)) === 'Richtiger Titel Erstes' && SAB::$tas_zelle === true, 'Produkt weg: Titel zwischen Bildlink und Textlink der Zelle');
 ok(SAB::titel_an_stelle($e14, strpos($e14, $tl2), strlen($tl2)) === '' && SAB::$tas_zelle === true, 'Zelle ohne Titel: nie Text hinter dem eBay-Link oder die nächste Überschrift');
 ok(SAB::titel_an_stelle($e14, strpos($e14, '[amz_bild asin="B0B'), 28) === '', 'Bildlink-Stelle ohne Titel in der Zelle: leer');
+// 0.89.11: Titel beim Tausch mit ersetzen (nur eindeutig erkannt)
+[$r1, $o1] = SAB::titel_ersetzen('<p>Text davor.</p><p><strong>Alter Lichtwecker Titel</strong></p><p>', 'Neuer Wecker', false);
+ok($o1 && $r1 === '<p>Text davor.</p><p><strong>Neuer Wecker</strong></p><p>', 'Einzelprodukt: fetter Titel direkt vor dem Bild wird ersetzt');
+[$r2, $o2] = SAB::titel_ersetzen('<h2>Weit entfernt</h2><p>Langer Text ohne Fettdruck.</p><p>', 'Neuer Wecker', false);
+ok(!$o2 && strpos($r2, 'Weit entfernt') !== false, 'Einzelprodukt: ohne fetten Titel direkt davor bleibt alles unverändert');
+[$r3, $o3] = SAB::titel_ersetzen('<td>[amz_bild asin="B0A1234567"][/amz_bild]<br>Alter Titel Erstes<br>[amz_link asin="B0A1234567"]Bei Amazon ansehen[/amz_link]<br>[amz_ebay asin="B0A1234567"]eBay[/amz_ebay]</td>', 'Neuer Titel', true);
+ok($o3 && strpos($r3, '<br>Neuer Titel<br>[amz_link') !== false && strpos($r3, 'eBay') !== false, 'Zelle: Text zwischen Bild- und Textlink wird ersetzt');
+[$r4, $o4] = SAB::titel_ersetzen('<td>[amz_bild asin="B0A1234567"][/amz_bild]<br>[amz_link asin="B0A1234567"]Bei Amazon[/amz_link]<br>Unter dem Link</td>', 'Neuer Titel', true);
+ok(!$o4, 'Zelle ohne Titel zwischen Bild und Textlink: unverändert');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

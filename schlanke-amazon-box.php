@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.10
+ * Version: 0.89.11
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.10';
+    const VERSION = '0.89.11';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1917,6 +1917,26 @@ JS;
         wp_send_json_success(['alt' => $name ?: $asin, 'asin' => $asin, 'suche' => self::suche_titel($asin, (array) $d, $fund, $ts_ = self::titel_an_stelle($c_, $pos_, strlen($tag_)), self::$tas_zelle), 'host' => self::LAENDER[$land][0], 'liste' => $out, 'ps' => $ps, 'zurueck' => (bool) get_post_meta($post->ID, '_sab_stelle_backup', true)]);
     }
 
+    /**
+     * Titel des alten Produkts an der Stelle durch den des neuen ersetzen, nur wenn er eindeutig erkannt ist:
+     * Einzelprodukt = ein fetter Text (strong/b) unmittelbar vor dem Bild(link); Zelle = Text zwischen Bild(link) und Textlink derselben Zelle.
+     * Alles andere bleibt unverändert. @return array{0:string,1:bool} [neuer Text, ersetzt]
+     */
+    public static function titel_ersetzen(string $c, string $neutitel, bool $zelle): array {
+        $neutitel = trim(preg_replace('/\s+/u', ' ', strip_tags($neutitel)));
+        if ($neutitel === '' || mb_strlen($neutitel) > 140) { return [$c, false]; }
+        $nt = htmlspecialchars($neutitel, ENT_NOQUOTES, 'UTF-8');
+        if ($zelle) {
+            $re = '#(\[/amz_bild\]|\[amz_produkt\b[^\]]*\]|<img\b[^>]*>\s*</a>)(\s*(?:<br\s*/?>\s*)+(?:<(?:strong|b)\b[^>]*>)?)([^<\[\]]{5,140})((?:</(?:strong|b)>)?\s*(?:<br\s*/?>\s*)+)(?=<a\b|\[amz_link)#i';
+            if (preg_match_all($re, $c) !== 1) { return [$c, false]; }
+            return [preg_replace_callback($re, fn($m) => $m[1] . $m[2] . $nt . $m[4], $c, 1), true];
+        }
+        $re = '#(<(strong|b)\b[^>]*>)([^<\[\]]{5,140})(</\2>)((?:\s|<br\s*/?>|</p>|</div>|<p\b[^>]*>|<div\b[^>]*>)*)$#i';
+        if (!preg_match($re, $c, $m, PREG_OFFSET_CAPTURE)) { return [$c, false]; }
+        if (preg_match('#https?://#', $m[3][0])) { return [$c, false]; }
+        return [substr($c, 0, $m[3][1]) . $nt . substr($c, $m[3][1] + strlen($m[3][0])), true];
+    }
+
     public static function ajax_stelle_tausch(): void {
         [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin] = self::stelle_pruefen();
         $neu = self::asin_aus_text((string) wp_unslash($_POST['neu'] ?? ''));
@@ -1926,26 +1946,34 @@ JS;
         $namen = self::produkte(); $neuer = (string) ($namen[$neu] ?? '');
         $alte = array_filter([(string) ($namen[$asin] ?? ''), (string) ($namen[$quelle] ?? '')]);
         // gleiche Tabellenzelle: alle zählenden Platzhalter desselben Produkts mitnehmen (Bild, Titel, Link)
-        $von = $pos; $bis = $pos + strlen($tag);
+        $von = $pos; $bis = $pos + strlen($tag); $in_td = false;
         $td0 = strripos(substr($c, 0, $pos), '<td'); $td1 = strripos(substr($c, 0, $pos), '</td>');
         if ($td0 !== false && ($td1 === false || $td1 < $td0)) {
             $e = stripos($c, '</td>', $pos);
-            if ($e !== false) { $von = $td0; $bis = $e; }
+            if ($e !== false) { $von = $td0; $bis = $e; $in_td = true; }
+        }
+        // Titel mit tauschen (nur eindeutig erkannte): neuer Produktname, sonst Kurzname aus dem Amazon-Titel
+        $pn = self::produkt($neu, self::land(''), false, true); $ntitel = $neuer !== '' ? $neuer : self::kurzname_aus_titel((string) ($pn['titel'] ?? ''));
+        $titel_ok = false; $c_vor = $c;
+        if (!$in_td && (preg_match('/^\[amz_(?:bild|produkt)\b/', $tag) || stripos($tag, '<img') !== false)) {   // Einzelprodukt: fetter Text direkt vor dem Bild
+            [$pre, $titel_ok] = self::titel_ersetzen(substr($c, 0, $pos), $ntitel, false);
+            if ($titel_ok) { $d_ = strlen($pre) - $pos; $c = $pre . substr($c, $pos); $von += $d_; $bis += $d_; $pos += $d_; }
         }
         $seg = substr($c, $von, $bis - $von);
         $seg2 = preg_replace('/\btitel="[^"]*"/u', '', $seg);   // dein alter Titel passt nicht zum neuen Produkt
+        if ($in_td) { [$seg2, $titel_ok] = self::titel_ersetzen($seg2, $ntitel, true); }
         [$seg3, $n] = self::tausch_text($seg2, $quelle, $neu, $alte, $neuer);
         if ($n === 0 || $seg3 === $seg) { wp_send_json_error('Nichts geändert.'); }
         $c2 = substr($c, 0, $von) . $seg3 . substr($c, $bis);
         $b = (array) get_post_meta($post->ID, '_sab_stelle_backup', true);
-        $b = array_slice(array_merge($b, [['ts' => time(), 'hash' => md5($c2), 'vorher' => $c, 'alt' => $asin, 'neu' => $neu]]), -5);
+        $b = array_slice(array_merge($b, [['ts' => time(), 'hash' => md5($c2), 'vorher' => $c_vor, 'alt' => $asin, 'neu' => $neu]]), -5);
         update_post_meta($post->ID, '_sab_stelle_backup', wp_slash($b));
         wp_update_post(['ID' => $post->ID, 'post_content' => wp_slash($c2)]);
         delete_transient('sab_alle_asins');
         $sj0 = self::satz_mit_link($c2, $neu); $kk = (array) get_option('sab_kontrolle', []);   // auch Tausch an einer Stelle im Frontend kommt in die Kontrollliste
         $kk[(string) time() . substr(md5($asin . $neu), 0, 4)] = ['ts' => time(), 'art' => 'stelle', 'pid' => (int) $post->ID, 'alt' => $asin, 'neu' => $neu, 'vorher' => mb_substr($seg, 0, 900), 'nachher' => mb_substr($seg3, 0, 900), 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => count(self::stellen_gruppen($c2, $neu)), 'ords' => self::stellen_gruppen($c2, $neu)]]];
         update_option('sab_kontrolle', array_slice($kk, -20, null, true), false);
-        wp_send_json_success(['n' => $n, 'nr' => substr_count(substr($c2, 0, $von), $neu) + 1, 'neu' => $neu]);
+        wp_send_json_success(['n' => $n, 'nr' => substr_count(substr($c2, 0, $von), $neu) + 1, 'neu' => $neu, 'titel' => $titel_ok ? 'ersetzt' : 'nicht eindeutig erkannt, unverändert']);
     }
 
     /** Rohtext der getauschten Stelle vorher/nachher (zum Prüfen und zum Weitergeben, wenn etwas nicht aussieht wie vorher). */
