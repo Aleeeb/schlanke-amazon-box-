@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.24
+ * Version: 0.89.25
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.24';
+    const VERSION = '0.89.25';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -252,6 +252,33 @@ final class SAB {
             [$name, $liste] = array_map('trim', explode(':', $z, 2));
             $asins = array_values(array_unique(array_filter(array_map([__CLASS__, 'asin'], explode(',', $liste)))));
             if ($name && $asins) { $out[$name] = $asins; }
+        }
+        return $out;
+    }
+
+    /**
+     * Ersatz-Datenbank: eine Zeile pro Ersatzprodukt „Produktart | Land | ASIN | Status (neu/geprüft) | Stand | Quelle“.
+     * Produktart = Name einer Produktgruppe oder eine ASIN (Ersatz nur für dieses Produkt). Land wie bei den Partner-IDs (co.uk, com, de …).
+     * Handdaten (Sterne, Provision, Lieferzeit, Lieferkosten) stehen wie immer bei den Handdaten. @return array<int,array{art:string,land:string,asin:string,status:string,stand:string,quelle:string}>
+     */
+    public static function ersatz_liste(): array {
+        $out = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_ersatz', '')) as $z) {
+            $t = array_map('trim', explode('|', $z));
+            $a = self::asin($t[2] ?? ''); if (strlen($a) !== 10 || ($t[0] ?? '') === '') { continue; }
+            $st = mb_strtolower($t[3] ?? ''); $out[] = ['art' => $t[0], 'land' => self::land_schluessel($t[1] ?? ''), 'asin' => $a, 'status' => in_array($st, ['geprüft', 'geprueft', 'ok', 'ja'], true) ? 'geprüft' : 'neu', 'stand' => $t[4] ?? '', 'quelle' => $t[5] ?? ''];
+        }
+        return $out;
+    }
+
+    /** Ersatzprodukte aus der Datenbank für ein Produkt im Land der Webseite: gleiche Produktgruppe oder ausdrücklich für diese ASIN. @return array<string,string> ASIN => Status */
+    public static function ersatz_fuer(string $alt, ?string $land = null): array {
+        $land = $land ?? self::land(''); $gr = [];
+        foreach (self::gruppen() as $name => $liste) { if (in_array($alt, $liste, true)) { $gr[mb_strtolower($name)] = 1; } }
+        $out = [];
+        foreach (self::ersatz_liste() as $e) {
+            if ($e['land'] !== $land || $e['asin'] === $alt) { continue; }
+            if (strtoupper($e['art']) === $alt || isset($gr[mb_strtolower($e['art'])])) { if (!isset($out[$e['asin']]) || $e['status'] === 'geprüft') { $out[$e['asin']] = $e['status']; } }
         }
         return $out;
     }
@@ -2237,7 +2264,7 @@ JS;
     private static function verwaiste_entfernen(array $asins): int {
         if (!$asins) { return 0; }
         $set = array_flip($asins);
-        $schluessel = ['sab_produkte', 'sab_manuell', 'sab_amz_alt', 'sab_such_kand', 'sab_auch_gekauft'];   // erste Spalte = ASIN: ganze Zeile weg
+        $schluessel = ['sab_produkte', 'sab_manuell', 'sab_ersatz', 'sab_amz_alt', 'sab_such_kand', 'sab_auch_gekauft'];   // erste Spalte = ASIN: ganze Zeile weg
         foreach ($schluessel as $o) {
             $neu = [];
             foreach (preg_split('/\R/', (string) get_option($o, '')) as $z) { $k = self::asin(trim(explode('|', $z)[0])); if ($k !== '' && isset($set[$k])) { continue; } $neu[] = $z; }
@@ -2454,6 +2481,7 @@ JS;
         foreach (self::such_kandidaten() as $l) { $alle = array_merge($alle, $l['liste']); }
         foreach (self::auch_gekauft() as $l) { $alle = array_merge($alle, $l['liste']); }   // Mitgekauftes mit abfragen (Score)
         foreach (self::claude_empfehlungen() as $l) { $alle[] = $l[0]; }
+        foreach (self::ersatz_liste() as $e) { $alle[] = $e['asin']; }   // Ersatz-Datenbank mit abfragen (Score)
         global $wpdb;
         if (isset($wpdb) && method_exists($wpdb, 'get_col')) {
             $host = preg_quote(preg_replace('#^www\.#', '', self::LAENDER[self::land('')][0]), '#');   // nur Links ins Land dieser Webseite, sonst sähen Produkte anderer Länder „unbekannt“ aus
@@ -2676,6 +2704,9 @@ JS;
         $h .= '<h3 style="margin-top:2em">Von Hand gepflegte Daten</h3><p class="description">Die Amazon-Schnittstelle liefert keine Sterne, kein Prime und keine Lieferzeit. Trag sie hier ein, eine Zeile pro Produkt: <code>ASIN | Sterne | Anzahl Bewertungen | Prime (ja/nein) | Lieferzeit in Tagen je Hauptstadt | Datum | Provision in % | Lieferkosten (Betrag, „gratis“ oder leer)</code>, zum Beispiel <code>B001AUKTYG | 4,1 | 588 | ja | ' . (self::land('') === 'de' ? 'Berlin 2, München 3, Hamburg 2' : 'Madrid 2, Barcelona 3, Sevilla 2') . ' | 2026-10-24 | 3</code>. Die Provision steht in der SiteStripe auf der Amazon-Seite (Tarif); sie gilt für dieses Produkt und geht der Kategorietabelle vor. Leere Felder sind erlaubt. Hohe Lieferkosten ziehen den Score nach unten, gratis oder Prime nicht. Die Angaben erscheinen als Chips in der Übersicht und fließen in den Score ein (Gewicht oben).</p>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="manuell">'
            . '<textarea name="sab_manuell" rows="10" class="large-text code">' . esc_textarea((string) get_option('sab_manuell', '')) . '</textarea><p><button class="button button-primary">Handdaten speichern</button></p></form>';
+        $h .= '<h3 style="margin-top:2em">Ersatz-Datenbank</h3><p class="description">Geprüfte Ersatzprodukte, aus denen der Austausch zuerst schöpft. Eine Zeile pro Ersatzprodukt: <code>Produktart | Land | ASIN | Status (neu/geprüft) | Stand | Quelle</code>, z. B. <code>Schneckenzaun | co.uk | B0EXAMPLE1 | geprüft | 2026-10-27 | PC-Sitzung</code>. „Produktart“ ist der Name einer Produktgruppe (Reiter Gruppen) oder eine ASIN (Ersatz nur für dieses Produkt). Sterne, Provision, Lieferzeit und Lieferkosten der Ersatzprodukte stehen oben bei den Handdaten. Geprüfte Einträge werden im Austausch bevorzugt; es zählt nur das Land dieser Webseite (' . esc_html(self::land('')) . ').</p>'
+           . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="score"><input type="hidden" name="sab_form" value="ersatz">'
+           . '<textarea name="sab_ersatz" rows="8" class="large-text code">' . esc_textarea((string) get_option('sab_ersatz', '')) . '</textarea><p><button class="button button-primary">Ersatz-Datenbank speichern</button></p></form>';
         $d = self::uebersicht_daten($land, false);
         $h .= self::stand_hinweis($d);
         if (!empty($d['items'])) {
@@ -5466,6 +5497,7 @@ JS;
         foreach ((self::amz_alternativen()[$alt]['liste'] ?? []) as $i => $a) { $q[$a] = 'Amazon-Alternative ' . ($i + 1); }
         foreach ((self::such_kandidaten()[$alt]['liste'] ?? []) as $i => $a) { $q[$a] = $q[$a] ?? 'Amazon-Suche ' . ($i + 1); }
         foreach ((self::auch_gekauft()[$alt]['liste'] ?? []) as $a) { $q[$a] = $q[$a] ?? 'Kunden kauften auch'; }
+        foreach (self::ersatz_fuer($alt) as $a => $stt) { $q[$a] = 'Ersatz-Datenbank (' . $stt . ')'; }   // gepflegte Ersatzprodukte der Produktart
         $ce = self::claude_empfehlungen()[$alt] ?? null; if ($ce) { $q[$ce[0]] = 'Empfehlung'; }
         foreach ($marken as $a => $t) { if ($t === 'fav' && !isset($q[$a])) { $q[$a] = 'Favorit'; } }
         foreach (array_keys($namen) as $a) { if (!isset($q[$a])) { $q[$a] = 'Katalog'; } }
@@ -5495,10 +5527,10 @@ JS;
             foreach ($nom as $w_) { if (mb_strlen($w_) >= 4 && strpos($tcl, $w_) !== false) { $nb++; } }
             if ($tt >= 1 && $nb >= 1) { $passt = max($passt, 2); } elseif ($tt >= 1 || $nb >= 1) { $passt = max($passt, 1); }
             $aehn = count(array_intersect($wn, self::woerter($tc))) + min(2, $tt + $nb); if ($tk >= 2) { $aehn++; if ($passt === 0) { $passt = 1; } } $sim = $wn ? min(1.0, count(array_intersect($wn, self::woerter($tc))) / max(1, count($wn))) : 0.0;
-            if ($passt === 0 && ($quelle === 'Kunden kauften auch' || strpos($quelle, 'Amazon-Suche') === 0)) { $passt = 2; }   // von Amazon als zugehörig gezeigt beziehungsweise von Hand geprüft   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
+            if ($passt === 0 && ($quelle === 'Kunden kauften auch' || strpos($quelle, 'Amazon-Suche') === 0 || strpos($quelle, 'Ersatz-Datenbank') === 0)) { $passt = 2; }   // von Amazon als zugehörig gezeigt beziehungsweise von Hand geprüft   // von Hand gesucht und geprüft: nicht noch einmal aussortieren
             if ($passt === 0) { $aus[] = ['asin' => $a, 'quelle' => $quelle, 'titel' => (string) ($x['titel'] ?? '')]; if ($ok && $quelle === 'Katalog') { $rest[] = ['asin' => $a, 'quelle' => 'Bestes im Portfolio (Passung unklar)', 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => 0, 'pv' => $pv, 'rang' => $sc, 'ausgeschlossen' => false]; } continue; }
             $gw = $wn ? count(array_intersect($wn, self::woerter($tc))) : 0;   // gemeinsame Titelwörter (ohne Füllwörter): Hauptkriterium der Reihenfolge, danach Score
-            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'sim' => $sim, 'gw' => $gw, 'ahs' => min(6, $gw) * 5 + (int) floor(4 * $sim) + min(2, $aehn), 'pv' => $pv, 'rang' => $sc + 30 * $tt + 10 * $nb + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + 40 * $sim + ($quelle === 'Katalog' ? 0 : 3), 'ausgeschlossen' => false];
+            $out[] = ['asin' => $a, 'quelle' => $quelle, 'score' => $sc, 'x' => $x, 'ok' => $ok, 'passt' => $passt, 'aehn' => $aehn, 'sim' => $sim, 'gw' => $gw, 'ahs' => min(6, $gw) * 5 + (int) floor(4 * $sim) + min(2, $aehn), 'pv' => $pv, 'rang' => $sc + 30 * $tt + 10 * $nb + 15 * max(0, ((float) $pv) - 3) + 10 * $ar + 4 * $tr + 12 * $aehn + 40 * $sim + ($quelle === 'Katalog' ? 0 : 3) + ($quelle === 'Ersatz-Datenbank (geprüft)' ? 20 : 0), 'ausgeschlossen' => false];
         }
         // zwei Gruppen: bis zu $max aus dem eigenen Bestand (vom Algorithmus gewählt) und bis zu 2 neue Treffer der Amazon-Suche
         usort($out, fn($p, $q2) => [(int) $q2['ok'], (int) ($q2['ahs'] ?? 0), (float) ($q2['score'] ?? -1), (float) $q2['rang']] <=> [(int) $p['ok'], (int) ($p['ahs'] ?? 0), (float) ($p['score'] ?? -1), (float) $p['rang']]);   // lieferbare zuerst, dann ähnlicher Produktname (Alexander 25.10.), dann Score, bei gleichem Score nach Rang inkl. Provision
@@ -6740,6 +6772,9 @@ JS;
             } elseif ($form === 'manuell') {
                 update_option('sab_manuell', sanitize_textarea_field(wp_unslash($_POST['sab_manuell'] ?? '')), false);
                 $meldung = 'Handdaten gespeichert.';
+            } elseif ($form === 'ersatz') {
+                update_option('sab_ersatz', sanitize_textarea_field(wp_unslash($_POST['sab_ersatz'] ?? '')), false); delete_transient('sab_alle_asins'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
+                $meldung = 'Ersatz-Datenbank gespeichert (' . count(self::ersatz_liste()) . ' Einträge).';
             } elseif ($form === 'dringlichkeit') {
                 if (!empty($_POST['sab_dr_std'])) { delete_option('sab_dringlichkeit'); $meldung = 'Dringlichkeit auf den Standard zurückgesetzt.'; }
                 else {

@@ -1547,4 +1547,11 @@ $scx = new ReflectionMethod('SAB', 'score'); $scx->setAccessible(true);
 $sa = $scx->invoke(null, array_merge($mdd['B0LIEFKST1'], ['preis' => '10 €', 'lieferbar' => true])); $sb = $scx->invoke(null, array_merge($mdd['B0LIEFKST2'], ['preis' => '10 €', 'lieferbar' => true])); $sc3 = $scx->invoke(null, array_merge($mdd['B0LIEFKST3'], ['preis' => '10 €', 'lieferbar' => true]));
 ok($sa[0] < $sc3[0] && $sc3[0] < $sb[0], 'Hohe Lieferkosten ziehen den Score nach unten, gratis nach oben');
 unset($GLOBALS['opt']['sab_manuell']);
+// 0.89.25: Ersatz-Datenbank
+$GLOBALS['opt']['sab_ersatz'] = "Zaunart | .co.uk | B0ERSATZ01 | geprüft | 2026-10-27 | PC\nZaunart | com | B0ERSATZ02 | neu\nB0ALTPROD1 | UK | B0ERSATZ03 | ok\nkaputt | x";
+$GLOBALS['opt']['sab_gruppen'] = "Zaunart: B0ALTPROD1, B0ALTPROD2";
+$el = SAB::ersatz_liste();
+ok(count($el) === 3 && $el[0]['land'] === 'co.uk' && $el[0]['status'] === 'geprüft' && $el[1]['status'] === 'neu', 'Ersatz-Datenbank lesen');
+ok(SAB::ersatz_fuer('B0ALTPROD1', 'co.uk') === ['B0ERSATZ01' => 'geprüft', 'B0ERSATZ03' => 'geprüft'] && SAB::ersatz_fuer('B0ALTPROD1', 'com') === ['B0ERSATZ02' => 'neu'] && SAB::ersatz_fuer('B0ANDERES1', 'co.uk') === [], 'Ersatz je Produktart, Land und ASIN');
+unset($GLOBALS['opt']['sab_ersatz'], $GLOBALS['opt']['sab_gruppen']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
