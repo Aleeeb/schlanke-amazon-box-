@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.17
+ * Version: 0.89.18
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.17';
+    const VERSION = '0.89.18';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -774,7 +774,7 @@ final class SAB {
         $q = self::dringlichkeit_werte();
         $primeUnklar = array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null;
         if ($primeUnklar && (($x['preis'] ?? '') === '' || ($x['kaufen'] ?? null) === false)) { return 100; }   // ohne Preis oder Buy Box und ohne Prime: wohl nicht mehr zu haben
-        $d = max($primeUnklar ? 20 : 0, $score < $q['schwelle'] ? (int) round(($q['schwelle'] - $score) * $q['faktor']) : 0);
+        $d = max(0, $score < $q['schwelle'] ? (int) round(($q['schwelle'] - $score) * $q['faktor']) : 0);
         if (isset($x['liefertage']) && $x['liefertage'] !== null && (float) $x['liefertage'] > $q['tage']) { $d = max($d, $q['tage_dr']); }
         if (isset($x['sterne']) && $x['sterne'] !== null && (float) $x['sterne'] < $q['sterne']) { $d = max($d, $q['sterne_dr']); }
         return min(100, $d);
@@ -3260,7 +3260,7 @@ JS;
         $p1x = []; $p2x = []; $grund2 = []; $vorher = array_merge($weg, $nv, $uk, $wa);
         foreach ((array) ($d['items'] ?? []) as $a_ => $x_) {
             $a_ = (string) $a_; if (in_array($a_, $vorher, true) || isset($trotz[$a_])) { continue; }
-            if (array_key_exists('manuell_stand', $x_) && ($x_['prime'] ?? null) === null) { $p1x[] = $a_; continue; }
+            if (array_key_exists('manuell_stand', $x_) && ($x_['prime'] ?? null) === null && (($x_['preis'] ?? '') === '' || ($x_['kaufen'] ?? null) === false)) { $p1x[] = $a_; continue; }   // „Prime unklar“ allein ist nur ein Hinweis (Shogen 27.10.): nur mit fehlendem Preis oder ohne Buy Box ein Problem
             $gr_ = [];
             if (self::score($x_)[0] < 35) { $gr_[] = 'sehr schlechter Score (' . self::score($x_)[0] . ')'; }
             if (isset($x_['liefertage']) && $x_['liefertage'] !== null && (float) $x_['liefertage'] > 14) { $gr_[] = 'Lieferzeit ' . round((float) $x_['liefertage']) . ' Tage'; }

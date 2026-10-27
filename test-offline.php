@@ -1493,4 +1493,9 @@ set_transient('sab_alle_asins', ['B0ARTIKEL01'], 600);
 $rp = new ReflectionMethod('SAB', 'pruef_liste'); $rp->setAccessible(true);
 ok(in_array('B0ARTIKEL01', $rp->invoke(null), true), 'Prüfliste enthält Produkte aus Artikeln');
 delete_transient('sab_alle_asins');
+// 0.89.18: „Prime unklar“ allein ist kein Tauschgrund
+$rd = new ReflectionMethod('SAB', 'tausch_dringlichkeit'); $rd->setAccessible(true);
+$xu = ['manuell_stand' => 1, 'prime' => null, 'preis' => '12,99 €', 'lieferbar' => true, 'kaufen' => true, 'liefertage' => 2, 'sterne' => 4.5];
+ok($rd->invoke(null, $xu, 80) === 0, 'Prime unklar, Preis da, gute Lieferzeit: kein Tauschgrund');
+ok($rd->invoke(null, array_merge($xu, ['kaufen' => false]), 80) === 100, 'Prime unklar ohne Buy Box: weiter Problem');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
