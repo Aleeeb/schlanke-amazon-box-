@@ -1530,4 +1530,12 @@ ok($au->invoke(null, 'B0FRISCH01', ['items' => []]) === false && $au->invoke(nul
 $bn = new ReflectionMethod('SAB', 'bilder_nachladen'); $bn->setAccessible(true);
 $be = null; try { $bm = $bn->invoke(null); } catch (\Throwable $e) { $be = $e->getMessage(); }
 ok($be === null && strpos((string) $bm, 'Bilder nachgeladen') !== false, 'Bilder nachladen läuft: ' . ($be ?? $bm));
+// 0.89.23: Wiederholung ersetzen (nur die zweite, zu nahe Stelle)
+$wc = '<p>Erster Absatz.</p><p><a href="https://www.amazon.co.uk/dp/B06WRV4RKC?tag=x-21">Zaun A</a></p><p>' . str_repeat('Text zum Thema Schnecken. ', 40) . '</p><p>Noch mal: <a href="https://www.amazon.co.uk/dp/B06WRV4RKC?tag=x-21">Zaun A</a> hilft.</p><p>Ende.</p>';
+ok(count(SAB::doppel_funde($wc)) === 1, 'Test-Artikel hat eine Wiederholung');
+[$wc2, $wok] = SAB::wiederholung_ersetzen($wc, 'B06WRV4RKC', 'B0ZAUNNEU1');
+ok($wok && substr_count($wc2, 'B06WRV4RKC') === 1 && substr_count($wc2, 'B0ZAUNNEU1') === 1 && strpos($wc2, 'B06WRV4RKC') < strpos($wc2, 'B0ZAUNNEU1'), 'Nur die zweite Stelle ersetzt, die erste bleibt');
+ok(count(SAB::doppel_funde($wc2)) === 0, 'Danach keine Wiederholung mehr');
+[$wc3, $wok3] = SAB::wiederholung_ersetzen($wc2, 'B06WRV4RKC', 'B0ZAUNNEU1');
+ok(!$wok3 && $wc3 === $wc2, 'Ohne Wiederholung nichts geändert');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

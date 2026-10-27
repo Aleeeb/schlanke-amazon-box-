@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.22
+ * Version: 0.89.23
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.22';
+    const VERSION = '0.89.23';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3043,6 +3043,75 @@ JS;
         return $z($neu_c) > $z($c);
     }
 
+    /** Spätere Anzeige eines zu nah wiederholten Produkts: Bereich [von, bis] des Absatzes bzw. der Tabelle der zweiten Stelle. @return int[]|null */
+    public static function wied_stelle(string $c, string $asin): ?array {
+        $re = '#(?:asin|fields|box|link|data-sab-asin)\s*=\s*["\']?([A-Z0-9]{10})\b|/(?:dp|gp/product|product)/([A-Z0-9]{10})\b#i'; $tab = []; $iv = [];
+        if (preg_match_all('#<table\b.*?</table>#is', $c, $tm, PREG_OFFSET_CAPTURE)) { foreach ($tm[0] as [$t, $off]) { $tab[] = [$off, $off + strlen($t)]; } }
+        if (!preg_match_all($re, $c, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { return null; }
+        foreach ($m as $x) {
+            if (strtoupper(($x[1][0] ?? '') !== '' ? $x[1][0] : ($x[2][0] ?? '')) !== $asin) { continue; }
+            $p = (int) $x[0][1]; $s = $p; $e = $p + strlen($x[0][0]);
+            foreach ($tab as [$ts, $te]) { if ($p >= $ts && $p <= $te) { $s = $ts; $e = $te; break; } }
+            $iv[] = [$s, $e, $s !== $p];
+        }
+        if (count($iv) < 2) { return null; }
+        usort($iv, fn($a, $b) => $a[0] <=> $b[0]);
+        $gr = [$iv[0]];
+        foreach (array_slice($iv, 1) as $v) { $l = count($gr) - 1; if ($v[0] - $gr[$l][1] <= self::NAH_EINS) { $gr[$l][1] = max($gr[$l][1], $v[1]); } else { $gr[] = $v; } }
+        for ($i = 1; $i < count($gr); $i++) {
+            if ($gr[$i][0] - $gr[$i - 1][1] >= self::NAH) { continue; }
+            [$s, $e, $tabelle] = $gr[$i];
+            if (!$tabelle) {   // Absatz um die Stelle: ab letztem Absatzende bis zum nächsten
+                $vor = substr($c, 0, $s); $b = 0;
+                foreach (['</p>', '</table>', '</h2>', '</h3>', '</h4>', "\n\n", '[/amz_karten]'] as $t) { $q = strripos($vor, $t); if ($q !== false) { $b = max($b, $q + strlen($t)); } }
+                $nach = substr($c, $e); $n = strlen($nach);
+                foreach (['</p>', "\n\n", '</table>'] as $t) { $q = stripos($nach, $t); if ($q !== false) { $n = min($n, $q + ($t === "\n\n" ? 0 : strlen($t))); } }
+                $s = min($s, $b); $e += $n;
+            }
+            return [$s, $e];
+        }
+        return null;
+    }
+
+    /** Ersetzt NUR die spätere, zu nahe Anzeige von ALT durch NEU (die erste bleibt). @return array{0:string,1:bool} */
+    public static function wiederholung_ersetzen(string $c, string $alt, string $neu, array $alte_namen = [], string $neuer_name = ''): array {
+        $st = self::wied_stelle($c, $alt);
+        if (!$st) { return [$c, false]; }
+        [$seg3, $n] = self::tausch_text(substr($c, $st[0], $st[1] - $st[0]), $alt, $neu, $alte_namen, $neuer_name);
+        if ($n < 1) { return [$c, false]; }
+        $c2 = substr($c, 0, $st[0]) . $seg3 . substr($c, $st[1]);
+        $z = fn(string $t, string $a) => count(array_filter(self::doppel_funde($t), fn($f) => $f['asin'] === $a));
+        if ($z($c2, $alt) >= $z($c, $alt) || self::doppel_neu($c, $c2, $neu)) { return [$c, false]; }   // muss die Wiederholung wirklich beseitigen und darf keine neue Doppelung erzeugen
+        return [$c2, true];
+    }
+
+    /** Panel „Wiederholung ersetzen“: ähnliche Produkte als Variante für die zweite Stelle; Einsetzen nur nach Klick (Freigabe), danach Rückgängig. */
+    private static function wiederholung_html(int $pid, string $alt): string {
+        $post = get_post($pid); if (!$post) { return '<p>Artikel nicht gefunden.</p>'; }
+        $c = (string) $post->post_content; $d = (array) self::uebersicht_daten(self::land(''), false); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte();
+        $fund = self::fundstellen([$alt]); $h = '<h3>Wiederholung ersetzen: „' . esc_html($post->post_title) . '“</h3>';
+        $b = (array) get_post_meta($pid, '_sab_wied_backup', true); $l = end($b);
+        if ($l && md5($c) === ($l['hash'] ?? '')) { $h .= '<form method="post" style="margin:8px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="wied_zurueck"><input type="hidden" name="sab_id" value="' . $pid . '"><button class="button">Rückgängig: ' . esc_html((string) ($l['neu'] ?? '')) . ' wieder durch ' . esc_html((string) ($l['alt'] ?? '')) . ' ersetzen</button></form>'; }
+        $st = self::wied_stelle($c, $alt);
+        if (!$st) { return $h . '<p>Keine zu nahe Wiederholung von <code>' . esc_html($alt) . '</code> (mehr) in diesem Artikel.</p>'; }
+        $kontext = trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace('/\[[^\]]*\]/', ' ', mb_scrub(substr($c, max(0, $st[0] - 300), 300))))));
+        $h .= '<p>Das Produkt <strong>' . esc_html(self::anzeige_name($alt, $d, $fund)) . '</strong> (<code>' . esc_html($alt) . '</code>) steht weniger als ' . self::NAH . ' Zeichen nach seiner ersten Anzeige noch einmal. Nur die <strong>zweite</strong> Stelle (hinter „… ' . esc_html(mb_substr($kontext, -140)) . '“) wird ersetzt, die erste bleibt. Es wird nichts gespeichert, bevor du „Freigeben“ klickst.</p>';
+        $k = self::austausch_kandidaten($alt, self::anzeige_name($alt, $d, $fund), $d, $trotz, $fund, 8); $n = 0; $h .= '<div style="display:flex;flex-wrap:wrap;gap:12px">';
+        foreach ($k['liste'] as $cd) {
+            if ($n >= 4) { break; }
+            if (empty($cd['x']) || empty($cd['ok']) || (int) ($cd['passt'] ?? 0) < 2) { continue; }
+            $nn = (string) ($namen[$cd['asin']] ?? ''); [$c2, $ok] = self::wiederholung_ersetzen($c, $alt, (string) $cd['asin'], [(string) ($namen[$alt] ?? '')], $nn);
+            if (!$ok) { continue; }
+            $n++;
+            $h .= '<form method="post" style="border:1px solid #c3c4c7;background:#fff;padding:8px;width:260px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="wied_los"><input type="hidden" name="sab_id" value="' . $pid . '"><input type="hidden" name="sab_alt" value="' . esc_attr($alt) . '"><input type="hidden" name="sab_neu" value="' . esc_attr((string) $cd['asin']) . '"><input type="hidden" name="sab_hash" value="' . md5($c) . '">'
+                . '<div style="display:flex;gap:8px;align-items:center">' . self::mini_bild((string) $cd['asin'], (array) $cd['x']) . '<span><strong>' . esc_html($nn ?: self::kurzname_aus_titel((string) ($cd['x']['titel'] ?? ''))) . '</strong><br><small>Score ' . (int) $cd['score'] . ' · <code>' . esc_html((string) $cd['asin']) . '</code></small></span></div>'
+                . '<p style="margin:6px 0 0"><button class="button button-primary">Freigeben und einsetzen</button></p></form>';
+        }
+        $h .= '</div>';
+        if (!$n) { $h .= '<p><em>Keine passende Variante im Bestand gefunden (gleiche Produktart, lieferbar, ohne neue Doppelung). Bitte unter „Austausch“ nach einem anderen Zaun suchen oder die Stelle von Hand ändern.</em></p>'; }
+        return $h;
+    }
+
     /** Artikel (Titel), die durch den Tausch ALT => NEU eine Doppelung von NEU bekämen. */
     private static function doppel_durch_tausch(string $alt, string $neu): array {
         global $wpdb; $out = [];
@@ -3074,7 +3143,7 @@ JS;
                 if (count($zeilen) < 60) {
                     $name = ($namen[$f['asin']] ?? '') ?: (string) ($d['items'][$f['asin']]['titel'] ?? '');
                     $zeilen[] = '<tr><td><a href="' . esc_url(admin_url('post.php?post=' . (int) $r['ID'] . '&action=edit')) . '">' . esc_html((string) $r['post_title']) . '</a></td><td><code>' . esc_html($f['asin']) . '</code> ' . esc_html($name) . '</td><td>'
-                        . ($f['art'] === 'nebeneinander' ? '<strong style="color:#a00">nebeneinander</strong> (zwei Spalten derselben Tabelle)' : '<strong style="color:#b36b00">zu nah</strong> (nur ' . (int) $f['abstand'] . ' Zeichen Abstand)') . '</td></tr>';
+                        . ($f['art'] === 'nebeneinander' ? '<strong style="color:#a00">nebeneinander</strong> (zwei Spalten derselben Tabelle)' : '<strong style="color:#b36b00">zu nah</strong> (nur ' . (int) $f['abstand'] . ' Zeichen Abstand) <a class="button button-small" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'wied' => (int) $r['ID'], 'wasin' => $f['asin']], admin_url('admin.php'))) . '#sab-wied">Wiederholung ersetzen</a>') . '</td></tr>';
                 }
             }
         }
@@ -6556,6 +6625,27 @@ JS;
                         $meldung = count($plan['schritte']) . ' Block/Blöcke verschoben. Bitte den Artikel ansehen; Rückgängig steht in der Vorschau.';
                     }
                 }
+            } elseif ($form === 'wied_los') {
+                $pid = (int) ($_POST['sab_id'] ?? 0); $post = $pid ? get_post($pid) : null; $alt = self::asin((string) ($_POST['sab_alt'] ?? '')); $neu = self::asin((string) ($_POST['sab_neu'] ?? ''));
+                if (!$post || !current_user_can('edit_post', $pid) || strlen($alt) !== 10 || strlen($neu) !== 10) { $meldung = 'Ungültige Angaben.'; }
+                elseif (md5((string) $post->post_content) !== (string) ($_POST['sab_hash'] ?? '')) { $meldung = 'Der Artikel hat sich inzwischen geändert, bitte die Vorschau neu öffnen.'; }
+                elseif (!self::neues_produkt_vorladen($neu)) { $meldung = 'Amazon liefert zu ' . $neu . ' gerade kein Bild oder keine Daten. Nicht getauscht.'; }
+                else {
+                    $namen = self::produkte(); [$c2, $ok] = self::wiederholung_ersetzen((string) $post->post_content, $alt, $neu, [(string) ($namen[$alt] ?? '')], (string) ($namen[$neu] ?? ''));
+                    if (!$ok) { $meldung = 'Nichts geändert (keine passende Stelle oder es würde eine neue Doppelung entstehen).'; }
+                    else {
+                        $b = (array) get_post_meta($pid, '_sab_wied_backup', true);
+                        $b = array_slice(array_merge($b, [['ts' => time(), 'hash' => md5($c2), 'vorher' => (string) $post->post_content, 'alt' => $alt, 'neu' => $neu]]), -5);
+                        update_post_meta($pid, '_sab_wied_backup', wp_slash($b));
+                        wp_update_post(['ID' => $pid, 'post_content' => wp_slash($c2)]); delete_transient('sab_alle_asins');
+                        $meldung = 'Die zweite Stelle von ' . $alt . ' ist jetzt ' . $neu . '. Rückgängig steht unten in der Vorschau; bitte den Artikel ansehen.';
+                    }
+                }
+            } elseif ($form === 'wied_zurueck') {
+                $pid = (int) ($_POST['sab_id'] ?? 0); $post = $pid ? get_post($pid) : null; $b = $pid ? (array) get_post_meta($pid, '_sab_wied_backup', true) : []; $l = end($b);
+                if (!$post || !current_user_can('edit_post', $pid) || !$l) { $meldung = 'Keine Sicherung vorhanden.'; }
+                elseif (md5((string) $post->post_content) !== ($l['hash'] ?? '')) { $meldung = 'Der Artikel wurde seitdem geändert; Rückgängig ist zu riskant. Bitte unter „Versionen“ zurückgehen.'; }
+                else { wp_update_post(['ID' => $pid, 'post_content' => wp_slash((string) $l['vorher'])]); array_pop($b); update_post_meta($pid, '_sab_wied_backup', wp_slash($b)); delete_transient('sab_alle_asins'); $meldung = 'Rückgängig gemacht: ' . ($l['alt'] ?? '') . ' steht wieder an der zweiten Stelle.'; }
             } elseif ($form === 'entzerren_zurueck') {
                 $pid = (int) ($_POST['sab_id'] ?? 0); $alt = $pid ? get_post_meta($pid, '_sab_entzerren_backup', true) : '';
                 if ($alt !== '' && $alt !== false) { wp_update_post(['ID' => $pid, 'post_content' => wp_slash($alt)]); delete_post_meta($pid, '_sab_entzerren_backup'); $meldung = 'Entzerren rückgängig gemacht.'; } else { $meldung = 'Keine Sicherung vorhanden.'; }
@@ -6742,6 +6832,11 @@ JS;
         } elseif ($tab === 'umbau') {
             $eid = (int) ($_GET['entzerren'] ?? ($_POST['sab_id'] ?? 0));
             if (!empty($_GET['entzerren']) || (isset($_POST['sab_form']) && in_array($_POST['sab_form'], ['entzerren_los', 'entzerren_zurueck'], true))) { echo '<div id="sab-entzerren" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">' . self::entzerren_vorschau_html($eid) . '</div>'; }
+            if ((!empty($_GET['wied']) && !empty($_GET['wasin'])) || (isset($_POST['sab_form']) && in_array($_POST['sab_form'], ['wied_los', 'wied_zurueck'], true))) {
+                $wp_ = (int) ($_GET['wied'] ?? ($_POST['sab_id'] ?? 0)); $wa_ = self::asin((string) ($_GET['wasin'] ?? ($_POST['sab_alt'] ?? '')));
+                if (!$wa_ && $wp_ && ($lw_ = (array) get_post_meta($wp_, '_sab_wied_backup', true)) && ($le_ = end($lw_))) { $wa_ = (string) ($le_['alt'] ?? ''); }
+                echo '<div id="sab-wied" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">' . self::wiederholung_html($wp_, $wa_) . '</div>';
+            }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
             echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>'
