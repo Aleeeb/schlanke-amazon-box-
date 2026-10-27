@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.14
+ * Version: 0.88.15
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.14';
+    const VERSION = '0.88.15';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -958,6 +958,9 @@ final class SAB {
     private static function bild_noch_offen(array $e, string $land, int &$budget): ?bool {   // true = fehlt, false = behoben, null = Abruf läuft noch (merken, nicht melden)
         $asin = (string) $e['asin']; $p = get_transient("sab_{$land}_" . $asin); $p = is_array($p) ? $p : null;
         if (self::hat_bild($p)) { return false; }
+        if (self::getauscht($asin) !== $asin) { return false; }   // inzwischen durch ein anderes Produkt ersetzt (Austausch-Regel): die Meldung gilt dem neuen
+        $pc = (int) ($e['post'] ?? 0); if ($pc > 0 && function_exists('get_post_field') && strpos((string) get_post_field('post_content', $pc), $asin) === false) { return false; }   // steht gar nicht mehr im Artikel (schon getauscht oder gelöscht)
+        $bf = self::bild_pfad($land, $asin, 0); if (is_file($bf) && time() - (int) filemtime($bf) <= self::BILD_MAX) { return false; }   // Bild liegt in der Mediathek: kein Fehler
         if ($p === null) {
             $v = "sab_bf_{$land}_" . $asin;
             if ($budget > 0 && !get_transient($v)) { $budget--; set_transient($v, 1, 5 * MINUTE_IN_SECONDS); $p = self::produkt($asin, $land, false, true); if (self::hat_bild($p)) { return false; } }
@@ -5489,6 +5492,7 @@ JS;
         }
         usort($zeilen, fn($a, $b) => [(int) ($b['dr'] >= 100), $b['prio'], $b['n']] <=> [(int) ($a['dr'] >= 100), $a['prio'], $a['n']]);   // zuerst alles Nicht-Lieferbare/ohne Bild, darin nach Priorität; danach der Rest
         // Produkte ohne Bild (laut Warnliste, von Amazon unbekannt oder ohne Bild und ohne eigenes Bild) kommen als eigene Dringend-Liste nach oben: zuerst die auf den meisten Seiten
+        self::bildfehler_html();   // räumt erledigte und veraltete Einträge auf, bevor die Dringend-Liste sie liest
         $bf = []; foreach ((array) get_option('sab_bildfehler', []) as $e_) { $bf[(string) ($e_['asin'] ?? '')] = 1; }
         $zb = []; $zr = [];
         foreach ($zeilen as $z_) {

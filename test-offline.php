@@ -1347,7 +1347,7 @@ $gj = tempnam(sys_get_temp_dir(), 'gj') . '.js'; file_put_contents($gj, "var win
 exec('node ' . escapeshellarg($gj) . ' 2>&1', $gout, $grc);
 ok($grc === 0 && trim(implode('', $gout)) === '["co.uk","ca","co.uk",null]', 'Länder-Erkennung: Zeitzone vor Sprache, unbekannt = null (' . implode(' ', $gout) . ')');
 // 0.88.1: Bildwarnung klickbar, kurze Titel, Sprung; frisch eingetragene Produkte nicht sofort melden
-foreach (['get_edit_post_link' => 'https://example.test/wp-admin/post.php?post=5&action=edit', 'get_the_title' => 'Elektrozaun Akku Weidezaun Test', 'get_post_field' => '<p>[amz_link asin="B0BILDFEH2"]x[/amz_link]</p>'] as $fn_ => $rv_) { if (!function_exists($fn_)) { eval('function ' . $fn_ . '(...$a) { return ' . var_export($rv_, true) . '; }'); } }
+foreach (['get_edit_post_link' => 'https://example.test/wp-admin/post.php?post=5&action=edit', 'get_the_title' => 'Elektrozaun Akku Weidezaun Test', 'get_post_field' => '<p>[amz_link asin="B0BILDFEH2"]x[/amz_link] [amz_bild asin="B0BILDNEU3"]</p>'] as $fn_ => $rv_) { if (!function_exists($fn_)) { eval('function ' . $fn_ . '(...$a) { return ' . var_export($rv_, true) . '; }'); } }
 $GLOBALS['opt']['sab_bildfehler'] = ['B0BILDFEH2|5' => ['asin' => 'B0BILDFEH2', 'post' => 5, 'ts' => 1, 'art' => 'Bild'], 'B0BILDNEU3|5' => ['asin' => 'B0BILDNEU3', 'post' => 5, 'ts' => time(), 'art' => 'Bild']];
 $mBh = new ReflectionMethod('SAB', 'bildfehler_html'); $mBh->setAccessible(true); $bh = $mBh->invoke(null);
 ok(strpos($bh, '/dp/B0BILDFEH2') !== false && (new ReflectionMethod('SAB', 'kurz_wort'))->invoke(null, 'Elektrozaun Akku Weidezaun Test') === 'Elektrozaun Akku Weidezaun …' && strpos($bh, 'sab_zeige=B0BILDFEH2') !== false && strpos($bh, 'Editor') !== false, 'Bildwarnung: ASIN klickbar, Artikelname nur drei Wörter, Sprung zur Stelle');
@@ -1386,4 +1386,8 @@ ok(SAB::titel_an_stelle($e4, $p4, 21) === '', 'Zweier-Tabelle: Zelle ohne eigene
 $e5 = '<table><tr><td>[amz_bild asin="B0A"]<br>Titel Erstes</td><td>[amz_bild asin="B0B"]<br>Titel Zweites</td></tr></table>';
 ok(SAB::titel_an_stelle($e5, strpos($e5, '[amz_bild asin="B0B"'), 21) === 'Titel Zweites' && SAB::titel_an_stelle($e5, strpos($e5, '[amz_bild asin="B0A"'), 21) === 'Titel Erstes', 'Zweier-Tabelle: Titel steht unter dem Bild der eigenen Zelle');
 ok(SAB::land_schluessel('.co.uk') === 'co.uk' && SAB::land_schluessel('www.amazon.co.uk') === 'co.uk' && SAB::land_schluessel('amazon.de') === 'de' && SAB::land_schluessel('https://www.amazon.com/') === 'com' && SAB::land_schluessel('.de') === 'de', 'Ländercode: „.co.uk“, „amazon.co.uk“, „www.amazon.de“ werden erkannt');
+// 0.88.15: veraltete Bildwarnungen verschwinden (ASIN nicht mehr im Artikel)
+$GLOBALS['opt']['sab_bildfehler'] = ['B0ALTWEG01|5' => ['asin' => 'B0ALTWEG01', 'post' => 5, 'ts' => 1, 'art' => 'Bild']];
+ok(SAB::bildfehler_zaehlen() === [0, 0], 'Bildwarnung: ASIN steht nicht mehr im Artikel => keine Meldung');
+unset($GLOBALS['opt']['sab_bildfehler']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
