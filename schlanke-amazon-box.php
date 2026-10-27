@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.1
+ * Version: 0.89.2
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.1';
+    const VERSION = '0.89.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -195,7 +195,7 @@ final class SAB {
     }
 
     private static function tag(string $land): string {
-        return self::tags()[$land] ?? '';
+        return self::tags()[$land] ?? (self::slughelp_ids()[$land] ?? '');
     }
 
     private static function token(string $land): string {
@@ -1774,11 +1774,16 @@ final class SAB {
     // ---------- Besucherland im Browser erkennen (Zeitzone + Browsersprache, keine IP, kein Cookie, keine Übertragung) ----------
 
     /** Vorgabe-IDs für Slughelp (aus dem bisherigen Seiten-Skript); auf anderen Seiten leer, dort zählen nur die eigenen Partner-IDs. */
-    private static function geo_ids(): array {
-        $vor = [];
+    /** Vorbelegte Partner-IDs der Slughelp-Seite (nur dort); fehlt in den Einstellungen ein Land, gilt diese ID. */
+    private static function slughelp_ids(): array {
         if (function_exists('home_url') && stripos((string) home_url(), 'slughelp') !== false) {
-            $vor = ['co.uk' => 'schnectest08-21', 'com' => 'sh04a0-20', 'ca' => 'sh09cc-20', 'com.au' => 'slughelp00-22', 'de' => 'schnectest-21', 'fr' => 'schnectest03-21', 'it' => 'happy0be-21', 'es' => 'babosa-21'];
+            return ['co.uk' => 'schnectest08-21', 'com' => 'sh04a0-20', 'ca' => 'sh09cc-20', 'com.au' => 'slughelp00-22', 'de' => 'schnectest-21', 'fr' => 'schnectest03-21', 'it' => 'happy0be-21', 'es' => 'babosa-21'];
         }
+        return [];
+    }
+
+    private static function geo_ids(): array {
+        $vor = self::slughelp_ids();
         $out = [];
         foreach (array_merge($vor, self::tags()) as $l => $t) { if (preg_match('/^(co\.uk|com\.au|com|ca|de|fr|it|es)$/', (string) $l) && preg_match('/^[A-Za-z0-9\-]{3,40}$/', (string) $t)) { $out[(string) $l] = (string) $t; } }
         return $out;
@@ -3975,6 +3980,7 @@ JS;
     }
 
     /** Meldungen des Umbaus, warum eine Tabelle bewusst nicht umgebaut wurde (Abweichung zwischen Bild, Link und Titel). */
+    public static array $skip_laender = [];
     public static array $umbau_abw = [];
     /** Hinweise, was der Umbau nach dem Bild angepasst hat (Link oder Titel passten nicht zum Bildprodukt). */
     public static array $umbau_info = [];
@@ -4180,7 +4186,7 @@ JS;
             if (!$u) { return $m[0]; }
             [$land, $asin] = $u;
             if ($nur !== '' && $asin !== $nur) { return $m[0]; }
-            if (!self::tag($land) || strpos($m[2], '[') !== false) { $skip++; return $m[0]; }
+            if (!self::tag($land) || strpos($m[2], '[') !== false) { $skip++; if (!self::tag($land)) { self::$skip_laender[$land] = 1; } return $m[0]; }
             if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land) && !self::weg_umbauen($asin)) { self::$umbau_keys[self::$umbau_abw[] = 'Link „' . mb_substr(trim(strip_tags($m[2])), 0, 40) . '“ zeigt auf ' . $asin . ', das Amazon nicht mehr kennt, nicht umgebaut (erst das Produkt tauschen)'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; $skip++; return $m[0]; }
             $cls = '';
             if (preg_match('#class=(["\'])(.*?)\1#is', $m[1], $cl)) { $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', $cl[2])); }
@@ -4390,7 +4396,7 @@ JS;
             if (microtime(true) - $t_start > 20) { $uebrig++; continue; }   // Zeitgrenze: Der Rest kommt auf der nächsten Seite (sie beginnt nach dem letzten geprüften Artikel)
             $letzte = (int) $a['id']; $geprueft++;
             $post = get_post($a['id']); if (!$post) { continue; }
-            self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
+            self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = []; self::$skip_laender = [];
             try { self::umbau_text((string) $post->post_content); }
             catch (\Throwable $e) { self::$umbau_abw[] = 'Prüfung abgebrochen: ' . $e->getMessage(); }
             $abw = array_values(array_unique(self::$umbau_abw)); $info = count(array_unique(self::$umbau_info)); $kurzOffen += self::$kurz_offen;
@@ -4454,7 +4460,7 @@ JS;
             catch (\Throwable $e) { self::$umbau_abw[] = 'Umbau abgebrochen (' . $e->getMessage() . '), Artikel unverändert'; }
             if (self::$umbau_abw) { $problem(self::$umbau_abw, self::$umbau_weg); }
             elseif ($gea) { $umg++; $l['umgebaut'] = (int) $l['umgebaut'] + 1; }
-            else { $problem(['Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: keine Partner-ID für das Land oder Sonderinhalt)' : '') . '.'], []); }
+            else { $problem(['Nichts umgebaut' . ($sk ? ' (' . $sk . ' übersprungen: ' . (self::$skip_laender ? 'keine Partner-ID für ' . implode(', ', array_keys(self::$skip_laender)) . ' (in den Einstellungen eintragen)' : 'Sonderinhalt') . ')' : '') . '.'], []); }
         }
         $l['rest'] = $rest;
         if ($rest === 0) { $l['aktiv'] = false; $l['ende'] = time(); }
@@ -5697,8 +5703,10 @@ JS;
         if (!$post) { return '<p>Artikel nicht gefunden.</p>'; }
         $c = (string) $post->post_content;
         self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
+        self::$skip_laender = [];
         [$neu, $n, $sk] = self::umbau_text($c);   // der ganze Artikel auf einmal, wie beim echten Umbau (Tabellenspalten und Nachbarn sind sichtbar)
         $h = '<h3>Vorschau für „' . esc_html($post->post_title) . '“</h3><p class="description">Es wird nichts gespeichert. Gezeigt wird das Ergebnis für den ganzen Artikel, so wie der Umbau ihn schreiben würde.</p>';
+        if (self::$skip_laender) { $h .= '<div class="notice notice-error inline"><p><strong>Keine Partner-ID für: ' . esc_html(implode(', ', array_keys(self::$skip_laender))) . '.</strong> Links zu diesen Amazon-Ländern werden deshalb nicht umgebaut. Bitte unter Einstellungen die Partner-ID dieses Shops eintragen.</p></div>'; }
         $knopf = '<form method="post" style="margin:10px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_einzeln"><input type="hidden" name="sab_id" value="' . (int) $id . '"><button class="button button-primary button-hero">Jetzt so umbauen</button> <span class="description">Der Artikel wird vorher gesichert, Rückgängig geht in der Liste.</span></form>';
         $h .= $knopf;
         if (self::$umbau_info) { $h .= '<div class="notice notice-info inline"><p><strong>Das Bild bestimmt das Produkt, daher angepasst:</strong></p><ul>' . implode('', array_map(fn($x) => '<li>' . esc_html($x) . self::ort_links($x, $id) . self::ok_knopf($x, $id) . '</li>', array_unique(self::$umbau_info))) . '</ul></div>'; }
