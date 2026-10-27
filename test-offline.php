@@ -1353,4 +1353,13 @@ $mBh = new ReflectionMethod('SAB', 'bildfehler_html'); $mBh->setAccessible(true)
 ok(strpos($bh, '/dp/B0BILDFEH2') !== false && (new ReflectionMethod('SAB', 'kurz_wort'))->invoke(null, 'Elektrozaun Akku Weidezaun Test') === 'Elektrozaun Akku Weidezaun …' && strpos($bh, 'sab_zeige=B0BILDFEH2') !== false && strpos($bh, 'Editor') !== false, 'Bildwarnung: ASIN klickbar, Artikelname nur drei Wörter, Sprung zur Stelle');
 ok(strpos($bh, 'B0BILDNEU3') === false && isset(((array) get_option('sab_bildfehler', []))['B0BILDNEU3|5']), 'Bildwarnung: gerade erst eingetragenes Produkt wird nicht gemeldet, aber gemerkt');
 unset($GLOBALS['opt']['sab_bildfehler']);
+// 0.88.2: Standardland ohne Partner-ID => erstes Land mit Partner-ID
+$GLOBALS['opt']['sab_tags'] = "co.uk=uk-21"; $GLOBALS['opt']['sab_default_land'] = 'de';
+$mSl = new ReflectionMethod('SAB', 'standardland'); $mSl->setAccessible(true);
+ok($mSl->invoke(null) === 'co.uk', 'Standardland de ohne Partner-ID: nimmt co.uk (nur dort eine ID)');
+$GLOBALS['opt']['sab_tags'] = "de=x-21\nco.uk=uk-21"; ok($mSl->invoke(null) === 'de', 'Standardland mit Partner-ID bleibt');
+unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
+$_GET['sab_zeige'] = 'B0AKKUNEU1'; $GLOBALS['admin'] = true; $GLOBALS['loggedin'] = true; ob_start(); SAB::zeige_skript(); $zj = ob_get_clean(); unset($_GET['sab_zeige']); $GLOBALS['admin'] = false; $GLOBALS['loggedin'] = false;
+$zf = tempnam(sys_get_temp_dir(), 'zj') . '.js'; file_put_contents($zf, preg_replace('#^<script>|</script>$#', '', trim($zj))); exec('node --check ' . escapeshellarg($zf) . ' 2>&1', $zo, $zrc);
+ok($zj !== '' && $zrc === 0 && strpos($zj, 'Hier tauschen') !== false, 'Sprung-Banner: Knopf „Hier tauschen“, JavaScript ok ' . implode(' ', $zo));
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

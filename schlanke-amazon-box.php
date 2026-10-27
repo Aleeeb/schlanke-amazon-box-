@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.1
+ * Version: 0.88.2
  * Requires PHP: 7.4
  */
 
@@ -47,7 +47,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.1';
+    const VERSION = '0.88.2';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -133,13 +133,22 @@ final class SAB {
             if ($z === '') { continue; }
             $t = array_map(fn($v) => trim($v, " \t\"'"), preg_split('/\s*[=:]\s*/', $z, 2));
             if (count($t) === 2 && $t[0] !== '' && $t[1] !== '') { $out[strtolower($t[0])] = $t[1]; }
-            elseif (count($t) === 1 && preg_match('/^[A-Za-z0-9][A-Za-z0-9\-]{2,39}$/', $t[0])) { $out[self::standardland()] = $out[self::standardland()] ?? $t[0]; }   // nur die ID ohne „de=“: gilt für das Standardland
+            elseif (count($t) === 1 && preg_match('/^[A-Za-z0-9][A-Za-z0-9\-]{2,39}$/', $t[0])) { $out[self::standardland_roh()] = $out[self::standardland_roh()] ?? $t[0]; }   // nur die ID ohne „de=“: gilt für das Standardland
         }
         return $out;
     }
 
-    private static function standardland(): string {
+    private static function standardland_roh(): string {
         return defined('SAB_DEFAULT_LAND') ? SAB_DEFAULT_LAND : (string) get_option('sab_default_land', 'de');
+    }
+
+    private static function standardland(): string {
+        $l = self::standardland_roh();
+        $t = self::tags();
+        if (!isset($t[$l]) && isset(self::LAENDER[$l])) {   // Standardland ohne Partner-ID (z. B. internationale Seite, nur co.uk eingetragen): erstes Land mit Partner-ID nehmen
+            foreach (array_keys($t) as $k) { if (isset(self::LAENDER[$k])) { return $k; } }
+        }
+        return $l;
     }
 
     /** Land aus Accept-Language (erste passende Sprache). Kein Cookie, keine IP. */
@@ -1033,7 +1042,7 @@ final class SAB {
         $l = (array) get_option('sab_bildfehler', []); $k = $asin . '|' . $pid;
         if ($pid > 0 && !isset($l[$k]) && count($l) < 300) { $l[$k] = ['asin' => $asin, 'post' => $pid, 'ts' => time(), 'art' => $art]; update_option('sab_bildfehler', $l, false); }
         if (function_exists('current_user_can') && current_user_can('edit_posts')) {
-            return '<span style="display:inline-block;padding:6px 10px;background:#fcf0f1;border:2px solid #d63638;color:#8a1f1f;font:600 13px sans-serif">Produktbild fehlt: ' . esc_html($asin) . ' (nur für Redakteure sichtbar)</span>';
+            return '<span data-sab-asin="' . esc_attr($asin) . '" style="display:inline-block;padding:6px 10px;background:#fcf0f1;border:2px solid #d63638;color:#8a1f1f;font:600 13px sans-serif">Produktbild fehlt: ' . esc_html($asin) . ' (nur für Redakteure sichtbar)</span>';
         }
         return '<span class="sab-weg" style="display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;max-width:240px;min-height:120px;padding:10px;text-align:center;background:#f3f4f4;border:1px dashed #b6babd;border-radius:6px;color:#555;font:600 13px/1.3 sans-serif">Momentan nicht verfügbar</span>';
     }
@@ -1685,7 +1694,7 @@ final class SAB {
     /** Für angemeldete Redakteure: ein totes Produkt (Amazon kennt es nicht mehr) bleibt im Text auffindbar, der Link „Stelle ansehen“ im Umbau-Reiter springt dorthin. */
     private static function weg_marker(string $asin, string $html): string {
         if (!function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts')) { return $html; }
-        return '<span data-sab-weg="' . esc_attr($asin) . '" title="Amazon kennt dieses Produkt nicht mehr">' . $html . '</span>';
+        return '<span data-sab-weg="' . esc_attr($asin) . '" data-sab-asin="' . esc_attr($asin) . '" title="Amazon kennt dieses Produkt nicht mehr">' . $html . '</span>';
     }
 
     /** Im Bearbeiten-Fenster (klassischer Editor): ?sab_zeige=ASIN schaltet auf „Text“, markiert die Stelle im Code und scrollt direkt dorthin. */
@@ -1916,12 +1925,12 @@ JS;
            . 'if(r.data.zurueck){var zu=el("a","display:inline-block;margin-top:10px;color:#a00;cursor:pointer;text-decoration:underline","Letzten Tausch in diesem Artikel rückgängig machen");zu.onclick=function(){post("sab_stelle_zurueck",{},function(q){if(q.success){location.reload()}else{inf.textContent=q.data;inf.style.color="#a00"}})};bx.appendChild(zu)}'
            . '});}'
            . 'function mk(e){var o=e.getAttribute("data-sab-ord");if(!o||seen[o]){return}seen[o]=1;var box=e.closest(".sab-karte,.sab-produkt,td")||e.parentNode;if(getComputedStyle(box).position==="static"){box.style.position="relative"}'
-           . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b);'
+           . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.className="sab-tb";b.setAttribute("data-o",o);b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b);'
            . 'if(C.e){var b3=el("button","position:absolute;top:30px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","✎ bearbeiten");b3.type="button";b3.title="Öffnet den Editor an dieser Stelle (neuer Tab)";b3.onclick=function(ev){ev.preventDefault();ev.stopPropagation();window.open(C.e+encodeURIComponent(e.getAttribute("data-sab-asin")),"_blank")};box.appendChild(b3)}}'
            . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}'
            . 'var hs=document.querySelectorAll("a[href]"),cn={},al={};for(var j=0;j<hs.length;j++){var a=hs[j],m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(a.getAttribute("href")||"");var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as){continue}al[as]=(al[as]||0)+1;'
            . 'if(a.hasAttribute("data-sab-asin")||a.closest("[data-sab-ord],#wpadminbar,.sab-karte,.sab-produkt")||!a.closest("article,.entry-content,.hentry,main,.post")){continue}cn[as]=(cn[as]||0)+1;'
-           . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}'
+           . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(t.indexOf("tauschen")>0){b.className="sab-tb";b.setAttribute("data-o","h"+nth+as)}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}'
            . 'kn("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};oeffne(0,as)});'
            . 'if(C.e){kn("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(as)+"&sab_nr="+nr,"_blank")})}'
            . 'a.parentNode.insertBefore(sp,a.nextSibling)})(a,as,cn[as],al[as])}'
@@ -2026,6 +2035,7 @@ JS;
            . 'var le=null;function zeige(n){idx=(n+s.length)%s.length;t.textContent="Hier steht "+a+(s.length>1?" (Stelle "+(idx+1)+" von "+s.length+", alle rot markiert)":" (1 Stelle, rot markiert)");'
            . 'for(var i=0;i<s.length;i++){s[i].style.outlineColor=i===idx?"#000":"#d63638"}s[idx].scrollIntoView({block:"center"});if(le){le.href=ed+"&sab_nr="+(idx+1)}}'
            . 'if(s.length>1){btn("◀ vorige",function(){zeige(idx-1)});btn("nächste ▶",function(){zeige(idx+1)})}'
+           . 'btn("⇄ Hier tauschen",function(){var o=s[idx].closest("[data-sab-ord]"),q=o?document.querySelector("button.sab-tb[data-o=\""+o.getAttribute("data-sab-ord")+"\"]"):null;if(!q){var bx=s[idx].closest(".sab-karte,.sab-produkt,td")||s[idx].parentNode;q=bx&&bx.querySelector("button.sab-tb")}if(q){q.scrollIntoView({block:"center"});q.click()}else{t.textContent="Hier gibt es keinen Tauschen-Knopf (feste Stelle im Text): bitte im Editor bearbeiten."}});'
            . 'if(ed){le=btn("Im Editor bearbeiten",function(e){window.open(e.href,"_blank")});le.href=ed+"&sab_nr="+(idx+1);le.target="_blank";le.onclick=null}'
            . 'var x=btn("×",function(){b.remove()});setTimeout(function(){zeige(idx)},300)})();</script>';
     }
