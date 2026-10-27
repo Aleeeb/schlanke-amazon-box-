@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.88.13
+ * Version: 0.88.14
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.88.13';
+    const VERSION = '0.88.14';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1912,9 +1912,15 @@ JS;
         wp_update_post(['ID' => $post->ID, 'post_content' => wp_slash($c2)]);
         delete_transient('sab_alle_asins');
         $sj0 = self::satz_mit_link($c2, $neu); $kk = (array) get_option('sab_kontrolle', []);   // auch Tausch an einer Stelle im Frontend kommt in die Kontrollliste
-        $kk[(string) time() . substr(md5($asin . $neu), 0, 4)] = ['ts' => time(), 'art' => 'stelle', 'pid' => (int) $post->ID, 'alt' => $asin, 'neu' => $neu, 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => count(self::stellen_gruppen($c2, $neu)), 'ords' => self::stellen_gruppen($c2, $neu)]]];
+        $kk[(string) time() . substr(md5($asin . $neu), 0, 4)] = ['ts' => time(), 'art' => 'stelle', 'pid' => (int) $post->ID, 'alt' => $asin, 'neu' => $neu, 'vorher' => mb_substr($seg, 0, 900), 'nachher' => mb_substr($seg3, 0, 900), 'stellen' => [['pid' => (int) $post->ID, 'titel' => (string) $post->post_title, 'satz' => $sj0 ? mb_substr(str_replace('【LINK】', '【' . $sj0['linktext'] . '】', $sj0['maske']), 0, 300) : '', 'n' => count(self::stellen_gruppen($c2, $neu)), 'ords' => self::stellen_gruppen($c2, $neu)]]];
         update_option('sab_kontrolle', array_slice($kk, -20, null, true), false);
         wp_send_json_success(['n' => $n, 'nr' => substr_count(substr($c2, 0, $von), $neu) + 1, 'neu' => $neu]);
+    }
+
+    /** Rohtext der getauschten Stelle vorher/nachher (zum Prüfen und zum Weitergeben, wenn etwas nicht aussieht wie vorher). */
+    private static function kontrolle_code(int $pid, string $neu): array {
+        foreach ((array) get_option('sab_kontrolle', []) as $e) { if (($e['art'] ?? '') === 'stelle' && (int) ($e['pid'] ?? 0) === $pid && (string) ($e['neu'] ?? '') === $neu && isset($e['nachher'])) { return ['vorher' => (string) $e['vorher'], 'nachher' => (string) $e['nachher']]; } }
+        return [];
     }
 
     /** Kontrolleinträge einer Frontend-Tausch-Stelle (Artikel + neue ASIN) in der Kontrollliste. @return string[] Schlüssel */
@@ -2076,7 +2082,7 @@ JS;
         $eid = function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0;
         $ed = $eid && current_user_can('edit_post', $eid) ? admin_url('post.php?post=' . $eid . '&action=edit&sab_zeige=' . rawurlencode($a)) : '';
         $nr = max(1, (int) ($_GET['sab_nr'] ?? 1));
-        $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch')]) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
+        $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch'), 'v' => self::kontrolle_code($eid, strtoupper($a))]) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
         echo '<script>(function(){var KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
            . 's=(function(l){var o=[],bk="p,div,td,li,figure,h1,h2,h3,h4,h5,h6,section",last=null;for(var i=0;i<l.length;i++){var b=l[i].closest(bk)||l[i].parentNode;if(last&&b===last){continue}last=b;o.push(l[i])}return o})(Array.prototype.slice.call(s));'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:10px 16px;font:600 15px sans-serif;text-align:center";'
@@ -2090,6 +2096,7 @@ JS;
            . 'if(s.length>1){btn("◀ vorige",function(){zeige(idx-1)});btn("nächste ▶",function(){zeige(idx+1)})}'
            . 'btn("⇄ Hier tauschen",function(){var o=s[idx].closest("[data-sab-ord]"),q=o?document.querySelector("button.sab-tb[data-o=\""+o.getAttribute("data-sab-ord")+"\"]"):null;if(!q){var bx=s[idx].closest(".sab-karte,.sab-produkt,td")||s[idx].parentNode;q=bx&&bx.querySelector("button.sab-tb")}if(q){q.scrollIntoView({block:"center"});q.click()}else{t.textContent="Hier gibt es keinen Tauschen-Knopf (feste Stelle im Text): bitte im Editor bearbeiten."}});'
            . 'function kpost(act,f){var fd=new FormData();fd.append("action",act);fd.append("n",KC.n);fd.append("post",KC.p);fd.append("neu",KC.a);fetch(KC.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){t.textContent="Verbindungsfehler"})}'
+           . 'if(KC&&KC.v&&KC.v.nachher){btn("Code anzeigen",function(e){var d=document.getElementById("sab-code");if(d){d.remove();return}d=document.createElement("textarea");d.id="sab-code";d.readOnly=true;d.style.cssText="position:fixed;left:8px;right:8px;top:56px;height:42vh;z-index:99998;font:12px monospace;padding:8px";d.value="VORHER:\n"+KC.v.vorher+"\n\nNACHHER:\n"+KC.v.nachher;document.body.appendChild(d);d.select()})}'
            . 'if(KC){var ok=btn("✓ Kontrolliert, passt",function(){kpost("sab_stelle_ok",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});ok.style.fontWeight="700";btn("✗ Passt nicht, rückgängig",function(){kpost("sab_stelle_zurueck",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})})}'
            . 'if(ed){le=btn("Im Editor bearbeiten",function(e){window.open(e.href,"_blank")});le.href=ed+"&sab_nr="+(idx+1);le.target="_blank";le.onclick=null}'
            . 'var x=btn("×",function(){b.remove()});setTimeout(function(){zeige(idx)},300)})();</script>';
