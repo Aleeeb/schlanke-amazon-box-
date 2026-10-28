@@ -1634,5 +1634,7 @@ ok(!isset($g36['B0GESUCHT1']), 'Ersatz gesucht: Eintrag fällt weg, sobald wiede
 unset($GLOBALS['opt']['sab_ersatz_gesucht']);
 // 0.89.36: WordPress-Mail zu automatischen Plugin-Updates standardmäßig aus
 ok(SAB::update_mail_filter(true) === false, 'Update-Mail von WordPress standardmäßig aus');
+ok(SAB::update_mail_filter(true, ['plugin' => [(object) ['result' => true]]]) === false, 'Erfolgsmail aus');
+ok(SAB::update_mail_filter(true, ['plugin' => [(object) ['result' => true], (object) ['result' => false]]]) === true, 'Fehlermail bleibt an');
 $GLOBALS['opt']['sab_update_mail'] = '1'; ok(SAB::update_mail_filter(true) === true, 'Update-Mail mit Haken wieder an'); unset($GLOBALS['opt']['sab_update_mail']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

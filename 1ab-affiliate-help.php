@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.36
+ * Version: 0.89.37
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.36';
+    const VERSION = '0.89.37';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -84,7 +84,8 @@ final class SAB {
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
         add_action('sab_auffrischen', [__CLASS__, 'auffrischen']);
         add_action('admin_notices', [__CLASS__, 'alarm_hinweis']);
-        add_filter('auto_plugin_update_send_email', [__CLASS__, 'update_mail_filter'], 10, 1);   // WordPress-Mail „Plugins automatisch aktualisiert“: standardmäßig aus
+        add_filter('auto_plugin_update_send_email', [__CLASS__, 'update_mail_filter'], 10, 2);
+        add_filter('auto_theme_update_send_email', [__CLASS__, 'update_mail_filter'], 10, 2);   // WordPress-Mail „Plugins automatisch aktualisiert“: standardmäßig aus
         add_action('wp_ajax_sab_pruef_start',   [__CLASS__, 'ajax_pruef_start']);
         add_action('wp_ajax_sab_pruef_schritt', [__CLASS__, 'ajax_pruef_schritt']);
         add_action('sab_holen',      [__CLASS__, 'holen'], 10, 2);
@@ -1785,8 +1786,10 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** Fragt GitHub jetzt (oder wenn der Abstand um ist) nach einer neuen Version und trägt sie sofort bei WordPress ein. @return string neue Version oder leer */
     /** WordPress verschickt nach automatischen Plugin-Updates eine Mail. Standard: aus (Haken unter Einstellungen schaltet sie wieder ein). Gilt für die ganze Webseite. */
-    public static function update_mail_filter($senden) {
-        return get_option('sab_update_mail') === '1' ? $senden : false;
+    public static function update_mail_filter($senden, $ergebnisse = []) {
+        if (get_option('sab_update_mail') === '1') { return $senden; }
+        foreach ((array) $ergebnisse as $liste) { foreach ((array) $liste as $e) { $r = is_object($e) ? ($e->result ?? null) : null; if ($r === false || (is_object($r) && function_exists('is_wp_error') && is_wp_error($r))) { return $senden; } } }   // Fehlermeldungen bleiben an
+        return false;
     }
 
     public static function update_nachsehen(bool $jetzt = false): string {
@@ -7303,7 +7306,7 @@ JS;
                . '> Produkte, die Amazon nicht mehr kennt, trotzdem umbauen: Die Stelle zeigt „Momentan nicht verfügbar“, getauscht wird später mit Vorrang im Reiter Austausch</label></td></tr>'
                . '<tr><th>Nicht verfügbar</th><td><label><input type="checkbox" name="sab_strikt" value="1"' . (get_option('sab_strikt') === '1' ? ' checked' : '')
                . '> Produkte, die Amazons Schnittstelle als „nicht verfügbar“ meldet, wie ausgefallen behandeln und durch den Ersatz aus der Liste ersetzen</label><p class="description">Aus lassen, wenn Amazon die Lieferbarkeit für einen anderen Lieferort prüft als deinen: Dann würde ein lieferbares Produkt fälschlich ersetzt.</p></td></tr>'
-               . '<tr><th>WordPress-Mails zu Plugin-Updates</th><td><label><input type="checkbox" name="sab_update_mail" value="1"' . (get_option('sab_update_mail') === '1' ? ' checked' : '') . '> Mail „Plugins automatisch aktualisiert“ weiterhin senden</label><p class="description">Aus (Standard): WordPress verschickt nach automatischen Plugin-Updates keine Mail mehr. Das gilt für alle Plugins dieser Webseite, nicht nur für dieses.</p></td></tr>'
+               . '<tr><th>WordPress-Mails zu Plugin-Updates</th><td><label><input type="checkbox" name="sab_update_mail" value="1"' . (get_option('sab_update_mail') === '1' ? ' checked' : '') . '> Mails über erfolgreiche automatische Plugin- und Theme-Updates weiterhin senden</label><p class="description">Aus (Standard): WordPress verschickt keine Mail mehr über erfolgreiche automatische Plugin- und Theme-Updates. Das gilt für alle Plugins und Themes dieser Webseite, nicht nur für dieses. Mails über fehlgeschlagene Updates bleiben an.</p></td></tr>'
                . '<tr><th>Wochenbericht</th><td><input type="email" name="sab_mail_an" class="regular-text" placeholder="leer = keine Mail" value="' . esc_attr((string) get_option('sab_mail_an', '')) . '"><p class="description">Einmal pro Woche eine Mail mit Klicks, Ausfällen und Seiten mit vielen Partnerlinks. An dieselbe Adresse gehen sofort Meldungen, wenn ein Produkt ausfällt oder die Amazon-Schnittstelle nicht antwortet.</p></td></tr>'
                . '<tr><th>Preis-Test</th><td><label><input type="checkbox" name="sab_preis_test" value="1"' . (get_option('sab_preis_test') === '1' ? ' checked' : '')
                . '> A/B-Test: Karte ohne Preis (A) gegen Karte mit Preis (B)</label><p class="description">Jeder Artikel bekommt fest eine Variante; Auswertung unter A/B-Tests als „preis-test“. Hat Vorrang vor dem Button-Test.</p></td></tr>'
