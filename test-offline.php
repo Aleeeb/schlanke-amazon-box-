@@ -376,7 +376,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 16 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und vierzehn Untermenüs');
+ok(count($GLOBALS['menu']) === 17 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und fünfzehn Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -1654,4 +1654,15 @@ ok(isset($ba1['B0TEXTONLY']) && !isset($bm1['B0TEXTONLY']) && isset($bm1['B0MITB
 $tdm = new ReflectionMethod('SAB', 'tausch_dringlichkeit'); $tdm->setAccessible(true);
 $xo = ['bilder' => [], 'lieferbar' => true, 'preis' => '10 €', 'status' => 'IN_STOCK', 'sterne' => 4.5];
 ok($tdm->invoke(null, $xo, 70, true) === 100 && $tdm->invoke(null, $xo, 70, false) < 100, 'Dringlichkeit: fehlendes Bild zählt nur, wenn das Produkt ein Bild braucht');
+// 0.89.41: Seite scannen
+$GLOBALS['opt']['sab_tags'] = "de=de-21\nco.uk=uk-21\ncom=us-20";
+$erw41 = SAB::scan_erwartet(); $e41 = (function () { $r = new ReflectionMethod('SAB', 'scan_neu'); $r->setAccessible(true); return $r->invoke(null); })();
+SAB::scan_text('<a href="https://www.amazon.de/dp/B0SCANNN01?tag=de-21">ok</a> <a href="https://www.amazon.de/dp/B0SCANNN02?tag=us-20">US-ID auf .de</a> <a href="https://www.amazon.co.uk/dp/B0SCANNN03?tag=fremd-99">fremd</a> <a href="https://www.amazon.com/dp/B0SCANNN04">ohne</a> <a href="https://amzn.to/abc123">kurz</a> <a href="https://www.amazon.de/dp/B0SCANNN0123?tag=de-21">lang</a> [amz_bild asin="B0SCANNN05" land="co.uk"][/amz_bild]', 7, $erw41, $e41);
+$typen = array_column($e41['probleme'], 'typ');
+ok($e41['kurz']['n'] === 1 && in_array('fremdland', $typen, true) && in_array('unbekannt', $typen, true) && in_array('ohne', $typen, true) && in_array('asin', $typen, true) && count($typen) === 4, 'Scan: Ausreißer erkannt, Kurzlink ohne Alarm, normale IDs still (' . implode(',', $typen) . ')');
+ok($e41['links'] === 6 && $e41['laender']['de'] === 3 && isset($e41['asin']['B0SCANNN05']) && ($e41['ids']['uk-21']['n'] ?? 0) === 1, 'Scan: Zählung je Shop, Platzhalter mit Land-ID zählt');
+$csv41 = SAB::scan_csv_text($e41);
+ok(strpos($csv41, '"Top-Probleme"') === 0 && strpos($csv41, '"ASIN-Details"') !== false && strpos($csv41, '"fremdland";') !== false, 'Scan: CSV mit Semikolon und Tabellen');
+$sh41 = new ReflectionMethod('SAB', 'scan_html'); $sh41->setAccessible(true); ok(strpos($sh41->invoke(null), 'Seite jetzt scannen') !== false, 'Scan-Reiter rendert');
+unset($GLOBALS['opt']['sab_tags']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

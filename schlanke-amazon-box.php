@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.40
+ * Version: 0.89.41
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.40';
+    const VERSION = '0.89.41';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -88,6 +88,9 @@ final class SAB {
         add_filter('auto_plugin_update_send_email', [__CLASS__, 'update_mail_filter'], 10, 2);
         add_filter('auto_theme_update_send_email', [__CLASS__, 'update_mail_filter'], 10, 2);   // WordPress-Mail „Plugins automatisch aktualisiert“: standardmäßig aus
         add_action('wp_ajax_sab_pruef_start',   [__CLASS__, 'ajax_pruef_start']);
+        add_action('wp_ajax_sab_scan_start',    [__CLASS__, 'ajax_scan_start']);
+        add_action('wp_ajax_sab_scan_schritt',  [__CLASS__, 'ajax_scan_schritt']);
+        add_action('admin_post_sab_scan_csv',   [__CLASS__, 'scan_csv']);
         add_action('wp_ajax_sab_pruef_schritt', [__CLASS__, 'ajax_pruef_schritt']);
         add_action('sab_holen',      [__CLASS__, 'holen'], 10, 2);
         add_action('sab_uebersicht_holen', [__CLASS__, 'uebersicht_holen'], 10, 1);
@@ -286,6 +289,148 @@ final class SAB {
             }
         }
         return [implode("\n", $zeilen), $geaendert];
+    }
+
+    // ---------- Seite scannen: alle Amazon-Links der Artikel, Partner-IDs je Land, Ausreißer (nur auf Klick im Backend, in Etappen) ----------
+
+    const SCAN_SCHRITT = 25;   // Artikel je Etappe
+
+    /** Erwartete Partner-IDs je Land (Einstellungen und, auf Slughelp, die bekannten acht). @return array<string,string[]> */
+    public static function scan_erwartet(): array {
+        $o = [];
+        foreach (array_merge(self::slughelp_ids(), self::tags()) as $l => $t) { if ($t !== '') { $o[(string) $l][$t] = $t; } }
+        return array_map('array_values', $o);
+    }
+
+    private static function scan_neu(): array {
+        return ['artikel' => 0, 'links' => 0, 'laender' => [], 'ids' => [], 'kurz' => ['n' => 0, 'posts' => []], 'probleme' => [], 'asin' => []];
+    }
+
+    /** Wertet einen Artikeltext aus und ergänzt $e. Ausreißer: ID eines anderen Landes, unbekannte ID, Link ohne ID, ungewöhnliche ASIN-Länge. Kurzlinks (amzn.to …) zählen als eigene Gruppe ohne Alarm. */
+    public static function scan_text(string $c, int $pid, array $erwartet, array &$e): void {
+        $e['artikel']++; $std = self::land('');
+        $land_von_tag = []; foreach ($erwartet as $l => $ts) { foreach ($ts as $t) { $land_von_tag[$t][] = $l; } }
+        $buche = function (string $land, string $tag, string $asin, string $art) use (&$e, $pid, $erwartet, $land_von_tag) {
+            $e['links']++; $e['laender'][$land] = ($e['laender'][$land] ?? 0) + 1;
+            $klasse = 'ok'; $grund = '';
+            if ($tag === '') { $klasse = 'ohne'; $grund = 'Link ohne Partner-ID'; }
+            elseif (in_array($tag, $erwartet[$land] ?? [], true)) { $klasse = 'ok'; }
+            elseif (isset($land_von_tag[$tag])) { $klasse = 'fremdland'; $grund = 'ID ' . $tag . ' gehört zu ' . implode('/', $land_von_tag[$tag]) . ', der Link steht auf amazon.' . $land; }
+            else { $klasse = 'unbekannt'; $grund = 'unbekannte ID ' . $tag . ' (nicht in den Einstellungen)'; }
+            $k = $tag === '' ? '(ohne)' : $tag; $e['ids'][$k] = $e['ids'][$k] ?? ['n' => 0, 'land' => $land, 'klasse' => $klasse]; $e['ids'][$k]['n']++;
+            if ($klasse !== 'ok' && count($e['probleme']) < 400) { $e['probleme'][] = ['typ' => $klasse, 'grund' => $grund, 'asin' => $asin, 'tag' => $tag, 'land' => $land, 'pid' => $pid]; }
+            if ($asin !== '' && (isset($e['asin'][$asin]) || count($e['asin']) < 1500)) { $a = &$e['asin'][$asin]; $a['n'] = ($a['n'] ?? 0) + 1; $a['laender'][$land] = 1; if (count($a['posts'] ?? []) < 12) { $a['posts'][$pid] = 1; } unset($a); }
+        };
+        if (preg_match_all('#<a\b[^>]*?href=(["\'])(.*?)\1#is', $c, $m)) {
+            foreach ($m[2] as $u) {
+                $u = html_entity_decode($u);
+                if (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $u)) { $e['kurz']['n']++; if (count($e['kurz']['posts']) < 100) { $e['kurz']['posts'][$pid] = ($e['kurz']['posts'][$pid] ?? 0) + 1; } continue; }
+                if (!preg_match('#^https?://(?:[a-z0-9-]+\.)?amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)(/[^?\\#]*)?(\?[^\\#]*)?#i', $u, $um)) { continue; }
+                $land = strtolower($um[1]); $pfad = $um[2] ?? ''; $query = $um[3] ?? '';
+                $tag = preg_match('#[?&]tag=([^&\\#]*)#', $query, $tm) ? rawurldecode($tm[1]) : '';
+                $asin = ''; $laenge = 0;
+                if (preg_match('#/(?:dp|gp/product|product-reviews|product)/([A-Za-z0-9]+)#', $pfad, $am)) { $laenge = strlen($am[1]); $asin = strtoupper($am[1]); }
+                $buche($land, $tag, $asin, 'link');
+                if ($asin !== '' && $laenge !== 10 && $laenge >= 11 && $laenge <= 16 && count($e['probleme']) < 400) { $e['probleme'][] = ['typ' => 'asin', 'grund' => 'ungewöhnliche ASIN mit ' . $laenge . ' Zeichen', 'asin' => $asin, 'tag' => $tag, 'land' => $land, 'pid' => $pid]; }
+            }
+        }
+        if (preg_match_all('#\[(amz_(?:bild|link|produkt|karte|rezension)|aawp|amazon)\b([^\]]*)\]#i', $c, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                $at = html_entity_decode($x[2]);
+                $asin = preg_match('#\b(?:asin|fields|box|link)=["\']?([A-Za-z0-9]{10})#i', $at, $am) ? strtoupper($am[1]) : '';
+                $land = preg_match('#\bland=["\']?([a-z.]+)#i', $at, $lm) ? self::land_schluessel($lm[1]) : $std; if (!isset($erwartet[$land]) && !isset(self::LAENDER[$land])) { $land = $std; }
+                $tag = preg_match('#\b(?:tag|tracking_id)=["\']([^"\']+)#i', $at, $tm) ? $tm[1] : (($erwartet[$land][0] ?? '') ?: self::tag($land));
+                $buche($land, $tag, $asin, 'platzhalter');
+            }
+        }
+    }
+
+    private static function scan_ajax_ok(): void {
+        if (!current_user_can('manage_options') || !check_ajax_referer('sab_scan', 'n', false)) { wp_send_json_error(['text' => 'Keine Berechtigung.'], 403); }
+        if (function_exists('set_time_limit')) { @set_time_limit(60); }
+    }
+
+    public static function ajax_scan_start(): void {
+        self::scan_ajax_ok(); global $wpdb;
+        $ids = array_map('intval', (array) $wpdb->get_col("SELECT ID FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%amzn.%' OR post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%a.co/%') ORDER BY ID"));
+        update_option('sab_scan', ['ids' => $ids, 'pos' => 0, 'erg' => self::scan_neu(), 'ts' => time(), 'fertig' => false], false);
+        wp_send_json_success(['pos' => 0, 'gesamt' => count($ids), 'fertig' => !$ids]);
+    }
+
+    public static function ajax_scan_schritt(): void {
+        self::scan_ajax_ok();
+        $s = (array) get_option('sab_scan', []); if (empty($s['ids']) || !empty($s['fertig'])) { wp_send_json_success(['pos' => count((array) ($s['ids'] ?? [])), 'gesamt' => count((array) ($s['ids'] ?? [])), 'fertig' => true]); }
+        $erw = self::scan_erwartet(); $e = (array) $s['erg']; $pos = (int) $s['pos'];
+        foreach (array_slice($s['ids'], $pos, self::SCAN_SCHRITT) as $pid) { $c = (string) get_post_field('post_content', (int) $pid); self::scan_text($c, (int) $pid, $erw, $e); $pos++; }
+        $fertig = $pos >= count($s['ids']);
+        update_option('sab_scan', ['ids' => $s['ids'], 'pos' => $pos, 'erg' => $e, 'ts' => $s['ts'], 'fertig' => $fertig], false);
+        wp_send_json_success(['pos' => $pos, 'gesamt' => count($s['ids']), 'fertig' => $fertig]);
+    }
+
+    /** CSV-Export (Semikolon, drei Tabellen: Top-Probleme, ASIN-Details, Fundstellen). */
+    public static function scan_csv(): void {
+        if (!current_user_can('manage_options') || !wp_verify_nonce((string) ($_GET['_wpnonce'] ?? ''), 'sab_scan_csv')) { wp_die('Keine Berechtigung.'); }
+        $s = (array) get_option('sab_scan', []); $e = (array) ($s['erg'] ?? self::scan_neu());
+        header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="scan-' . gmdate('Y-m-d') . '.csv"');
+        echo "\xEF\xBB\xBF" . self::scan_csv_text($e);
+        exit;
+    }
+
+    public static function scan_csv_text(array $e): string {
+        $z = function (array $f) { return implode(';', array_map(fn($v) => '"' . str_replace('"', '""', (string) $v) . '"', $f)) . "\n"; };
+        $o = $z(['Top-Probleme']) . $z(['Art', 'Grund', 'ASIN', 'Partner-ID', 'Shop', 'Artikel-ID']);
+        foreach ((array) ($e['probleme'] ?? []) as $p) { $o .= $z([$p['typ'], $p['grund'], $p['asin'], $p['tag'], $p['land'], $p['pid']]); }
+        $o .= "\n" . $z(['ASIN-Details']) . $z(['ASIN', 'Links', 'Shops', 'Artikel']);
+        foreach ((array) ($e['asin'] ?? []) as $a => $x) { $o .= $z([$a, $x['n'], implode(',', array_keys((array) $x['laender'])), implode(',', array_keys((array) $x['posts']))]); }
+        $o .= "\n" . $z(['Partner-IDs']) . $z(['Partner-ID', 'Links', 'Shop', 'Einstufung']);
+        foreach ((array) ($e['ids'] ?? []) as $t => $x) { $o .= $z([$t, $x['n'], $x['land'], $x['klasse']]); }
+        $o .= "\n" . $z(['Kurzlinks (amzn.to u. a.), kein Alarm']) . $z(['Links', 'Artikel']);
+        foreach ((array) ($e['kurz']['posts'] ?? []) as $pid => $n) { $o .= $z([$n, $pid]); }
+        return $o;
+    }
+
+    private static function scan_html(): string {
+        $s = (array) get_option('sab_scan', []); $e = isset($s['erg']) ? (array) $s['erg'] : null; $fertig = !empty($s['fertig']);
+        $nonce = wp_create_nonce('sab_scan'); $gesamt = count((array) ($s['ids'] ?? [])); $pos = (int) ($s['pos'] ?? 0);
+        $h = '<h2>Seite scannen</h2><p class="description">Geht alle Artikel mit Amazon-Links durch (in Etappen zu je ' . self::SCAN_SCHRITT . ' Artikeln, nur auf Klick, ohne Last für Besucher). Gezeigt werden nur die Ausreißer; normale Partner-IDs je Land aus den Einstellungen gelten als in Ordnung, Kurzlinks stehen in einer eigenen Gruppe ohne Alarm.</p>'
+            . '<p><button type="button" class="button button-primary button-hero" id="sab-scan-knopf">' . ($e && !$fertig && $gesamt ? 'Scan fortsetzen (' . $pos . ' von ' . $gesamt . ')' : 'Seite jetzt scannen') . '</button> <span id="sab-scan-t" style="font-weight:600"></span></p><progress id="sab-scan-p" max="100" value="0" style="width:100%;max-width:760px;height:22px;display:none"></progress>'
+            . '<script>(function(){var k=document.getElementById("sab-scan-knopf"),p=document.getElementById("sab-scan-p"),t=document.getElementById("sab-scan-t"),A=' . wp_json_encode(admin_url('admin-ajax.php')) . ',N=' . wp_json_encode($nonce) . ',weiter=' . ($e && !$fertig && $gesamt ? 'true' : 'false') . ',f=0;'
+            . 'function post(a,ok,bad){var x=new XMLHttpRequest();x.open("POST",A);x.setRequestHeader("Content-Type","application/x-www-form-urlencoded");x.timeout=90000;x.onload=function(){var j=null;try{j=JSON.parse(x.responseText)}catch(e){}if(x.status===200&&j&&j.success){ok(j.data)}else{bad()}};x.onerror=bad;x.ontimeout=bad;x.send("action="+a+"&n="+encodeURIComponent(N))}'
+            . 'function zeig(s){p.style.display="block";p.max=Math.max(1,s.gesamt);p.value=s.pos;t.textContent="Artikel "+s.pos+" von "+s.gesamt}'
+            . 'function schritt(){post("sab_scan_schritt",function(s){f=0;zeig(s);if(s.fertig){t.textContent="Fertig, Ergebnis wird geladen …";setTimeout(function(){location.reload()},800)}else{schritt()}},function(){f++;if(f<4){setTimeout(schritt,2000)}else{t.textContent="Unterbrochen. Bitte auf Fortsetzen klicken.";k.disabled=false;weiter=true;k.textContent="Scan fortsetzen"}})}'
+            . 'k.onclick=function(){k.disabled=true;f=0;if(weiter){schritt()}else{post("sab_scan_start",function(s){zeig(s);if(s.fertig){location.reload()}else{schritt()}},function(){t.textContent="Start nicht möglich.";k.disabled=false})}};})();</script>';
+        if (!$e || (!$fertig && !$e['artikel'])) { return $h . '<p>Noch kein Scan vorhanden.</p>'; }
+        $erw = self::scan_erwartet(); $namen = self::produkte();
+        $nprob = count($e['probleme']); $nbild = count((array) get_option('sab_bildfehler', []));
+        $karte = function (string $zahl, string $text, string $farbe = '#1d2327') { return '<div style="flex:1 1 150px;max-width:220px;background:#fff;border:1px solid #dcdcde;border-radius:10px;padding:12px 16px"><div style="font-size:30px;font-weight:700;color:' . $farbe . '">' . $zahl . '</div><div style="color:#50575e">' . $text . '</div></div>'; };
+        $h .= '<p class="description">Stand: ' . esc_html(wp_date('d.m.Y H:i', (int) ($s['ts'] ?? time()))) . ($fertig ? '' : ' (unvollständig: Scan nicht zu Ende gelaufen)') . '</p><div style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0">'
+            . $karte((string) (int) $e['artikel'], 'Artikel gescannt') . $karte((string) (int) $e['links'], 'Amazon-Links') . $karte((string) count($e['asin']), 'verschiedene Produkte')
+            . $karte((string) (int) $e['kurz']['n'], 'Kurzlinks (kein Alarm)', '#50575e') . $karte((string) $nprob, 'Ausreißer', $nprob ? '#b32d2e' : '#1a7f37') . $karte((string) $nbild, 'Produkte ohne Bild', $nbild ? '#b32d2e' : '#1a7f37') . '</div>';
+        // Balken je Partner-ID
+        $max = 1; foreach ($e['ids'] as $x) { $max = max($max, (int) $x['n']); }
+        $farbe = ['ok' => '#1a7f37', 'fremdland' => '#dba617', 'unbekannt' => '#b32d2e', 'ohne' => '#b32d2e'];
+        $h .= '<h3>Partner-IDs</h3><table class="widefat" style="max-width:820px"><tbody>';
+        uasort($e['ids'], fn($a, $b) => $b['n'] <=> $a['n']);
+        foreach ($e['ids'] as $t => $x) { $h .= '<tr><td style="width:190px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' . $farbe[$x['klasse']] . ';margin-right:6px"></span><code>' . esc_html((string) $t) . '</code> <small>amazon.' . esc_html((string) $x['land']) . '</small></td><td><div style="background:#f0f0f1;border-radius:4px"><div style="width:' . max(2, (int) round(100 * $x['n'] / $max)) . '%;background:' . $farbe[$x['klasse']] . ';color:#fff;font-size:12px;padding:1px 6px;border-radius:4px;white-space:nowrap">' . (int) $x['n'] . '</div></div></td></tr>'; }
+        $h .= '</tbody></table><p class="description"><span style="color:#1a7f37">&#9679;</span> erwartete ID des Landes · <span style="color:#dba617">&#9679;</span> ID eines anderen Landes · <span style="color:#b32d2e">&#9679;</span> unbekannt oder ohne ID.</p>';
+        // Balken je Shop
+        arsort($e['laender']); $mx = max(1, max($e['laender'] ?: [1]));
+        $h .= '<h3>Links je Amazon-Shop</h3><table class="widefat" style="max-width:820px"><tbody>';
+        foreach ($e['laender'] as $l => $n) { $h .= '<tr><td style="width:190px">amazon.' . esc_html((string) $l) . '</td><td><div style="background:#f0f0f1;border-radius:4px"><div style="width:' . max(2, (int) round(100 * $n / $mx)) . '%;background:#2271b1;color:#fff;font-size:12px;padding:1px 6px;border-radius:4px">' . (int) $n . '</div></div></td></tr>'; }
+        $h .= '</tbody></table>';
+        // Ausreißer
+        $h .= '<h3>Ausreißer (' . $nprob . ')</h3>';
+        if (!$e['probleme']) { $h .= '<p style="color:#1a7f37;font-size:16px"><strong>&#10003; Keine Ausreißer: alle Links tragen die erwartete Partner-ID ihres Landes.</strong></p>'; }
+        else {
+            $h .= '<table class="widefat striped" style="max-width:1100px"><thead><tr><th></th><th>Problem</th><th>Produkt</th><th>Artikel</th></tr></thead><tbody>';
+            foreach (array_slice($e['probleme'], 0, 150) as $p) {
+                $titel = (string) get_the_title((int) $p['pid']); $fe = add_query_arg('sab_zeige', $p['asin'], (string) get_permalink((int) $p['pid']));
+                $h .= '<tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' . ($p['typ'] === 'fremdland' ? '#dba617' : '#b32d2e') . '"></span></td><td>' . esc_html($p['grund']) . '</td><td>' . ($p['asin'] !== '' ? '<code>' . esc_html($p['asin']) . '</code> ' . esc_html((string) ($namen[$p['asin']] ?? '')) : '–') . '</td><td><a href="' . esc_url($fe) . '" target="_blank" rel="noopener">' . esc_html($titel !== '' ? $titel : ('Beitrag ' . $p['pid'])) . '</a> · <a href="' . esc_url(admin_url('post.php?post=' . (int) $p['pid'] . '&action=edit')) . '" target="_blank" rel="noopener">bearbeiten</a></td></tr>';
+            }
+            $h .= '</tbody></table>' . (count($e['probleme']) > 150 ? '<p class="description">Die ersten 150 sind gezeigt, der CSV-Export enthält alle.</p>' : '');
+        }
+        if ($e['kurz']['n']) { $h .= '<h3>Kurzlinks (amzn.to u. a.): ' . (int) $e['kurz']['n'] . ' in ' . count($e['kurz']['posts']) . ' Artikeln, kein Alarm</h3><p class="description">Sie tragen die Partner-ID im Ziel und werden hier nicht bewertet. Auflösen und ersetzen: Reiter Umbau.</p>'; }
+        return $h . '<p><a class="button" href="' . esc_url(wp_nonce_url(admin_url('admin-post.php?action=sab_scan_csv'), 'sab_scan_csv')) . '">Ergebnis als CSV herunterladen</a></p>';
     }
 
     // ---------- Lernen mit Mensch im Kreis: Ausfall simulieren, Ja/Nein, Gewichte der Merkmale verschieben (keine externe KI, keine Besucherdaten) ----------
@@ -6536,6 +6681,7 @@ JS;
         'helfer'        => 'Helferaufgaben',
         'laender'       => 'Länder',
         'lernen'        => 'Lernen',
+        'scan'          => 'Seite scannen',
         'gruppen'       => 'Produktgruppen',
         'score'         => 'Score',
         'umbau'         => 'Umbau',
@@ -7258,6 +7404,8 @@ JS;
             echo self::laender_html();
         } elseif ($tab === 'lernen') {
             echo self::lernen_html();
+        } elseif ($tab === 'scan') {
+            echo self::scan_html();
         } elseif ($tab === 'helfer') {
             echo self::austausch_html(true);
         } elseif ($tab === 'problem') {
