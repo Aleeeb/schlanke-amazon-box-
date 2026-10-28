@@ -1692,4 +1692,10 @@ file_put_contents($gj4, "var window={},document={readyState:'x',addEventListener
 exec('node ' . escapeshellarg($gj4) . ' 2>&1', $go4, $grc4);
 ok($grc4 === 0 && trim(implode('', $go4)) === '["https://www.amazon.de/s?k=fresh%20sheep%20wool&tag=de-21","https://www.amazon.de/s?k=Schneckenzaun%20aus%20Kupfer&tag=de-21","https://www.amazon.com/dp/B0WOLLE003?tag=us-20"]', 'Länder-Umschaltung: Textlink ohne Titel sucht mit dem Satz vor dem Link (' . implode(' ', $go4) . ')');
 unset($GLOBALS['opt']['sab_geo'], $GLOBALS['opt']['sab_tags']);
+// 0.89.45: generische Linktexte, Titel aus dem Satz vor dem Textlink
+ok(SAB::generischer_linktext('Offer on Amazon.com') && SAB::generischer_linktext('Oferta en Amazon') && SAB::generischer_linktext('Click here') && SAB::generischer_linktext('Angebot bei Amazon') && !SAB::generischer_linktext('Amazon Basics Gartenschlauch'), 'Linktext: Angebotstexte sind generisch, echte Titel nicht');
+$GLOBALS['opt']['sab_generische_linktexte'] = "Zum Shop vor Ort"; ok(SAB::generischer_linktext('zum shop vor ort!'), 'Linktext: eigene Liste'); unset($GLOBALS['opt']['sab_generische_linktexte']);
+ok(SAB::satz_titel('In the United States you can order fresh sheep wool here. ') === 'fresh sheep wool' && SAB::satz_titel('Schneckenzaun aus Kupfer kaufen: ') === 'Schneckenzaun aus Kupfer' && SAB::satz_titel('Hier gibt es den Bodendecker') !== '', 'Satz vor dem Link: Produktbegriff');
+$c45 = '<p>In the United States you can order fresh sheep wool here. <a href="https://www.amazon.com/dp/B0WOLLE001?tag=us-20">Offer on Amazon.com</a></p>'; $p45 = strpos($c45, '<a ');
+ok(SAB::titel_an_stelle($c45, $p45, strlen($c45) - $p45 - 4) === 'fresh sheep wool', 'Titel an der Stelle: Satz vor dem Textlink, nicht Linktext');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

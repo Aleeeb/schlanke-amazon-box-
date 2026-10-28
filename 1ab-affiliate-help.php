@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.44
+ * Version: 0.89.45
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.44';
+    const VERSION = '0.89.45';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2394,6 +2394,11 @@ JS;
             if (preg_match_all('#\[amz_[a-z]+\b[^\]]*' . $as . '[^\]]*\](?:(?:(?!\[amz_).){0,600}?\[/amz_[a-z]+\])?#is', $kopf, $m2, PREG_OFFSET_CAPTURE)) { $l_ = end($m2[0]); $ende = max($ende, $l_[1] + strlen($l_[0])); }
             if ($ende >= 0) { foreach (array_slice(preg_split($blk, substr($kopf, $ende)), 0, 4) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } } }
         }
+        if (!$in_zelle) {   // Textlink mitten im Absatz: der Satz direkt davor erklärt, was man unter dem Link findet
+            $sp_ = preg_split($blk, $kopf); $seg = (string) end($sp_);
+            $txt = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', $seg)), ENT_QUOTES, 'UTF-8')));
+            if ($txt !== '' && (preg_match('/[.!?:;,]/u', rtrim($txt, '.!?:;, ')) || count(preg_split('/\s+/u', $txt)) > 6)) { $z_ = self::satz_titel($txt); if ($z_ !== '') { return $z_; } }
+        }
         $vor = array_values(array_filter(array_reverse(preg_split($blk, $kopf)), fn($x) => trim(strip_tags((string) $x)) !== '')); $dahinter = array_values(array_filter(preg_split($blk, $nach), fn($x) => trim(strip_tags((string) $x)) !== ''));
         $reihen = $in_zelle ? [$dahinter] : [$vor, $dahinter];   // Tabellen-/Spaltenzelle: Titel steht nach dem Bild; nur bei Einzelprodukten davor
         foreach ($reihen as $liste) { foreach (array_slice($liste, 0, 2) as $teil) { $z = $zeile((string) $teil); if ($z !== '') { return $z; } } }
@@ -3802,7 +3807,30 @@ JS;
 
     /** Name für die Anzeige: Kurzname, Amazon-Titel, letzter bekannter Titel, Ausfallliste, sonst der Name laut Artikel (Tabellenzeile oder Überschrift). */
     /** Allgemeine Linktexte („Angebot bei Amazon“, „Zum Angebot“, „hier“) sind kein Produktname. */
+    const GENERISCHE_WOERTER = ['offer', 'offers', 'angebot', 'angebote', 'zum', 'zur', 'zu', 'das', 'der', 'die', 'bei', 'auf', 'at', 'on', 'in', 'amazon', 'view', 'see', 'check', 'price', 'prices', 'preis', 'preise', 'prüfen', 'ansehen', 'buy', 'now', 'click', 'here', 'hier', 'klick', 'klicken', 'jetzt', 'kaufen', 'bestellen', 'mehr', 'erfahren', 'more', 'details', 'info', 'infos', 'the', 'a', 'an', 'product', 'produkt', 'link', 'button', 'shop', 'get', 'it', 'for', 'für', 'to', 'oferta', 'ofertas', 'en', 'ver', 'precio', 'comprar', 'aquí', 'aqui', 'voir', 'sur', 'prix', 'acheter', 'ici', 'offre', 'offres', 'offerta', 'su', 'vedi', 'prezzo', 'acquista', 'qui', 'com', 'de', 'uk', 'and', 'und'];
+
+    /** Satz direkt vor einem Textlink → Produktbegriff („…you can order fresh sheep wool here.“ → „fresh sheep wool“). Füllwörter am Ende fallen weg; nach Wörtern wie order/kaufen beginnt der Begriff. */
+    public static function satz_titel(string $s): string {
+        $s = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', $s)), ENT_QUOTES, 'UTF-8')));
+        $s = preg_replace('/[\s.!?:;,–—-]+$/u', '', $s); $q = preg_split('/[.!?:;—]\s+/u', $s); $s = trim((string) end($q));
+        $w = preg_split('/\s+/u', $s, -1, PREG_SPLIT_NO_EMPTY);
+        while ($w && preg_match('/^(here|hier|now|jetzt|there|dort|click|klick|link|ici|aquí|aqui|qui|on|at|bei|auf|via|amazon|offer|angebot|the|a|an|and|or|und|oder|der|die|das|ein|eine|el|la|le)$/iu', preg_replace('/[^\p{L}\p{N}.]/u', '', (string) end($w)))) { array_pop($w); }
+        $s = implode(' ', $w);
+        if (preg_match_all('/\b(?:order|buy|get|find|purchase|shop|kaufen|kauf|bestellen|bestellst|findest|erhältst|erhaeltst|comprar|compras|encuentras|acheter|trouver|trouve|ordina|compra|trovi)\b/iu', $s, $m, PREG_OFFSET_CAPTURE)) {
+            $l = end($m[0]); $nach = trim(substr($s, $l[1] + strlen($l[0])));
+            $s = $nach !== '' ? $nach : trim(substr($s, 0, $l[1]));
+        } else { $s = implode(' ', array_slice($w, -4)); }
+        $s = preg_replace('/^(?:the|a|an|some|our|ein|eine|einen|den|das|el|la|los|las|un|una|le|les|des)\s+/iu', '', trim($s));
+        return mb_strlen($s) >= 3 ? mb_substr($s, 0, 80) : '';
+    }
+
     public static function generischer_linktext(string $n): bool {
+        $t = trim(mb_strtolower(preg_replace('/[^\p{L}\p{N}. ]+/u', ' ', preg_replace('/\.(com|de|co\.uk|fr|it|es|ca|com\.au)\b/i', '', $n))));
+        if ($t !== '') {   // Linktext besteht nur aus Aufforderungs-/Amazon-Wörtern (mehrsprachig) oder steht in der eigenen Liste: kein Produkttitel
+            foreach (preg_split('/\R/', (string) get_option('sab_generische_linktexte', '')) as $z) { if (trim($z) !== '' && $t === trim(mb_strtolower(preg_replace('/[^\p{L}\p{N}. ]+/u', ' ', $z)))) { return true; } }
+            $nur = true; foreach (preg_split('/\s+/u', trim(preg_replace('/\s+/u', ' ', str_replace('.', ' ', $t)))) as $w) { if ($w !== '' && !in_array($w, self::GENERISCHE_WOERTER, true)) { $nur = false; break; } }
+            if ($nur) { return true; }
+        }
         return (bool) preg_match('/^\s*(?:(?:zum\s+|das\s+)?angebote?(?:\s+(?:bei|auf)\s+amazon)?|(?:bei|auf)\s+amazon(?:\s+ansehen)?|jetzt\s+(?:ansehen|kaufen|bestellen)|hier(?:\s+(?:ansehen|klicken|kaufen))?|mehr\s+erfahren|zum\s+produkt|preis\s+prüfen|preis\s+ansehen|link|amazon)\s*[.:!›»→>]*\s*$/iu', $n);
     }
 
@@ -7189,6 +7217,7 @@ JS;
                 update_option('sab_geo', !empty($_POST['sab_geo']) ? '1' : '0', false);
                 update_option('sab_hinweis_auto', !empty($_POST['sab_hinweis_auto']) ? '1' : '0', false);
                 update_option('sab_karten_css', !empty($_POST['sab_karten_css']) ? '1' : '0', false);
+                update_option('sab_generische_linktexte', sanitize_textarea_field(wp_unslash($_POST['sab_generische_linktexte'] ?? '')), false);
                 update_option('sab_weg_umbauen', !empty($_POST['sab_weg_umbauen']) ? '1' : '0', false);
                 update_option('sab_strikt', !empty($_POST['sab_strikt']) ? '1' : '0', false);
                 update_option('sab_preis_test', !empty($_POST['sab_preis_test']) ? '1' : '0', false);
@@ -7644,6 +7673,7 @@ JS;
                . '<tr><th>Pflichthinweis</th><td><label><input type="checkbox" name="sab_hinweis_auto" value="1"' . (get_option('sab_hinweis_auto') === '1' ? ' checked' : '')
                . '> automatisch im Fuß jeder Seite mit Partnerlinks</label><br><input type="text" name="sab_hinweis_text" class="large-text" placeholder="leer = Standardsatz je Land" value="'
                . esc_attr((string) get_option('sab_hinweis_text', '')) . '"></td></tr>'
+               . '<tr><th>Allgemeine Linktexte</th><td><textarea name="sab_generische_linktexte" rows="3" cols="40" placeholder="Offer on Amazon&#10;Zum Shop vor Ort">' . esc_textarea((string) get_option('sab_generische_linktexte', '')) . '</textarea><p class="description">Ein Linktext je Zeile, der nie als Produkttitel gilt (Standard: Angebot/Offer/Click/Hier … bei Amazon, mehrsprachig). Der Titel kommt dann aus dem Satz vor dem Link.</p></td></tr>'
                . '<tr><th>Karten-Design</th><td><label><input type="checkbox" name="sab_karten_css" value="1"' . (get_option('sab_karten_css') !== '0' ? ' checked' : '')
                . '> kleines Karten-Design für <code>[amz_produkt]</code> laden (weißer Kasten, grüner Button)</label></td></tr>'
                . '<tr><th>Umbau bei unbekannten Produkten</th><td><label><input type="checkbox" name="sab_weg_umbauen" value="1"' . (get_option('sab_weg_umbauen', '1') === '1' ? ' checked' : '')
