@@ -1698,4 +1698,18 @@ $GLOBALS['opt']['sab_generische_linktexte'] = "Zum Shop vor Ort"; ok(SAB::generi
 ok(SAB::satz_titel('In the United States you can order fresh sheep wool here. ') === 'fresh sheep wool' && SAB::satz_titel('Schneckenzaun aus Kupfer kaufen: ') === 'Schneckenzaun aus Kupfer' && SAB::satz_titel('Hier gibt es den Bodendecker') !== '', 'Satz vor dem Link: Produktbegriff');
 $c45 = '<p>In the United States you can order fresh sheep wool here. <a href="https://www.amazon.com/dp/B0WOLLE001?tag=us-20">Offer on Amazon.com</a></p>'; $p45 = strpos($c45, '<a ');
 ok(SAB::titel_an_stelle($c45, $p45, strlen($c45) - $p45 - 4) === 'fresh sheep wool', 'Titel an der Stelle: Satz vor dem Textlink, nicht Linktext');
+// 0.89.47: Scan: Sprung zur Stelle im Editor, „Als eigene ID hinzufügen“
+$GLOBALS['opt']['sab_tags'] = "de=de-21"; unset($GLOBALS['opt']['sab_tags_extra']); $GLOBALS['admin'] = true;
+$e47 = (function () { $r = new ReflectionMethod('SAB', 'scan_neu'); $r->setAccessible(true); return $r->invoke(null); })();
+SAB::scan_text('<p><a href="https://www.amazon.de/dp/B0SCANNN11?tag=de-21">ok</a> <a href="https://www.amazon.de/dp/B0SCANNN12?tag=meine-22">A</a> <a href="https://www.amazon.de/dp/B0SCANNN13?tag=meine-22">B</a></p>', 7, SAB::scan_erwartet(), $e47);
+ok(count($e47['probleme']) === 2 && $e47['probleme'][0]['such'] === 'meine-22' && $e47['probleme'][0]['nr'] === 1 && $e47['probleme'][1]['nr'] === 2, 'Scan: Problem trägt Suchtext und laufende Nummer für den Editor');
+$GLOBALS['opt']['sab_scan'] = ['ids' => [7], 'pos' => 1, 'erg' => $e47, 'ts' => time(), 'fertig' => true]; $_POST['tag'] = 'meine-22';
+SAB::ajax_scan_id();
+$e47b = SAB::scan_erwartet();
+ok($GLOBALS['json']['ok'] && $GLOBALS['json']['d']['n'] === 2 && strpos((string) $GLOBALS['opt']['sab_tags_extra'], 'meine-22') !== false && !$GLOBALS['opt']['sab_scan']['erg']['probleme'] && in_array('meine-22', $e47b['*'], true), 'Scan: eigene ID übernehmen entfernt den Eintrag und gilt künftig als in Ordnung');
+$e47c = (function () { $r = new ReflectionMethod('SAB', 'scan_neu'); $r->setAccessible(true); return $r->invoke(null); })();
+SAB::scan_text('<a href="https://www.amazon.de/dp/B0SCANNN12?tag=meine-22">A</a>', 8, $e47b, $e47c);
+ok(!$e47c['probleme'], 'Scan: übernommene ID ist beim nächsten Scan kein Ausreißer');
+$_POST['tag'] = 'x y'; SAB::ajax_scan_id(); ok(!$GLOBALS['json']['ok'], 'Scan: ungültige ID abgelehnt');
+unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_tags_extra'], $GLOBALS['opt']['sab_scan'], $_POST['tag']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
