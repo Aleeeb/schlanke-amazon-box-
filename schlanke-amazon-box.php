@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.42
+ * Version: 0.89.43
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.42';
+    const VERSION = '0.89.43';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -112,6 +112,7 @@ final class SAB {
         add_action('wp_footer',            [__CLASS__, 'geo_skript'], 98);
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
+        add_action('wp_ajax_sab_stelle_karte',   [__CLASS__, 'ajax_stelle_karte']);
         add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
         add_action('wp_ajax_sab_kurz_ok',        [__CLASS__, 'ajax_kurz_ok']);
         add_action('wp_ajax_sab_stelle_ok',      [__CLASS__, 'ajax_stelle_ok']);
@@ -1414,6 +1415,7 @@ final class SAB {
     private static function bild_noch_offen(array $e, string $land, int &$budget): ?bool {   // true = fehlt, false = behoben, null = Abruf läuft noch (merken, nicht melden)
         $asin = (string) $e['asin']; $p = get_transient("sab_{$land}_" . $asin); $p = is_array($p) ? $p : null;
         if (self::hat_bild($p)) { return false; }
+        if (!self::braucht_bild($asin)) { return false; }   // steht nur als Textlink im Artikel: kein Bild nötig
         if (self::getauscht($asin) !== $asin) { return false; }   // inzwischen durch ein anderes Produkt ersetzt (Austausch-Regel): die Meldung gilt dem neuen
         $pc = (int) ($e['post'] ?? 0); if ($pc > 0 && function_exists('get_post_field') && strpos((string) get_post_field('post_content', $pc), $asin) === false) { return false; }   // steht gar nicht mehr im Artikel (schon getauscht oder gelöscht)
         $bf = self::bild_pfad($land, $asin, 0); if (is_file($bf) && time() - (int) filemtime($bf) <= self::BILD_MAX) { return false; }   // Bild liegt in der Mediathek: kein Fehler
@@ -2031,7 +2033,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     public static function fuss(): void {
         if (!self::$genutzt) { return; }
         if (get_option('sab_karten_css') !== '0') { $bm = max(120, min(800, (int) (get_option('sab_bild_max') ?: 240))); echo '<style id="sab-karten">' . self::KARTEN_CSS . 'a.sab-bild img{max-width:' . $bm . 'px;max-height:' . $bm . 'px;object-fit:contain}</style>'; }
-        if (self::$karten && get_option('sab_karten_css') !== '0') { echo '<style id="sab-karte">' . self::KARTE_CSS . '</style>'; }
+        if (self::$karten && get_option('sab_karten_css') !== '0') { $kd_ = self::kd_opt(); echo '<style id="sab-karte">' . self::KARTE_CSS . ($kd_ ? self::KD_CSS . '.sab-karte{' . self::kd_vars($kd_) . '}' : '') . '</style>'; }
         if (get_option('sab_hinweis_auto') === '1' && !self::$hinweis_gezeigt) {
             echo '<p class="sab-hinweis"><small>' . esc_html(self::hinweis_text(self::land(''))) . '</small></p>';
         }
@@ -2150,7 +2152,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     }
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
-    const KARTE_CSS = '.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:block}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}';
+    const KARTE_CSS = '.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:block}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
@@ -2174,11 +2176,16 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
         if ($ebay !== '') { $ebay = str_replace('<a ', '<a class="sab-karte-ebay" ', $ebay); }
         $tt = $titel !== '' ? '<div class="sab-karte-titel">' . $titel . '</div>' : '';
+        $kd = self::kd_opt(); $kc = $kd ? ' sab-kd-' . $kd['stil'] : ''; $ex = '';
+        if ($kd && self::brauchbar($p)) {   // Preis und Verfügbarkeit nur aus der Amazon-Abfrage (höchstens 1 Tag alt), mit Stand und Hinweis; Bewertungen werden nie angezeigt
+            if ($kd['preis'] && !empty($p['preis'])) { $ex .= '<div class="sab-karte-preis">' . esc_html((string) $p['preis']) . '<small>Stand ' . esc_html(date_i18n('d.m.Y', (int) ($p['ts'] ?? time()))) . ', Preis kann sich ändern</small></div>'; }
+            if ($kd['daten']) { $ex .= '<div class="sab-karte-daten">✓ Lieferbar bei Amazon</div>'; }
+        }
         // Bild, Titel und Button sind EIN Link (für Crawler zählt das als ein Affiliate-Link); data-sab-asin/-slot/-var bleiben für Statistik und Austausch am Link
         if (preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb) && preg_match('#^<a\b[^>]*>(.*)</a>$#s', $btn, $mt)) {
-            return '<div class="sab-karte">' . $mb[1] . $mb[2] . $tt . '<span class="sab-karte-btn">' . $mt[1] . '</span></a>' . $ebay . '</div>';
+            return '<div class="sab-karte' . $kc . '">' . $mb[1] . $mb[2] . $tt . $ex . '<span class="sab-karte-btn">' . $mt[1] . '</span></a>' . $ebay . '</div>';
         }
-        return '<div class="sab-karte">' . $bild . $tt . $btn . $ebay . '</div>';
+        return '<div class="sab-karte' . $kc . '">' . $bild . $tt . $ex . $btn . $ebay . '</div>';
     }
 
     /** [amz_ebay asin="…" host="www.ebay.es" campid="…" suche="…"]Text[/amz_ebay]: eBay-Suchlink; nach einem Austausch sucht er mit dem Namen des neuen Produkts. */
@@ -2454,6 +2461,104 @@ JS;
         return [substr($c, 0, $m[3][1]) . $nt . substr($c, $m[3][1] + strlen($m[3][0])), true];
     }
 
+    // ---------- Kartendesign ----------
+    const KD_PRESETS = ['dezent' => ['Dezent', 'dezent', 0, 0], 'auffaellig' => ['Auffällig', 'auffaellig', 0, 0], 'dezent_preis' => ['Dezent mit Preis', 'dezent', 1, 0], 'auffaellig_preis' => ['Auffällig mit Preis', 'auffaellig', 1, 0], 'daten' => ['Mit Produktdaten', 'dezent', 1, 1]];
+    const KD_FARBEN = ['Dezent' => ['#6b7f8c', '#7d8f6a', '#9a8878'], 'Mittel' => ['#2271b1', '#2e8b57', '#c26a00'], 'Auffällig' => ['#ff6a00', '#e0245e', '#7c3aed']];
+    const KD_GIMMICKS = ['' => 'keins', '🐌' => 'Schnecke', '🦔' => 'Igel', '🐦' => 'Vogel', '🐭' => 'Maus', '🐛' => 'Raupe', '🐝' => 'Biene', '🦋' => 'Schmetterling', '🐸' => 'Frosch'];
+    const KD_CSS = '.sab-karte{position:relative;border-radius:var(--kr,10px)}.sab-karte::before{content:var(--kg,none);position:absolute;top:-16px;right:var(--kgr,12px);left:var(--kgl,auto);font-size:28px;line-height:1;pointer-events:none}.sab-kd-dezent .sab-karte-btn{background:#fff;border:1px solid var(--kd);color:var(--kd)!important}.sab-kd-auffaellig{border:2px solid var(--kd);background:var(--kdh);box-shadow:0 4px 14px rgba(0,0,0,.12)}.sab-kd-auffaellig .sab-karte-btn{background:var(--kd);border-color:var(--kd);color:var(--kdt)!important}.sab-kd-auffaellig .sab-karte-titel{font-weight:700}.sab-karte-btn{border-radius:calc(var(--kr,10px) * .7)}.sab-karte-preis{font-weight:700;font-size:1.15em;color:#111}.sab-karte-preis small{display:block;font-weight:400;font-size:.62em;color:#666}.sab-karte-daten{font-size:.82em;color:#1a7f37}';
+
+    /** @var array|null|false Zwischenspeicher je Aufruf (false = noch nicht gelesen) */
+    public static $kd_cache = false;
+
+    /** Gespeichertes Kartendesign oder null (dann bleibt die Karte wie bisher). */
+    public static function kd_opt(): ?array {
+        if (self::$kd_cache !== false) { return self::$kd_cache; }
+        $o = &self::$kd_cache;
+        $r = get_option('sab_kd'); if (!is_array($r) || empty($r['preset']) || !isset(self::KD_PRESETS[$r['preset']])) { return $o = null; }
+        $pr = self::KD_PRESETS[$r['preset']];
+        return $o = ['preset' => $r['preset'], 'stil' => $pr[1], 'preis' => (bool) $pr[2], 'daten' => (bool) $pr[3], 'farbe' => preg_match('/^#[0-9a-f]{6}$/i', (string) ($r['farbe'] ?? '')) ? strtolower($r['farbe']) : '#2271b1', 'ecken' => max(0, min(28, (int) ($r['ecken'] ?? 10))), 'gimmick' => isset(self::KD_GIMMICKS[(string) ($r['gimmick'] ?? '')]) ? (string) $r['gimmick'] : '', 'seite' => ($r['seite'] ?? 'r') === 'l' ? 'l' : 'r'];
+    }
+
+    /** Lesbare Textfarbe auf der Akzentfarbe. */
+    public static function kd_textfarbe(string $hex): string {
+        $r = hexdec(substr($hex, 1, 2)); $g = hexdec(substr($hex, 3, 2)); $b = hexdec(substr($hex, 5, 2));
+        return (0.299 * $r + 0.587 * $g + 0.114 * $b) > 150 ? '#1a1a1a' : '#ffffff';
+    }
+
+    /** CSS-Variablen des Designs (gelten für .sab-karte). */
+    public static function kd_vars(array $o): string {
+        return '--kd:' . $o['farbe'] . ';--kdh:' . $o['farbe'] . '18;--kdt:' . self::kd_textfarbe($o['farbe']) . ';--kr:' . (int) $o['ecken'] . 'px;'
+            . ($o['gimmick'] !== '' ? '--kg:"' . $o['gimmick'] . '";' . ($o['seite'] === 'l' ? '--kgl:12px;--kgr:auto;' : '--kgr:12px;--kgl:auto;') : '');
+    }
+
+    private static function kd_speichern(): string {
+        self::$kd_cache = false;
+        if (!empty($_POST['kd_reset'])) { delete_option('sab_kd'); return 'Kartendesign zurückgesetzt: Karten sehen wieder aus wie vorher.'; }
+        $pre = sanitize_key(wp_unslash($_POST['kd_preset'] ?? ''));
+        if (!isset(self::KD_PRESETS[$pre])) { return 'Bitte ein Design wählen.'; }
+        $f = (string) wp_unslash($_POST['kd_farbe'] ?? ''); $f = preg_match('/^#[0-9a-f]{6}$/i', $f) ? strtolower($f) : '#2271b1';
+        $g = (string) wp_unslash($_POST['kd_gimmick'] ?? ''); if (!isset(self::KD_GIMMICKS[$g])) { $g = ''; }
+        update_option('sab_kd', ['preset' => $pre, 'farbe' => $f, 'ecken' => max(0, min(28, (int) ($_POST['kd_ecken'] ?? 10))), 'gimmick' => $g, 'seite' => (($_POST['kd_seite'] ?? 'r') === 'l') ? 'l' : 'r'], false);
+        return 'Kartendesign gespeichert. Es gilt für alle Karten (einzeln und mehrere) auf der ganzen Website.';
+    }
+
+    /** Reiter „Kartendesign“: fertige Designs mit Vorschau, Farbe, Ecken und Tierchen; gilt für alle Karten. */
+    private static function kd_html(): string {
+        $o = self::kd_opt() ?: ['preset' => 'dezent', 'stil' => 'dezent', 'preis' => false, 'daten' => false, 'farbe' => '#2271b1', 'ecken' => 10, 'gimmick' => '', 'seite' => 'r'];
+        $aktiv = self::kd_opt() !== null;
+        $h = '<h2>Kartendesign</h2><p class="description">Wähle ein Design, eine Farbe und die Rundung der Ecken. Die Vorschau ändert sich sofort; erst „Speichern“ übernimmt es für alle Karten (einzeln und nebeneinander). Preis und „Lieferbar“ kommen nur aus der Amazon-Abfrage (höchstens 1 Tag alt, mit Datum); Bewertungen zeigen wir nicht an, das erlaubt Amazon nicht.' . ($aktiv ? '' : ' <strong>Noch nichts gespeichert: die Karten sehen aus wie bisher.</strong>') . '</p>';
+        $h .= '<style>' . self::KARTE_CSS . self::KD_CSS . '.kd-vor{margin:0 0 14px;padding:12px;border:2px solid #dcdcde;border-radius:8px;background:#f6f7f7;max-width:520px}.kd-vor label{display:block;font-weight:600;margin-bottom:6px}.kd-vor .sab-karten{margin:14px 0 0}.kd-ph{height:70px;width:100%;background:#e3e6e6;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#777;font-size:12px}.kd-sw{width:30px;height:30px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #888;cursor:pointer;padding:0;margin:0 4px 4px 0}.kd-gim label{display:inline-block;margin:0 10px 6px 0}</style>';
+        $h .= '<form method="post" id="kd-form">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="kartendesign"><input type="hidden" name="sab_form" value="kartendesign">';
+        $h .= '<h3>1. Design</h3><div style="display:flex;flex-wrap:wrap;gap:0 18px">';
+        foreach (self::KD_PRESETS as $k => $pr) {
+            $h .= '<div class="kd-vor"><label><input type="radio" name="kd_preset" value="' . esc_attr($k) . '"' . ($o['preset'] === $k ? ' checked' : '') . '> ' . esc_html($pr[0]) . '</label><div class="kd-box" style="' . esc_attr(self::kd_vars($o)) . '"><div class="sab-karten" style="grid-template-columns:repeat(2,minmax(0,1fr))">';
+            for ($i = 1; $i <= 2; $i++) {
+                $h .= '<div class="sab-karte sab-kd-' . $pr[1] . '"><div class="kd-ph">Produktbild</div><div class="sab-karte-titel">Beispielprodukt ' . $i . ' für den Garten</div>'
+                    . ($pr[2] ? '<div class="sab-karte-preis">19,99 €<small>Stand ' . esc_html(date_i18n('d.m.Y')) . ', Preis kann sich ändern</small></div>' : '') . ($pr[3] ? '<div class="sab-karte-daten">✓ Lieferbar bei Amazon</div>' : '') . '<span class="sab-karte-btn">Bei Amazon ansehen</span></div>';
+            }
+            $h .= '</div></div></div>';
+        }
+        $h .= '</div><h3>2. Farbe</h3><p>';
+        foreach (self::KD_FARBEN as $gruppe => $fs) {
+            $h .= '<strong>' . esc_html($gruppe) . ':</strong> ';
+            foreach ($fs as $f) { $h .= '<button type="button" class="kd-sw" data-f="' . esc_attr($f) . '" style="background:' . esc_attr($f) . '" title="' . esc_attr($f) . '"></button>'; }
+            $h .= ' &nbsp; ';
+        }
+        $h .= '<br>Eigene Farbe: <input type="color" name="kd_farbe" value="' . esc_attr($o['farbe']) . '"></p>';
+        $h .= '<h3>3. Ecken</h3><p><input type="range" name="kd_ecken" min="0" max="28" value="' . (int) $o['ecken'] . '"> <span id="kd-ev">' . (int) $o['ecken'] . '</span> px (0 = eckig)</p>';
+        $h .= '<h3>4. Tierchen (optional)</h3><p class="kd-gim">';
+        foreach (self::KD_GIMMICKS as $g => $n) { $h .= '<label><input type="radio" name="kd_gimmick" value="' . esc_attr($g) . '"' . ($o['gimmick'] === $g ? ' checked' : '') . '> ' . ($g !== '' ? $g . ' ' : '') . esc_html($n) . '</label>'; }
+        $h .= '<br>Seite: <label><input type="radio" name="kd_seite" value="l"' . ($o['seite'] === 'l' ? ' checked' : '') . '> links</label> <label><input type="radio" name="kd_seite" value="r"' . ($o['seite'] !== 'l' ? ' checked' : '') . '> rechts</label></p>';
+        $h .= '<p><button class="button button-primary">Speichern</button> <button class="button" name="kd_reset" value="1" onclick="return confirm(\'Wieder wie vorher?\')">Zurücksetzen (wie bisher)</button></p></form>';
+        $h .= '<script>(function(){var f=document.getElementById("kd-form");function lum(h){var r=parseInt(h.substr(1,2),16),g=parseInt(h.substr(3,2),16),b=parseInt(h.substr(5,2),16);return .299*r+.587*g+.114*b>150?"#1a1a1a":"#ffffff"}'
+           . 'function upd(){var c=f.kd_farbe.value,r=f.kd_ecken.value,g=f.kd_gimmick.value,l=f.kd_seite.value==="l";document.getElementById("kd-ev").textContent=r;var v="--kd:"+c+";--kdh:"+c+"18;--kdt:"+lum(c)+";--kr:"+r+"px;"+(g?"--kg:\\""+g+"\\";"+(l?"--kgl:12px;--kgr:auto;":"--kgr:12px;--kgl:auto;"):"");var b=f.querySelectorAll(".kd-box");for(var i=0;i<b.length;i++){b[i].style.cssText=v}}'
+           . 'f.addEventListener("input",upd);f.addEventListener("change",upd);var s=f.querySelectorAll(".kd-sw");for(var i=0;i<s.length;i++){s[i].onclick=function(){f.kd_farbe.value=this.getAttribute("data-f");upd()}}upd()})();</script>';
+        return $h;
+    }
+
+    /** Frontend „＋ Karte“: setzt hinter den Absatz mit dem Textlink eine einzelne Karte (Bild + Textlink) desselben Produkts. Mit Sicherung, Rückgängig wie beim Tausch. */
+    public static function ajax_stelle_karte(): void {
+        [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin] = self::stelle_pruefen();
+        if ($ord > 0 || stripos($tag, '<a') !== 0) { wp_send_json_error('Hier steht schon eine Karte oder Box. „Karte hinzufügen“ gibt es nur für reine Textlinks.'); }
+        if (!self::neues_produkt_vorladen($asin)) { wp_send_json_error('Amazon liefert zu ' . $asin . ' gerade kein Bild. Keine Karte eingefügt. Bitte später noch einmal versuchen.'); }
+        $land = ''; if (preg_match('/\bhref=(["\'])(.*?)\1/is', $tag, $hm)) { foreach (self::LAENDER as $k => $v) { if (stripos($hm[2], $v[0]) !== false) { $land = $k; break; } } }
+        $sc = '[amz_karten][amz_karte asin="' . $asin . '"' . ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . '][/amz_karten]';
+        if (strpos($c, '<!-- wp:') !== false) { $sc = "<!-- wp:shortcode -->\n" . $sc . "\n<!-- /wp:shortcode -->"; }
+        $ende = $pos + strlen($tag); $ins = $ende;
+        $pe = stripos($c, '</p>', $ende);
+        if ($pe !== false && $pe - $ende < 3000) {
+            $zw = substr($c, $ende, $pe - $ende);
+            if (!preg_match('#<p[\s>]|</?li\b|</?td\b|</?div\b#i', $zw)) { $ins = $pe + 4; if (preg_match('#\G\s*<!-- /wp:paragraph -->#', $c, $m2, 0, $ins)) { $ins += strlen($m2[0]); } }
+        }
+        $c2 = substr($c, 0, $ins) . "\n\n" . $sc . "\n\n" . substr($c, $ins);
+        $b = (array) get_post_meta($post->ID, '_sab_stelle_backup', true);
+        $b = array_slice(array_merge($b, [['ts' => time(), 'hash' => md5($c2), 'vorher' => $c, 'alt' => $asin, 'neu' => $asin]]), -5);
+        update_post_meta($post->ID, '_sab_stelle_backup', wp_slash($b));
+        wp_update_post(['ID' => $post->ID, 'post_content' => wp_slash($c2)]);
+        delete_transient('sab_alle_asins');
+        wp_send_json_success(['asin' => $asin, 'nr' => max(1, (int) ($_POST['nth'] ?? 1))]);
+    }
+
     public static function ajax_stelle_tausch(): void {
         if (!empty($_POST['kurz'])) {
             [$post, $c, $tag, $pos, $kurz] = self::kurz_stelle();
@@ -2600,8 +2705,9 @@ JS;
            . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}'
            . 'var hs=document.querySelectorAll("a[href]"),cn={},al={},kz={};for(var j=0;j<hs.length;j++){var a=hs[j],hr=a.getAttribute("href")||"",m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(hr);var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as&&/^https?:\/\/(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)\//i.test(hr)&&!a.closest("#wpadminbar")&&a.closest("article,.entry-content,.hentry,main,.post")){kz[hr]=(kz[hr]||0)+1;(function(a,hr,nth){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn2(t,f,tb){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(tb){b.className="sab-tb"}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}kn2("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim(),kurz:hr};oeffne(0,"")},1);if(C.e){kn2("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(hr.replace(/[?#].*$/,"").replace(/\/+$/,"").split("/").pop()),"_blank")})}var ik=C.ko.indexOf(hr)>=0;kn2(ik?"✓ so gelassen – wieder prüfen":"✓ okay, so lassen",function(){var fd=new FormData();fd.append("action","sab_kurz_ok");fd.append("n",C.n);fd.append("post",C.p);fd.append("kurz",hr);fd.append("ok",ik?"0":"1");fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){if(r.success){location.reload()}})});a.parentNode.insertBefore(sp,a.nextSibling)})(a,hr,kz[hr]);continue}if(!as){continue}al[as]=(al[as]||0)+1;'
            . 'if(a.hasAttribute("data-sab-asin")||a.closest("[data-sab-ord],#wpadminbar,.sab-karte,.sab-produkt")||!a.closest("article,.entry-content,.hentry,main,.post")){continue}cn[as]=(cn[as]||0)+1;'
-           . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(t.indexOf("tauschen")>0){b.className="sab-tb";b.setAttribute("data-o","h"+nth+as)}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}'
+           . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(t.indexOf("tauschen")>0){b.className="sab-tb";b.setAttribute("data-o","h"+nth+as)}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b);return b}'
            . 'kn("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};oeffne(0,as)});'
+           . 'var kb=kn("＋ Karte",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};kb.textContent="…";post("sab_stelle_karte",{asin:as,ord:0},function(r){if(r.success){kb.textContent="✓ Karte da";location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr}else{kb.textContent="＋ Karte";alert(r.data)}})});kb.title="Fügt unter dem Absatz eine Karte mit Bild und Link ein (mit Sicherung, rückgängig im Tausch-Fenster)";'
            . 'if(C.e){kn("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(as)+"&sab_nr="+nr,"_blank")})}'
            . 'a.parentNode.insertBefore(sp,a.nextSibling)})(a,as,cn[as],al[as])}'
            . '})();</script>';
@@ -6326,6 +6432,7 @@ JS;
                 $ed .= ' <a href="' . esc_url(admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $alt)) . '" target="_blank" rel="noopener"' . $tt . '>' . ($z['seiten'] === 1 ? 'Seite bearbeiten' : $nr) . '</a>';
             }
             $wo .= ' · Stelle ansehen:' . $an . ' · Bearbeiten:' . $ed . ($z['seiten'] > 10 ? ' … (' . $z['seiten'] . ' insgesamt)' : '');
+            if (!self::braucht_bild((string) $alt)) { $wo .= ' · <strong>Nur Textlink, kein Bild nötig.</strong> Mit Bild: Stelle ansehen, dann „＋ Karte“ neben dem Link.'; }
         }
         $badge = !empty($z['bl']) ? ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#fcf0f1;color:#8a1f1f;font-weight:700;font-size:12px">ohne Bild</span>' : '';
         if ($best && self::lernen_auto($best, (int) self::score(array_merge((array) $xalt, ['trotz' => isset($trotz[$alt])]))[0], $lq)) { $badge .= ' <span style="display:inline-block;padding:1px 9px;border-radius:9px;background:#e3f4e7;color:#1a7f37;font-weight:700;font-size:12px" title="Würde bei eingeschalteter Automatik getauscht (noch nicht eingeschaltet)">Auto-Kandidat</span>'; }
@@ -6395,7 +6502,7 @@ JS;
         foreach ($zeilen as $z_) {
             $a_ = (string) $z_['alt'];
             $xi_ = $d['items'][$a_] ?? null; $unl_ = $xi_ && (empty($xi_['lieferbar']) || ($xi_['status'] ?? '') === 'OUT_OF_STOCK');   // nicht lieferbar: Amazon liefert dann oft keine Bild-URL, das Produkt hat aber eins; es steht ohnehin als „nicht lieferbar“ da
-            $z_['bl'] = !$xi_ || (!$unl_ && (isset($bf[$a_]) || (empty($xi_['bilder']) && !is_file(self::bild_pfad($land, $a_, 0)) && self::braucht_bild($a_))));
+            $z_['bl'] = !$xi_ || (!$unl_ && self::braucht_bild($a_) && (isset($bf[$a_]) || (empty($xi_['bilder']) && !is_file(self::bild_pfad($land, $a_, 0)) && self::braucht_bild($a_))));
             if ($z_['bl']) { $zb[] = $z_; } else { $zr[] = $z_; }
         }
         usort($zb, fn($a, $b) => [$b['seiten'], $b['n']] <=> [$a['seiten'], $a['n']]);
@@ -6685,6 +6792,7 @@ JS;
         'laender'       => 'Länder',
         'lernen'        => 'Lernen',
         'scan'          => 'Seite scannen',
+        'kartendesign'  => 'Kartendesign',
         'gruppen'       => 'Produktgruppen',
         'score'         => 'Score',
         'umbau'         => 'Umbau',
@@ -7039,6 +7147,8 @@ JS;
                     if ($ok > 0) { unset($kk[$kid]); update_option('sab_kontrolle', $kk, false); }
                     $meldung = $ok > 0 ? 'Rückgängig gemacht in ' . $ok . ' Artikel(n)' . ($skip ? ', ' . $skip . ' übersprungen, weil sie seitdem von Hand geändert wurden (dort bitte unter „Versionen“ zurückgehen).' : '.') : 'Nichts zurückgesetzt: ' . ($skip ? 'die Artikel wurden seitdem geändert (bitte unter „Versionen“ die Version vor dem Tausch laden).' : 'keine Sicherung gefunden.');
                 }
+            } elseif ($form === 'kartendesign') {
+                $meldung = self::kd_speichern();
             } elseif ($form === 'laender') {
                 $meldung = self::laender_speichern();
             } elseif ($form === 'laender_import') {
@@ -7407,6 +7517,8 @@ JS;
             echo self::laender_html();
         } elseif ($tab === 'lernen') {
             echo self::lernen_html();
+        } elseif ($tab === 'kartendesign') {
+            echo self::kd_html();
         } elseif ($tab === 'scan') {
             echo self::scan_html();
         } elseif ($tab === 'helfer') {

@@ -7,6 +7,7 @@ const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECO
 $GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
 function add_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return 'schlanke-amazon-box/schlanke-amazon-box.php'; } function wp_next_scheduled($x) { return true; }
+function date_i18n($f, $t = null) { return date($f, $t ?? time()); }
 function get_option($k, $d = false) { return $GLOBALS['opt'][$k] ?? $d; }
 function update_option($k, $v, $a = null) { $GLOBALS['opt'][$k] = $v; return true; }
 function delete_option($k) { unset($GLOBALS['opt'][$k]); return true; }
@@ -376,7 +377,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 17 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und fünfzehn Untermenüs');
+ok(count($GLOBALS['menu']) === 18 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und sechzehn Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -1674,4 +1675,14 @@ ok(SAB::seite_art('https://www.amazon.de/s?k=schneckenzaun') === 'suche' && SAB:
 [$e42x, $e42n] = SAB::seitenlinks_ergaenzen('<a href="https://www.amazon.de/s?k=zaun">Suche</a>');
 ok($e42n === 1 && strpos($e42x, 'k=zaun&tag=de-21') !== false && strpos($e42x, 'sponsored') !== false, 'Suchlink: ID und rel ergänzt');
 unset($GLOBALS['opt']['sab_tags']);
+// 0.89.43: Kartendesign, Karte hinzufügen, Textlink braucht kein Bild
+SAB::$kd_cache = false; ok(SAB::kd_opt() === null && strpos(SAB::sc_karte(['asin' => 'B0KARTE001']), 'sab-kd-') === false, 'Kartendesign: ohne Einstellung bleibt die Karte wie bisher');
+$GLOBALS['opt']['sab_kd'] = ['preset' => 'auffaellig_preis', 'farbe' => '#ff6a00', 'ecken' => 40, 'gimmick' => '🐌', 'seite' => 'l']; SAB::$kd_cache = false;
+$kd = SAB::kd_opt(); $kv = SAB::kd_vars($kd);
+ok($kd['stil'] === 'auffaellig' && $kd['preis'] && $kd['ecken'] === 28 && strpos($kv, '--kd:#ff6a00') !== false && strpos($kv, '--kr:28px') !== false && strpos($kv, '🐌') !== false && strpos($kv, '--kgl:12px') !== false, 'Kartendesign: Variablen, Ecken begrenzt, Tierchen links');
+ok(SAB::kd_textfarbe('#ffffff') === '#1a1a1a' && SAB::kd_textfarbe('#7c3aed') === '#ffffff', 'Kartendesign: Textfarbe lesbar');
+$kh = new ReflectionMethod('SAB', 'kd_html'); $kh->setAccessible(true); $khh = $kh->invoke(null);
+ok(substr_count($khh, 'name="kd_preset"') === 5 && strpos($khh, 'kd_gimmick') !== false && strpos($khh, 'Bewertungen zeigen wir nicht') !== false, 'Kartendesign-Reiter: fünf Designs, Farbe, Tierchen');
+$GLOBALS['opt']['sab_kd'] = ['preset' => 'kaputt']; SAB::$kd_cache = false; ok(SAB::kd_opt() === null, 'Kartendesign: ungültiges Design wird ignoriert');
+unset($GLOBALS['opt']['sab_kd']); SAB::$kd_cache = false;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
