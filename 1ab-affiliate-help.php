@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.47
+ * Version: 0.89.48
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.47';
+    const VERSION = '0.89.48';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -713,7 +713,10 @@ final class SAB {
         }
 
         $alt = get_option("sab_alt_{$land}_{$asin}");
-        $p = self::abrufen($asin, $land, $alt ?: []);
+        $hl = self::heimat_land($asin, $land);   // Produkt gibt es nur in einem anderen Store (z. B. .com): Bild und Link kommen von dort
+        $p = $hl !== $land ? self::abrufen($asin, $hl, $alt ?: []) : null;
+        if ($p === null || !empty($p['weg'])) { $p = self::abrufen($asin, $land, $alt ?: []); }
+        if ($p !== null && (!empty($p['weg']) || empty($p['bild']))) { $q = self::heimat_suchen($asin, $land); if ($q) { $p = $q; } }
         if ($p !== null) {
             set_transient("sab_{$land}_{$asin}", $p, self::TTL);
             update_option("sab_alt_{$land}_{$asin}", $p, false);
@@ -721,6 +724,38 @@ final class SAB {
         }
         // API gerade nicht erreichbar: letzter Stand nur, solange er höchstens 1 Tag alt ist (Amazon-Caching-Regel)
         return ($alt && (time() - (int) ($alt['ts'] ?? 0)) <= self::TTL) ? $alt : null;
+    }
+
+    /** Gemerkter Heimat-Store eines Produkts (ASIN => Land), wenn es im Standardstore der Seite nicht zu haben ist. */
+    public static function heimat_land(string $asin, string $land): string {
+        $m = array_filter(self::heimat_liste()) + (array) get_option('sab_asin_land', []);
+        return isset($m[$asin]) && isset(self::LAENDER[$m[$asin]]) && self::tag((string) $m[$asin]) !== '' ? (string) $m[$asin] : $land;
+    }
+
+    /** Eigene Liste „nur in einem anderen Store“ (Einstellungen): ASIN [= Land]; ohne Land wird gesucht. @return array<string,string> ASIN => Land oder '' */
+    private static function heimat_liste(): array {
+        $o = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_heimat_liste', '')) as $z) {
+            $t = preg_split('/[\s=:,;|]+/', trim($z), -1, PREG_SPLIT_NO_EMPTY); $a = strtoupper((string) ($t[0] ?? ''));
+            if (strlen(self::asin($a)) === 10) { $l = self::land_schluessel((string) ($t[1] ?? '')); $o[$a] = isset(self::LAENDER[$l]) && ($t[1] ?? '') !== '' ? $l : ''; }
+        }
+        return $o;
+    }
+
+    /** Das Produkt ist im angefragten Store unbekannt oder ohne Bild: in den anderen Stores mit eigener Partner-ID suchen (höchstens 4 Abrufe), Treffer als Heimat-Store merken. Es wird nichts gespeichert außer dem Land. */
+    private static function heimat_suchen(string $asin, string $land): ?array {
+        if (!array_key_exists($asin, self::heimat_liste())) { return null; }   // nur für Produkte, die du ausdrücklich eingetragen hast (sonst würde ein ausgefallenes Produkt nie ersetzt)
+        $n = 0;
+        foreach (['com', 'co.uk', 'ca', 'com.au', 'de', 'fr', 'it', 'es'] as $k) {
+            if ($k === $land || self::tag($k) === '') { continue; }
+            if (++$n > 4) { break; }
+            $q = self::abrufen($asin, $k, []);
+            if ($q !== null && empty($q['weg']) && !empty($q['bild']) && !empty($q['link'])) {
+                $m = (array) get_option('sab_asin_land', []); if (($m[$asin] ?? '') !== $k && count($m) < 500) { $m[$asin] = $k; update_option('sab_asin_land', $m, false); }
+                return $q;
+            }
+        }
+        return null;
     }
 
     /** Plant einen einmaligen Abruf im WP-Cron (ohne Doppelungen), damit Seitenaufrufe nie auf Amazon warten. */
@@ -1881,6 +1916,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $nm = (string) (self::produkte()[$asin] ?? ''); if ($nm === '') { $pp = self::produkt($asin, self::land('')); $nm = (string) ($pp['titel'] ?? ''); }
         if ($nm !== '') { $tn = esc_attr(mb_substr(trim(preg_replace('/\s*\|\s*/u', ' ', $nm)), 0, 80)); $gt = ' data-sab-t="' . $tn . '" data-aawp-product-title="' . $tn . '"'; }   // Suchbegriff für die Länder-Umschaltung; das zweite Attribut kennt auch die ältere, fremde Umschaltung (sonst sucht sie nach „dp“)
         if (get_option('sab_geo') === '1') { $lmap = (array) get_option('sab_laender_map', []); $lm = (array) ($lmap[$asin] ?? []); $lz = []; foreach ($lm as $l_ => $e_) { if (!empty($e_['asin'])) { $lz[] = $l_ . ':' . $e_['asin']; } } if ($lz) { $gt .= ' data-sab-l="' . esc_attr(implode(',', $lz)) . '"'; } }   // freigegebene ASINs in den anderen Ländern
+        if (array_key_exists($asin, self::heimat_liste()) || isset(((array) get_option('sab_asin_land', []))[$asin])) { $gt .= ' data-sab-fix="1"'; }   // Heimat-Store ist ein anderer: die Länder-Umschaltung lässt den Link in Ruhe
         return ' data-sab-asin="' . esc_attr($asin) . '"' . ($slot ? ' data-sab-slot="' . esc_attr($slot) . '"' : '') . ($var ? ' data-sab-var="' . esc_attr($var) . '"' : '') . $gt
              . ' target="_blank" rel="nofollow sponsored noopener"';
     }
@@ -2344,7 +2380,7 @@ return s.replace(/^(the|a|an|some|our|ein|eine|einen|den|die|das|frische|el|la|l
 function run(tz,lang){var w=pick(tz,lang);if(!w||!T[w])return 0;var n=0,all=document.querySelectorAll('a[href*="amazon."]');
 for(var i=0;i<all.length;i++){var a=all[i],u;try{u=new URL(a.href)}catch(e){continue}
 var h=u.hostname.match(/(?:^|\.)amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)$/);if(!h||h[1]===w)continue;
-var tag=u.searchParams.get('tag'),ok=false;for(var k in T){if(T[k]===tag)ok=true}if(!ok)continue;
+if(a.hasAttribute('data-sab-fix'))continue;var tag=u.searchParams.get('tag'),ok=false;for(var k in T){if(T[k]===tag)ok=true}if(!ok)continue;
 var t=a.getAttribute('data-sab-t')||a.getAttribute('data-aawp-product-title')||a.getAttribute('title')||'';
 if(!t){var sg=(u.pathname.split('/')[1]||'');if(!/^(dp|gp|product|s|exec|d|o|ref|stores|hz|b)$/i.test(sg)&&!/^[A-Z0-9]{10}$/.test(sg))t=sg.replace(/-/g,' ')}
 if(!t)t=pre(a);t=t.replace(/[^\wÀ-ɏ ]+/g,' ').replace(/\s+/g,' ').trim().split(' ').slice(0,8).join(' ');if(!t)continue;
@@ -7243,6 +7279,7 @@ JS;
                 update_option('sab_geo', !empty($_POST['sab_geo']) ? '1' : '0', false);
                 update_option('sab_hinweis_auto', !empty($_POST['sab_hinweis_auto']) ? '1' : '0', false);
                 update_option('sab_karten_css', !empty($_POST['sab_karten_css']) ? '1' : '0', false);
+                update_option('sab_heimat_liste', sanitize_textarea_field(wp_unslash($_POST['sab_heimat_liste'] ?? '')), false);
                 update_option('sab_generische_linktexte', sanitize_textarea_field(wp_unslash($_POST['sab_generische_linktexte'] ?? '')), false);
                 update_option('sab_weg_umbauen', !empty($_POST['sab_weg_umbauen']) ? '1' : '0', false);
                 update_option('sab_strikt', !empty($_POST['sab_strikt']) ? '1' : '0', false);
@@ -7699,6 +7736,7 @@ JS;
                . '<tr><th>Pflichthinweis</th><td><label><input type="checkbox" name="sab_hinweis_auto" value="1"' . (get_option('sab_hinweis_auto') === '1' ? ' checked' : '')
                . '> automatisch im Fuß jeder Seite mit Partnerlinks</label><br><input type="text" name="sab_hinweis_text" class="large-text" placeholder="leer = Standardsatz je Land" value="'
                . esc_attr((string) get_option('sab_hinweis_text', '')) . '"></td></tr>'
+               . '<tr><th>Nur in einem anderen Store</th><td><textarea name="sab_heimat_liste" rows="3" cols="40" class="code" placeholder="B0XXXXXXXX = com">' . esc_textarea((string) get_option('sab_heimat_liste', '')) . '</textarea><p class="description">Produkte, die es im Standard-Store dieser Seite nicht gibt (z. B. nur auf amazon.com). Eine ASIN je Zeile, Land dahinter (com, co.uk, ca …) oder weglassen, dann sucht das Plugin. Bild und Link kommen dann live von diesem Store (Bild höchstens 1 Tag zwischengespeichert), die Länder-Umschaltung lässt den Link in Ruhe. Dafür muss für das Land eine Partner-ID eingetragen sein.</p></td></tr>'
                . '<tr><th>Allgemeine Linktexte</th><td><textarea name="sab_generische_linktexte" rows="3" cols="40" placeholder="Offer on Amazon&#10;Zum Shop vor Ort">' . esc_textarea((string) get_option('sab_generische_linktexte', '')) . '</textarea><p class="description">Ein Linktext je Zeile, der nie als Produkttitel gilt (Standard: Angebot/Offer/Click/Hier … bei Amazon, mehrsprachig). Der Titel kommt dann aus dem Satz vor dem Link.</p></td></tr>'
                . '<tr><th>Karten-Design</th><td><label><input type="checkbox" name="sab_karten_css" value="1"' . (get_option('sab_karten_css') !== '0' ? ' checked' : '')
                . '> kleines Karten-Design für <code>[amz_produkt]</code> laden (weißer Kasten, grüner Button)</label></td></tr>'

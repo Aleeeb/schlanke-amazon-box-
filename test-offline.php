@@ -23,7 +23,7 @@ function wp_remote_post($u, $a) {
     $ids = json_decode($a['body'], true)['itemIds']; $items = [];
     foreach ($ids as $id) { if (($GLOBALS['bad'] ?? '') === $id) { return ['code' => 400, 'body' => 'ungueltig']; } }
     foreach ($ids as $id) { if (($GLOBALS['drossel'] ?? '') === $id) { return ['code' => 429, 'body' => 'TooManyRequests']; } }
-    foreach ($ids as $id) { $items[] = $GLOBALS['http'][$id] ?? null; }
+    foreach ($ids as $id) { $items[] = $GLOBALS['http_mp'][$a['headers']['x-marketplace'] ?? ''][$id] ?? $GLOBALS['http'][$id] ?? null; }
     $antwort = ['itemsResult' => ['items' => array_values(array_filter($items))]];
     if (!empty($GLOBALS['fehler200'])) { $antwort['errors'] = $GLOBALS['fehler200']; }
     return ['code' => 200, 'body' => json_encode($antwort)];
@@ -1712,4 +1712,19 @@ SAB::scan_text('<a href="https://www.amazon.de/dp/B0SCANNN12?tag=meine-22">A</a>
 ok(!$e47c['probleme'], 'Scan: übernommene ID ist beim nächsten Scan kein Ausreißer');
 $_POST['tag'] = 'x y'; SAB::ajax_scan_id(); ok(!$GLOBALS['json']['ok'], 'Scan: ungültige ID abgelehnt');
 unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_tags_extra'], $GLOBALS['opt']['sab_scan'], $_POST['tag']);
+// 0.89.48: Produkt nur in einem anderen Store (Heimat-Store)
+$GLOBALS['opt']['sab_tags'] = "es=t-21\nco.uk=t-21\ncom=t-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+$GLOBALS['http_mp']['www.amazon.com']['B0HEIMAT01'] = item('B0HEIMAT01', [$money('20 $')]); $GLOBALS['http_mp']['www.amazon.com']['B0HEIMAT01']['detailPageURL'] = 'https://www.amazon.com/dp/B0HEIMAT01?tag=t-21';
+$h0 = (new ReflectionMethod('SAB', 'produkt')); $h0->setAccessible(true); define('SAB_SYNC', true);
+$p0 = $h0->invoke(null, 'B0HEIMAT01', 'es', true, true);
+ok(!empty($p0['weg']) || empty($p0['bild']), 'Heimat-Store: ohne Eintrag bleibt ein nur woanders vorhandenes Produkt „weg“ (kein stilles Umlenken)');
+$GLOBALS['opt']['sab_heimat_liste'] = "B0HEIMAT01 = com\nB0HEIMAT02"; $GLOBALS['tr'] = array_filter($GLOBALS['tr'], fn($k) => strpos($k, 'B0HEIMAT') === false, ARRAY_FILTER_USE_KEY); unset($GLOBALS['opt']['sab_alt_es_B0HEIMAT01']);
+$p1 = $h0->invoke(null, 'B0HEIMAT01', 'es', true, true);
+ok(empty($p1["weg"]) && strpos((string) $p1['link'], 'amazon.com') !== false && $p1['bild'] !== '', 'Heimat-Store: eingetragenes Produkt zeigt Bild und Link vom .com-Store');
+$GLOBALS['http_mp']['www.amazon.co.uk']['B0HEIMAT02'] = item('B0HEIMAT02', [$money('9 £')]); $GLOBALS['http_mp']['www.amazon.co.uk']['B0HEIMAT02']['detailPageURL'] = 'https://www.amazon.co.uk/dp/B0HEIMAT02?tag=t-21';
+$p2 = $h0->invoke(null, 'B0HEIMAT02', 'es', true, true);
+ok(strpos((string) ($p2['link'] ?? ''), 'amazon.co.uk') !== false && (get_option('sab_asin_land')['B0HEIMAT02'] ?? '') === 'co.uk', 'Heimat-Store: ohne Land wird gesucht und das Land gemerkt');
+ob_start(); $aa48 = (new ReflectionMethod('SAB', 'a_attr')); $aa48->setAccessible(true); $x48 = $aa48->invoke(null, 'B0HEIMAT01'); ob_end_clean();
+ok(strpos($x48, 'data-sab-fix="1"') !== false && strpos((string) (function () { $r = new ReflectionMethod('SAB', 'a_attr'); $r->setAccessible(true); return $r->invoke(null, 'B0ANDERES1'); })(), 'data-sab-fix') === false, 'Heimat-Store: Link ist für die Länder-Umschaltung gesperrt');
+unset($GLOBALS['opt']['sab_heimat_liste'], $GLOBALS['opt']['sab_asin_land']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
