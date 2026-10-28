@@ -1637,4 +1637,13 @@ ok(SAB::update_mail_filter(true) === false, 'Update-Mail von WordPress standardm
 ok(SAB::update_mail_filter(true, ['plugin' => [(object) ['result' => true]]]) === false, 'Erfolgsmail aus');
 ok(SAB::update_mail_filter(true, ['plugin' => [(object) ['result' => true], (object) ['result' => false]]]) === true, 'Fehlermail bleibt an');
 $GLOBALS['opt']['sab_update_mail'] = '1'; ok(SAB::update_mail_filter(true) === true, 'Update-Mail mit Haken wieder an'); unset($GLOBALS['opt']['sab_update_mail']);
+// 0.89.38: Amazon-Startseite und Rezensionslinks
+ok(SAB::seite_art('https://www.amazon.de/?tag=x-21') === 'startseite' && SAB::seite_art('https://www.amazon.co.uk') === 'startseite' && SAB::seite_art('https://www.amazon.de/product-reviews/B0ABCDEFGH?tag=x') === 'rezension' && SAB::seite_art('https://www.amazon.com/dp/B0ABCDEFGH#customerReviews') === 'rezension' && SAB::seite_art('https://www.amazon.de/dp/B0ABCDEFGH') === '' && SAB::seite_art('https://example.com/') === '', 'Seitenarten erkannt');
+$GLOBALS['opt']['sab_amz_seiten'] = "https://www.amazon.de/b?node=123*"; ok(SAB::seite_art('https://www.amazon.de/b?node=123&x=1') === 'liste' && SAB::seite_art('https://www.amazon.de/b?node=999') === '', 'Ausnahmeliste mit Stern'); unset($GLOBALS['opt']['sab_amz_seiten']);
+$GLOBALS['opt']['sab_tags'] = "de=de-21\nco.uk=uk-21"; 
+[$e1x, $e1n] = SAB::seitenlinks_ergaenzen('<p><a href="https://www.amazon.de/" class="b">Amazon</a> <a href="https://www.amazon.co.uk/product-reviews/B0ABCDEFGH" rel="nofollow">Rezensionen</a> <a href="https://www.amazon.de/dp/B0ABCDEFGH">Produkt</a> <a href="https://www.amazon.de/?tag=de-21" rel="sponsored nofollow noopener">ok</a></p>');
+ok($e1n === 2 && strpos($e1x, 'href="https://www.amazon.de/?tag=de-21" class="b" rel="sponsored nofollow noopener"') !== false && strpos($e1x, 'product-reviews/B0ABCDEFGH?tag=uk-21" rel="nofollow sponsored noopener"') !== false && strpos($e1x, '/dp/B0ABCDEFGH">Produkt') !== false, 'Startseiten- und Rezensionslinks: Tag je Land und rel ergänzt, Produktlink unberührt (' . $e1x . ')');
+$rz = $GLOBALS['sc']['amz_rezension'](['asin' => 'B0ABCDEFGH', 'land' => 'co.uk'], 'Rezensionen ansehen');
+ok(strpos($rz, 'amazon.co.uk/product-reviews/B0ABCDEFGH?tag=uk-21') !== false && strpos($rz, 'sponsored') !== false, 'Baustein [amz_rezension]');
+unset($GLOBALS['opt']['sab_tags']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

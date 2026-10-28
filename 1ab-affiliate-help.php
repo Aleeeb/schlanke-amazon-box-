@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.37
+ * Version: 0.89.38
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.37';
+    const VERSION = '0.89.38';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -77,6 +77,7 @@ final class SAB {
         add_shortcode('amz_titel',   [__CLASS__, 'sc_titel']);
         add_shortcode('amz_ebay',    [__CLASS__, 'sc_ebay']);
         add_shortcode('amz_karten',  [__CLASS__, 'sc_karten']);
+        add_shortcode('amz_rezension', [__CLASS__, 'sc_rezension']);
         add_shortcode('amz_karte',   [__CLASS__, 'sc_karte']);
         add_shortcode('amz_hinweis', [__CLASS__, 'sc_hinweis']);
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
@@ -2564,6 +2565,52 @@ JS;
         return $weg_ ? self::weg_marker($asin, $a_html) : $a_html;
     }
 
+    /** [amz_rezension asin="…" land="co.uk"]Rezensionen ansehen[/amz_rezension]: Link auf die Rezensionsseite des Produkts bei Amazon (Partner-ID des Landes). Es werden keine Rezensionstexte gespeichert oder angezeigt. */
+    public static function sc_rezension($a, $inhalt = ''): string {
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'class' => ''], $a);
+        $asin = self::getauscht(self::asin($a['asin'])); $land = self::land($a['land']); $tag = self::tag($land);
+        if (strlen($asin) !== 10 || !isset(self::LAENDER[$land])) { return esc_html((string) $inhalt); }
+        $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $a['class']));
+        $link = 'https://' . self::LAENDER[$land][0] . '/product-reviews/' . $asin . ($tag !== '' ? '?tag=' . rawurlencode($tag) : '');
+        self::$genutzt = true; self::$links++;
+        return '<a' . ($cls ? ' class="' . esc_attr($cls) . '"' : '') . ' href="' . esc_url($link) . '"' . self::a_attr($asin) . '>' . esc_html(trim((string) $inhalt) !== '' ? (string) $inhalt : 'Rezensionen ansehen') . '</a>';
+    }
+
+    /** Art einer Amazon-Adresse ohne Produktseite: „startseite“ (Amazon-Startseite), „rezension“ (/product-reviews/ASIN, /dp/ASIN#customerReviews), „liste“ (steht in der Ausnahmeliste „Amazon-Seite, kein Produkt“), sonst leer. */
+    public static function seite_art(string $url): string {
+        $url = html_entity_decode(trim($url));
+        if (!preg_match('#^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com|ca|com\.au)(/[^?\#]*)?(\?[^\#]*)?(\#.*)?$#i', $url, $m)) { return ''; }
+        $pfad = $m[2] ?? '';
+        if (preg_match('#^/product-reviews/[A-Za-z0-9]{10}(?:/|$)#i', $pfad) || (preg_match('#/dp/[A-Za-z0-9]{10}#i', $pfad) && stripos($m[4] ?? '', 'customerReviews') !== false)) { return 'rezension'; }
+        if ($pfad === '' || $pfad === '/') { return 'startseite'; }
+        foreach (preg_split('/\R/', (string) get_option('sab_amz_seiten', '')) as $z) {
+            $z = trim($z); if ($z === '') { continue; }
+            $kern = preg_replace('#[?\#].*$#', '', $url);
+            if ($z === $url || $z === $kern || (substr($z, -1) === '*' && strpos($url, rtrim($z, '*')) === 0)) { return 'liste'; }
+        }
+        return '';
+    }
+
+    /** Ergänzt an Amazon-Startseiten- und Rezensionslinks fehlende Partner-ID des Landes und rel="sponsored nofollow noopener". @return array{0:string,1:int} */
+    public static function seitenlinks_ergaenzen(string $c): array {
+        $n = 0;
+        $c2 = preg_replace_callback('#<a\b([^>]*)>#i', function ($m) use (&$n) {
+            if (!preg_match('#href=(["\'])(.*?)\1#is', $m[1], $h)) { return $m[0]; }
+            $u = html_entity_decode($h[2]); $art = self::seite_art($u);
+            if ($art !== 'startseite' && $art !== 'rezension') { return $m[0]; }
+            $land = preg_match('#amazon\.(es|de|fr|it|co\.uk|com\.au|com|ca)#i', $u, $lm) ? strtolower($lm[1]) : ''; $tag = $land !== '' ? self::tag($land) : '';
+            $neu_u = $u;
+            if ($tag !== '' && !preg_match('#[?&]tag=#', $u)) { $anker = ''; if (strpos($u, '#') !== false) { [$u0, $anker] = explode('#', $u, 2); $anker = '#' . $anker; } else { $u0 = $u; } $neu_u = $u0 . (strpos($u0, '?') === false ? '?' : '&') . 'tag=' . rawurlencode($tag) . $anker; }
+            $attr = $m[1];
+            if ($neu_u !== $u) { $attr = str_replace($h[0], 'href=' . $h[1] . esc_url_raw($neu_u) . $h[1], $attr); }
+            if (preg_match('#\brel=(["\'])(.*?)\1#i', $attr, $r)) { $rel = $r[2]; foreach (['sponsored', 'nofollow', 'noopener'] as $w) { if (!preg_match('#\b' . $w . '\b#i', $rel)) { $rel .= ' ' . $w; } } $attr = str_replace($r[0], 'rel=' . $r[1] . trim($rel) . $r[1], $attr); }
+            else { $attr .= ' rel="sponsored nofollow noopener"'; }
+            if ($attr === $m[1]) { return $m[0]; }
+            $n++; return '<a' . $attr . '>';
+        }, $c);
+        return [is_string($c2) ? $c2 : $c, $n];
+    }
+
     // ---------- Eigene Klickmessung (ohne Cookies, ohne IP, ohne Besucher-Kennung) ----------
 
     private static function klicktabelle(): string { global $wpdb; return $wpdb->prefix . 'sab_klicks'; }
@@ -2720,7 +2767,7 @@ JS;
                 $tx = self::nur_textlink_neben_bild((string) $c); $vor_n = count($alle);
                 if (preg_match_all('#https?://(?:www\.)?' . $host . '/(?:[^"\'\s<>]*/)?(?:dp|gp/product)/([A-Za-z0-9]{10})#', $c, $m)) { $alle = array_merge($alle, array_map('strtoupper', $m[1])); }   // feste Links
                 // alle Plugin-Shortcodes mit asin="..." (bild, link, produkt) und die AAWP-Zeilen (fields/box/link, mehrere ASINs mit Komma)
-                if (preg_match_all('/\[amz_(?:bild|link|produkt|karte|titel|hinweis)\b[^\]]*?\basin=["\']([A-Za-z0-9]{10})["\']/', $c, $m)) { $alle = array_merge($alle, array_map([__CLASS__, 'asin'], $m[1])); }   // auch Karten ([amz_karte]) und Titel, einfache Anführungszeichen
+                if (preg_match_all('/\[amz_(?:bild|link|produkt|karte|titel|hinweis|rezension)\b[^\]]*?\basin=["\']([A-Za-z0-9]{10})["\']/', $c, $m)) { $alle = array_merge($alle, array_map([__CLASS__, 'asin'], $m[1])); }   // auch Karten ([amz_karte]) und Titel, einfache Anführungszeichen
                 if (preg_match_all('/\[(?:aawp|amazon)\b[^\]]*\b(?:fields|box|link)=["\']([^"\']+)["\']/', $c, $m)) {
                     foreach ($m[1] as $liste) { foreach (explode(',', $liste) as $a) { $a = substr(self::asin($a), 0, 10); if (strlen($a) === 10) { $alle[] = $a; } } }
                 }
@@ -4703,6 +4750,7 @@ JS;
         $c0 = $c; $c = self::kurzlink_nachbarhilfe($c); if (!is_string($c)) { $c = $c0; self::$umbau_abw[] = 'Schritt kurzlink_nachbarhilfe abgebrochen (PCRE-Grenze), Artikel nicht vollständig geprüft'; }
         $c0 = $c; $c = self::tabellen_umbau($c, $nur); if (!is_string($c)) { $c = $c0; self::$umbau_abw[] = 'Schritt tabellen_umbau abgebrochen (PCRE-Grenze), Artikel nicht vollständig geprüft'; }
         $n = 0; $skip = 0;
+        if ($nur === '') { [$c_s, $n_s] = self::seitenlinks_ergaenzen($c); $c = $c_s; $n += $n_s; }   // Startseiten- und Rezensionslinks: Partner-ID des Landes und rel ergänzen
         $c = preg_replace_callback('#<a\b([^>]*)>(.*?)</a>#is', function ($m) use (&$n, &$skip, $nur) {
             if (!preg_match('#href=(["\'])(.*?)\1#is', $m[1], $h)) { return $m[0]; }
             $u = self::umbau_url($h[2], true);
@@ -4932,6 +4980,7 @@ JS;
         foreach ($m as $x) {
             $u = html_entity_decode($x[2][0]);
             if (isset($gesehen[$u]) || self::umbau_url($u, true)) { continue; }
+            if (($sa_ = self::seite_art(self::kurzlink_aufloesen($u))) !== '') { $gesehen[$u] = 1; $ok_liste .= '<li><code style="word-break:break-all">' . esc_html($u) . '</code> <small>(' . ($sa_ === 'rezension' ? 'Rezensionsseite eines Produkts, gültiger Produktlink' : 'Amazon-Seite, kein Produkt, gewollt') . ')</small></li>'; continue; }
             if (self::kurz_ok($u)) { $gesehen[$u] = 1; $ok_liste .= '<li><code style="word-break:break-all">' . esc_html($u) . '</code> <form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="kurzlink_ok"><input type="hidden" name="sab_aus" value="1"><input type="hidden" name="sab_kurz" value="' . esc_attr($u) . '">' . $rueck . '<button class="button button-small">Wieder prüfen</button></form></li>'; continue; }
             $gesehen[$u] = 1;
             $vor = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', substr($c, max(0, $x[0][1] - 500), min(500, $x[0][1])))))));
@@ -6857,6 +6906,7 @@ JS;
                 update_option('sab_btn_b', sanitize_text_field(wp_unslash($_POST['sab_btn_b'] ?? '')), false);
                 update_option('sab_mail_an', sanitize_email(wp_unslash($_POST['sab_mail_an'] ?? '')), false);
                 update_option('sab_update_mail', !empty($_POST['sab_update_mail']) ? '1' : '0', false);
+                update_option('sab_amz_seiten', sanitize_textarea_field(wp_unslash($_POST['sab_amz_seiten'] ?? '')), false);
                 update_option('sab_hinweis_text', sanitize_text_field(wp_unslash($_POST['sab_hinweis_text'] ?? '')), false);
                 delete_transient('sab_token_' . md5(self::LAENDER['de'][1]));
                 delete_transient('sab_token_' . md5(self::LAENDER['com'][1]));
@@ -7306,6 +7356,7 @@ JS;
                . '> Produkte, die Amazon nicht mehr kennt, trotzdem umbauen: Die Stelle zeigt „Momentan nicht verfügbar“, getauscht wird später mit Vorrang im Reiter Austausch</label></td></tr>'
                . '<tr><th>Nicht verfügbar</th><td><label><input type="checkbox" name="sab_strikt" value="1"' . (get_option('sab_strikt') === '1' ? ' checked' : '')
                . '> Produkte, die Amazons Schnittstelle als „nicht verfügbar“ meldet, wie ausgefallen behandeln und durch den Ersatz aus der Liste ersetzen</label><p class="description">Aus lassen, wenn Amazon die Lieferbarkeit für einen anderen Lieferort prüft als deinen: Dann würde ein lieferbares Produkt fälschlich ersetzt.</p></td></tr>'
+               . '<tr><th>Amazon-Seite (kein Produkt)</th><td><textarea name="sab_amz_seiten" rows="3" class="large-text code" placeholder="https://www.amazon.de/b?node=123*">' . esc_textarea((string) get_option('sab_amz_seiten', '')) . '</textarea><p class="description">Ausnahmeliste: Amazon-Adressen ohne Produkt, die gewollt sind (eine pro Zeile, am Ende * erlaubt). Die Amazon-Startseite und Rezensionsseiten (/product-reviews/ASIN) gelten ohnehin als in Ordnung; das Plugin ergänzt dort beim Umbau die Partner-ID des Landes und <code>rel="sponsored nofollow noopener"</code>. Empfohlen: voller Link <code>https://www.amazon.de/?tag=ID</code> statt Kurzlink. Baustein für Rezensionen: <code>[amz_rezension asin="ASIN" land="co.uk"]Rezensionen ansehen[/amz_rezension]</code>. Es werden keine Rezensionstexte gespeichert.</p></td></tr>'
                . '<tr><th>WordPress-Mails zu Plugin-Updates</th><td><label><input type="checkbox" name="sab_update_mail" value="1"' . (get_option('sab_update_mail') === '1' ? ' checked' : '') . '> Mails über erfolgreiche automatische Plugin- und Theme-Updates weiterhin senden</label><p class="description">Aus (Standard): WordPress verschickt keine Mail mehr über erfolgreiche automatische Plugin- und Theme-Updates. Das gilt für alle Plugins und Themes dieser Webseite, nicht nur für dieses. Mails über fehlgeschlagene Updates bleiben an.</p></td></tr>'
                . '<tr><th>Wochenbericht</th><td><input type="email" name="sab_mail_an" class="regular-text" placeholder="leer = keine Mail" value="' . esc_attr((string) get_option('sab_mail_an', '')) . '"><p class="description">Einmal pro Woche eine Mail mit Klicks, Ausfällen und Seiten mit vielen Partnerlinks. An dieselbe Adresse gehen sofort Meldungen, wenn ein Produkt ausfällt oder die Amazon-Schnittstelle nicht antwortet.</p></td></tr>'
                . '<tr><th>Preis-Test</th><td><label><input type="checkbox" name="sab_preis_test" value="1"' . (get_option('sab_preis_test') === '1' ? ' checked' : '')
