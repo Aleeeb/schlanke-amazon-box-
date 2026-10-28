@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.50
+ * Version: 0.89.51
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.50';
+    const VERSION = '0.89.51';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3001,7 +3001,7 @@ JS;
 
     public static function tabelle(): void {
         global $wpdb;
-        if (!isset($wpdb) || get_option('sab_db_version') === '4') { return; }
+        if (!isset($wpdb) || get_option('sab_db_version') === '5') { return; }
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $t = self::klicktabelle();
         dbDelta("CREATE TABLE $t (
@@ -3015,12 +3015,15 @@ JS;
             pfad VARCHAR(190) NOT NULL DEFAULT '',
             anker VARCHAR(80) NOT NULL DEFAULT '',
             ziel VARCHAR(10) NOT NULL DEFAULT '',
+            herkunft CHAR(2) NOT NULL DEFAULT '',
+            ziel_land VARCHAR(6) NOT NULL DEFAULT '',
+            ziel_asin CHAR(10) NOT NULL DEFAULT '',
             zurueck_s INT UNSIGNED NULL,
             PRIMARY KEY (id),
             KEY asin (asin),
             KEY kid (kid)
         ) {$wpdb->get_charset_collate()};");
-        update_option('sab_db_version', '4', false);
+        update_option('sab_db_version', '5', false);
     }
 
     public static function rest(): void {
@@ -3063,6 +3066,9 @@ JS;
                     'var' => substr(preg_replace('/[^A-D]/', '', (string) ($d['var'] ?? '')), 0, 1),
                     'typ' => $typ, 'pfad' => substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190),
                     'anker' => substr(preg_replace('/[^A-Za-z0-9_.:-]/', '', (string) ($d['anker'] ?? '')), 0, 80),
+                    'herkunft' => preg_match('/^[A-Z]{2}$/', (string) ($d['h'] ?? '')) ? (string) $d['h'] : '',   // Land des Besuchers, nur aus Zeitzone/Browsersprache (keine IP, kein Cookie)
+                    'ziel_land' => preg_match('/^(?:de|es|fr|it|co\.uk|com|ca|com\.au)$/', (string) ($d['zl'] ?? '')) ? (string) $d['zl'] : '',   // Amazon-Land, in das der Klick wirklich ging
+                    'ziel_asin' => preg_match('/^[A-Z0-9]{10}$/', (string) ($d['za'] ?? '')) ? (string) $d['za'] : '',   // tatsächlich ausgelieferte ASIN (leer bei Suchlink)
                     'ziel' => preg_match('/^(com|ca|com\.au):[as]$/', (string) ($d['z'] ?? '')) ? (string) $d['z'] : '',   // Länder-Umschaltung: Zielstore und a = ASIN im Land, s = Suche
                 ]);
             }
@@ -3076,10 +3082,13 @@ JS;
         $url = esc_url_raw(rest_url('sab/v1/m'));
         echo '<script>(function(){var U=' . wp_json_encode($url) . ',p=null;'
            . 'function S(o){try{navigator.sendBeacon(U,new Blob([JSON.stringify(o)],{type:"text/plain"}))}catch(e){}}'
+           . 'function L(){var t="",l=(navigator.languages&&navigator.languages[0])||navigator.language||"",x=l.split("-")[1]||"";try{t=Intl.DateTimeFormat().resolvedOptions().timeZone||""}catch(e){}'
+           . 'var m={"Europe/Berlin":"DE","Europe/Vienna":"AT","Europe/Zurich":"CH","Europe/Madrid":"ES","Atlantic/Canary":"ES","Europe/Paris":"FR","Europe/Rome":"IT","Europe/London":"GB","Europe/Dublin":"IE","Europe/Amsterdam":"NL","Europe/Brussels":"BE","Europe/Luxembourg":"LU","Europe/Lisbon":"PT","Europe/Warsaw":"PL","Europe/Prague":"CZ","Europe/Stockholm":"SE","Europe/Copenhagen":"DK","Europe/Oslo":"NO","Europe/Helsinki":"FI","Europe/Budapest":"HU","Europe/Athens":"GR","America/New_York":"US","America/Chicago":"US","America/Denver":"US","America/Los_Angeles":"US","America/Toronto":"CA","America/Vancouver":"CA","America/Mexico_City":"MX","America/Sao_Paulo":"BR","America/Argentina/Buenos_Aires":"AR","America/Bogota":"CO","America/Santiago":"CL","America/Lima":"PE","Australia/Sydney":"AU","Australia/Melbourne":"AU","Australia/Brisbane":"AU","Australia/Perth":"AU","Pacific/Auckland":"NZ"};'
+           . 'return m[t]||(/^[A-Za-z]{2}$/.test(x)?x.toUpperCase():"")}'
            . 'function H(a){var r="",h=document.querySelectorAll("h2[id],h3[id],h4[id]"),i;for(i=0;i<h.length;i++){if(h[i].compareDocumentPosition(a)&4)r=h[i].id}return r}'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
-           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||""});'
+           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
            . 'p={id:id,t:Date.now(),h:false}},true);'
            . 'document.addEventListener("visibilitychange",function(){if(!p)return;'
            . 'if(document.visibilityState==="hidden"){p.h=true;return}'
@@ -3451,6 +3460,8 @@ JS;
         $namen = self::produkte(); $trotz = (array) get_option('sab_trotz', []);
         $gz = 0; foreach ($zeilen as $r) { $gz += (int) $r['z']; }
         $us = (array) get_option('sab_update_status', []);
+        $lz = [];   // je Hauptprodukt: Besucherland, Zielland, ausgelieferte ASIN
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT asin, herkunft, ziel_land, ziel_asin, COUNT(*) n FROM $t WHERE ts >= %s AND (herkunft <> '' OR ziel_land <> '') GROUP BY asin, herkunft, ziel_land, ziel_asin ORDER BY n DESC", $ab), ARRAY_A) as $r) { $lz[$r['asin']][] = $r; }
 
         $h = '<h2>Statistik</h2><style>.sab-st-k{display:flex;gap:10px;align-items:center;padding:10px;cursor:pointer;list-style:none}.sab-st-k::-webkit-details-marker{display:none}.sab-st-p{background:#fff;border:1px solid #dcdcde;border-radius:8px;margin:0 0 8px}.sab-st-p[open]{border-color:#2271b1}.sab-st-z{flex:1;min-width:0}.sab-st-z b{display:block;overflow-wrap:anywhere}.sab-st-z small{color:#50575e}.sab-st-n{font-size:20px;font-weight:700;text-align:right;min-width:48px}.sab-st-n small{display:block;font-size:11px;font-weight:400;color:#50575e}.sab-st-s{padding:0 10px 10px 10px;border-top:1px solid #f0f0f1}.sab-st-s li{margin:6px 0;overflow-wrap:anywhere}.sab-sc{display:inline-block;padding:1px 7px;border-radius:10px;background:#f0f6fc;color:#0a4b78;font-size:12px;font-weight:600}</style>'
           . '<p>Zeitraum: ';
@@ -3483,7 +3494,16 @@ JS;
                 $h .= '<li><a href="' . esc_url($url) . '" target="_blank" rel="noopener">' . esc_html($titel !== '' ? $titel : ($pf !== '' ? $pf : '(unbekannte Seite)')) . '</a> &ndash; <strong>' . (int) $sr['n'] . '</strong>'
                     . ($an !== '' ? ' <small>(Stelle: ' . esc_html($an) . ')</small>' : ' <small>(Stelle nicht erfasst)</small>') . '</li>';
             }
-            $h .= '</ol></div></details>';
+            $h .= '</ol>';
+            if (!empty($lz[$a])) {
+                $h .= '<p class="description" style="margin:10px 0 2px">Woher die Besucher kamen und wohin der Klick ging (Land aus Zeitzone/Sprache, keine IP):</p><table class="widefat striped" style="max-width:640px"><thead><tr><th>Besucher aus</th><th>Amazon-Land</th><th>ausgelieferte ASIN</th><th>Klicks</th></tr></thead><tbody>';
+                foreach (array_slice($lz[$a], 0, 20) as $lr) {
+                    $za = (string) $lr['ziel_asin'];
+                    $h .= '<tr><td>' . esc_html($lr['herkunft'] !== '' ? $lr['herkunft'] : '?') . '</td><td>' . esc_html($lr['ziel_land'] !== '' ? 'amazon.' . $lr['ziel_land'] : '?') . '</td><td>' . ($za === '' ? '<em>Suche</em>' : '<code>' . esc_html($za) . '</code>' . ($za === $a ? '' : ' <small>(andere ASIN)</small>')) . '</td><td>' . (int) $lr['n'] . '</td></tr>';
+                }
+                $h .= '</tbody></table>';
+            }
+            $h .= '</div></details>';
         }
         return $h;
     }

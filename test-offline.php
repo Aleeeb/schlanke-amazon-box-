@@ -759,6 +759,8 @@ $mS = new ReflectionProperty('SAB', 'genutzt'); $mS->setAccessible(true); $mS->s
 $GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false; ob_start(); SAB::messskript(); $s1 = ob_get_clean();
 $GLOBALS['loggedin'] = true; $GLOBALS['admin'] = true; ob_start(); SAB::messskript(); $s2 = ob_get_clean();
 ok(strpos($s1, 'sendBeacon') !== false && $s2 === '', 'Statistik: Messskript für Besucher ja, für angemeldete Redakteure nein');
+ok(strpos($s1, 'zl:') !== false && strpos($s1, 'za:') !== false && strpos($s1, 'h:L()') !== false, 'Statistik: Messskript meldet Herkunftsland, Zielland und ausgelieferte ASIN');
+file_put_contents(sys_get_temp_dir() . '/sab_mess.js', preg_replace('#</?script>#', '', $s1));
 $GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false; $mS->setValue(null, false);
 
 // ---- 0.51.4: Umbau übernimmt Standard-Knopftext nicht ----
