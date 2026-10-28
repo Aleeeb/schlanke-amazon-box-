@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.51
+ * Version: 0.89.52
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.51';
+    const VERSION = '0.89.52';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -994,10 +994,9 @@ final class SAB {
     public static function alarm_berechnen(): array {
         $land = self::land(''); $d = (array) self::uebersicht_daten($land, false); $v = (array) get_option('sab_verlauf', []); $trotz = (array) get_option('sab_trotz', []); $alt = (array) get_option('sab_alarm', []); $neu = [];
         foreach (self::alle_asins() as $a) {
-            $x = $d['items'][$a] ?? null; if (!$x || !empty($d['fehler'])) { continue; }
-            $grund = '';
-            if (empty($trotz[$a]) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') && !self::unklar($x)) { $grund = 'nicht mehr lieferbar'; }
-            elseif (($f = self::alarm_fall((array) ($v[$a] ?? []))) !== null) { $grund = 'Score von ' . $f[0] . ' auf ' . $f[1] . ' gefallen'; }
+            if (!empty($d['fehler'])) { continue; }
+            // Rot oben nur, wenn Amazon das Produkt nicht mehr kennt (Bildausfall meldet bild_hinweis). Score-Abfall und „nicht lieferbar“ sind nur Anlass zum Tausch und laufen über den Reiter Austausch.
+            $grund = isset($d['items'][$a]) || !self::asin_weg((string) $a, $land) ? '' : 'Amazon kennt das Produkt nicht mehr';
             if ($grund === '') { continue; }
             $er = self::ersatz_fuer($a, $land); arsort($er); $er = array_keys($er);   // „neu“ vor „geprüft“ sortiert alphabetisch, daher unten gezielt geprüfte zuerst
             $ge = array_values(array_filter($er, fn($b) => (self::ersatz_fuer($a, $land)[$b] ?? '') === 'geprüft'));
@@ -1007,7 +1006,7 @@ final class SAB {
         return $neu;
     }
 
-    /** Roter Hinweis auf den Seiten des Plugins, solange Alarme offen sind. */
+    /** Roter Hinweis auf den Seiten des Plugins, solange Produkte offen sind, die Amazon nicht mehr kennt. */
     public static function alarm_hinweis(): void {
         if (!function_exists('current_user_can') || !current_user_can('manage_options') || strpos((string) ($_GET['page'] ?? ''), 'sab') !== 0) { return; }
         $al = (array) get_option('sab_alarm', []); if (!$al) { return; }
@@ -1015,7 +1014,7 @@ final class SAB {
         foreach (array_slice($al, 0, 10, true) as $a => $e) {
             $li .= '<li><code>' . esc_html((string) $a) . '</code> ' . esc_html((string) ($namen[$a] ?? '')) . ': <strong>' . esc_html((string) $e['grund']) . '</strong> · ' . ($e['ersatz'] ? 'Ersatz bereit: ' . esc_html(implode(', ', $e['ersatz'])) : '<span style="color:#a00">kein Ersatz in der Datenbank</span>') . '</li>';
         }
-        echo '<div class="notice notice-error"><p><strong>Alarm: ' . count($al) . ' Produkt(e) mit starkem Score-Absturz oder nicht lieferbar.</strong> Tausch unter <a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Austausch</a> (mit Freigabe und Rückgängig).</p><ul style="margin-left:18px;list-style:disc">' . $li . '</ul></div>';
+        echo '<div class="notice notice-error"><p><strong>Alarm: ' . count($al) . ' Produkt(e), die Amazon nicht mehr kennt.</strong> Tausch unter <a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Austausch</a> (mit Freigabe und Rückgängig).</p><ul style="margin-left:18px;list-style:disc">' . $li . '</ul></div>';
     }
 
     /** Produkte ohne Handdaten oder mit Handdaten älter als 30 Tage: [ASIN => Hinweis]. */
