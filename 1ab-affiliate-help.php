@@ -2,7 +2,8 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.45
+ * Version: 0.89.46
+ * Requires at least: 5.0
  * Requires PHP: 7.4
  */
 
@@ -48,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.45';
+    const VERSION = '0.89.46';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2998,7 +2999,7 @@ JS;
         $t = self::klicktabelle();
         $out = [];
         foreach ((array) $wpdb->get_results("SELECT asin, COUNT(*) n, SUM(typ='bild') b, SUM(typ<>'bild') x, SUM(zurueck_s IS NOT NULL) z, AVG(zurueck_s) m FROM $t GROUP BY asin", ARRAY_A) as $r) {
-            $out[$r['asin']] = $r;
+            $out[(string) ($r['asin'] ?? '')] = $r;
         }
         return $out;
     }
@@ -3249,7 +3250,7 @@ JS;
             'liefer'  => 'Durchschnittliche Lieferzeit in Tagen zu den eingetragenen Hauptstädten: 1 Tag oder weniger ergibt 1, 7 Tage oder mehr 0. Ohne Angabe 0,5.',
         ];
         foreach (self::SCORE_NAMEN as $k => $name) {
-            $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="1000000" name="sab_w[' . esc_attr($k) . ']" value="' . (int) $w[$k] . '" style="width:100px"> <small>(' . round(100 * $w[$k] / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k]) . '</small></td></tr>';
+            $h .= '<tr><td><strong>' . esc_html($name) . '</strong></td><td><input type="number" min="0" max="1000000" name="sab_w[' . esc_attr($k) . ']" value="' . (int) ($w[$k] ?? 0) . '" style="width:100px"> <small>(' . round(100 * ($w[$k] ?? 0) / max(1, $summe)) . ' %)</small></td><td><small>' . esc_html($erkl[$k] ?? '') . '</small></td></tr>';
         }
         $h .= '</tbody></table><p><button class="button button-primary">Gewichte speichern</button> <button class="button" name="sab_score_std" value="1">Auf Standard zurücksetzen</button> <span class="description">Standard: Rang 27, Buy Box 18, Angebot 13, Preis 9, Streichpreis 9, Deal 4, Bewertung 10, Konstanz 10.</span></p></form>';
         $h .= '<h3 style="margin-top:2em">Größe der Kategorien</h3><p class="description">Ein Rang zählt im Verhältnis zur Zahl der Produkte der Kategorie (Platz 69 von 800 ist weniger als Platz 69 von 500.000). Amazon liefert die Größe nicht, sie lässt sich aber auf der Kategorie-Seite („x Ergebnisse“) ablesen. Eine Zeile pro Kategorie: <code>Kategoriename | Anzahl Produkte</code>, z. B. <code>Jardín | 1500000</code>. Ohne Angabe schätzt das Plugin die Größe: Jardín fest 1,5 Mio., andere Kategorien aus dem doppelten größten Rang deiner Produkte (mindestens 2000). Eingetragene Zahlen haben Vorrang.</p>'
@@ -3342,7 +3343,7 @@ JS;
         $zr = (array) $wpdb->get_results($wpdb->prepare("SELECT ziel, COUNT(*) n FROM $t WHERE ts >= %s AND ziel <> '' GROUP BY ziel ORDER BY n DESC", $ab), ARRAY_A);
         if ($zr) {
             $zn = ['com' => 'USA', 'ca' => 'Kanada', 'com.au' => 'Australien/Neuseeland']; $zs = 0; $zz = '';
-            foreach ($zr as $r) { [$lz, $art] = explode(':', (string) $r['ziel']) + ['', '']; $zs += (int) $r['n']; $zz .= '<tr><td>' . esc_html($zn[$lz] ?? $lz) . '</td><td>' . ($art === 'a' ? 'direkt zur ASIN im Land' : 'zur Suche im Land') . '</td><td>' . (int) $r['n'] . '</td></tr>'; }
+            foreach ($zr as $r) { [$lz, $art] = explode(':', (string) ($r['ziel'] ?? '')) + ['', '']; $zs += (int) $r['n']; $zz .= '<tr><td>' . esc_html($zn[$lz] ?? $lz) . '</td><td>' . ($art === 'a' ? 'direkt zur ASIN im Land' : 'zur Suche im Land') . '</td><td>' . (int) $r['n'] . '</td></tr>'; }
             $ziel_h = '<h3 style="margin-top:1.5em">Umgeleitete Klicks (Besucher aus anderen Ländern)</h3><p class="description">' . $zs . ' von ' . $summe . ' Klicks (' . ($summe ? round(100 * $zs / $summe) : 0) . ' %) gingen über die Länder-Umschaltung zum Amazon des Besucherlandes.</p><table class="widefat striped" style="max-width:560px"><thead><tr><th>Ziel</th><th>wohin</th><th>Klicks</th></tr></thead><tbody>' . $zz . '</tbody></table>';
         } elseif (get_option('sab_geo') === '1') { $ziel_h = '<h3 style="margin-top:1.5em">Umgeleitete Klicks</h3><p class="description">Die Länder-Umschaltung ist an, in diesem Zeitraum gab es aber noch keine umgeleiteten Klicks.</p>'; }
         // Daten je Produkt und je Seite
@@ -4540,10 +4541,10 @@ JS;
             $klick = $k ? '<span title="Bild ' . (int) $k['b'] . ', Text/Button ' . (int) $k['x'] . '; zurückgekommen ' . (int) $k['z'] . '">' . $nk . '</span>' : '0';
             $mehr = '<details><summary>Details</summary><div style="max-width:420px;font-size:12px">'
                   . '<p><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener">' . esc_html($x['titel'] ?? '') . '</a></p>'
-                  . '<p>Verkäufer: ' . esc_html($x['verkaeufer'] ?: '–') . '</p>'
+                  . '<p>Verkäufer: ' . esc_html(($x['verkaeufer'] ?? '') ?: '–') . '</p>'
                   . '<p>Kategorie: ' . esc_html((string) ($x['kategorie'] ?? '–')) . ($sch !== '' ? '<br><em>' . esc_html($sch) . '</em>' : '') . '</p>'
                   . '<p>' . self::lieferzelle($x) . '</p>'
-                  . (($x['preis'] === '' || $x['verkaeufer'] === '') ? '<p style="color:#a00">' . esc_html($x['diag'] ?? '') . '</p><details><summary>Rohdaten</summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>' : '')
+                  . ((($x['preis'] ?? '') === '' || ($x['verkaeufer'] ?? '') === '') ? '<p style="color:#a00">' . esc_html($x['diag'] ?? '') . '</p><details><summary>Rohdaten</summary><code style="font-size:10px;word-break:break-all">' . esc_html((string) ($x['roh'] ?? '')) . '</code></details>' : '')
                   . '</div></details>';
             return '<tr><td class="sab-name"><div style="display:flex;gap:8px;align-items:center">' . $bild . '<div><strong>' . esc_html(($namen[$asin] ?? '') ?: mb_substr((string) ($x['titel'] ?? ''), 0, 60)) . '</strong><br><small><a href="' . esc_url($dp . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a></small></div></div></td>'
                . '<td data-v="' . $sc . '" title="Zahl und Balken: Score heute (etwa 0 bis 100). Die kleinen Striche darunter: Score an den einzelnen Tagen, ein Strich pro Tag seit der ersten Prüfung."><span class="sab-bal" style="width:' . max(4, (int) round(max(0, min(100, $sc)) * 0.6)) . 'px;background:' . $farbe . '"></span><strong style="color:' . $farbe . '">' . $sc . '</strong>' . (!empty($x['bonus']) ? ' <small style="color:#6a3fb0;font-weight:700" title="Von Hand vergebener Bonus, im Score enthalten">&#9998; ' . ($x['bonus'] > 0 ? '+' : '') . (int) $x['bonus'] . ' manuell</small>' : '') . (isset($x['k_anteil']) ? '<br><small title="Tage mit Score ab ' . self::K_SCHWELLE . ' in den letzten ' . (int) $x['k_tage'] . ' Tagen">' . round(100 * $x['k_anteil']) . ' % gut</small>' : '') . (!empty($x['k_reihe']) ? '<br>' . self::sparkline($x['k_reihe']) : '') . '</td>'
@@ -4563,8 +4564,8 @@ JS;
            . '<p class="description"><strong>Reihenfolge:</strong> nach Priorität. Priorität = Dringlichkeit (0 bis 100: nicht lieferbar oder Status unklar = 100, sonst schwacher Score, sehr lange Lieferzeit oder wenig Sterne) mal Zahl der Seiten, auf denen das Produkt steht. Oben steht also, was auf vielen Seiten dringend geprüft werden muss. Spaltenkopf anklicken, um anders zu sortieren.</p>'
            . '<p><button class="button" name="sab_neu" value="1">Übersicht neu laden</button></p>';
         $h .= self::stand_hinweis($d);
-        if ($d['fehler']) { $h .= '<div class="notice notice-warning inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
-        if ($d['fehler']) { return $h; }
+        if (!empty($d['fehler'])) { $h .= '<div class="notice notice-warning inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
+        if (!empty($d['fehler'])) { return $h; }
         if (get_option('sab_uebersicht_teilfehler', '') !== '') { $h .= '<div class="notice notice-warning inline"><p><strong>Abruf bei Amazon unvollständig:</strong> ' . esc_html((string) get_option('sab_uebersicht_teilfehler', '')) . '</p></div>'; }
         $kz = self::klickzahlen(); $fund = self::fundstellen(self::alle_asins()); $dp = 'https://' . self::LAENDER[$land][0] . '/dp/';
         $h .= self::uebersicht_css() . '<!--SABPAGER-->';
