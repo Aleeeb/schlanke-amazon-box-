@@ -1626,4 +1626,10 @@ $GLOBALS['wpdb'] = $wpdb_vor; delete_transient('sab_alle_asins');
 // 0.89.34: Mail „automatisch ersetzt“ mit Backend- und Frontend-Links
 $mt = SAB::auto_mail_text(['B0ALT00001' => ['neu' => 'B0NEU00001', 'alt_name' => 'Alter Zaun', 'neu_name' => 'Neuer Zaun', 'seiten' => [['titel' => 'Artikel A', 'url' => 'https://x.de/a/?sab_zeige=B0NEU00001', 'edit' => 'https://x.de/wp-admin/post.php?post=1&action=edit']]]], 'x.de', 'https://x.de/wp-admin/admin.php?page=sab-austausch#sab-auto-log');
 ok(strpos($mt, 'Seite: x.de') !== false && strpos($mt, 'page=sab-austausch#sab-auto-log') !== false && strpos($mt, 'https://x.de/a/?sab_zeige=B0NEU00001') !== false && strpos($mt, 'Alter Zaun (B0ALT00001) => Neuer Zaun (B0NEU00001)') !== false, 'Auto-Tausch-Mail: Seite, Backend-Link, Frontend-Link, Namen');
+// 0.89.35: „Ersatz gesucht“ wird vom Plugin selbst gemerkt
+$g35 = SAB::ersatz_gesucht_merken([['B0GESUCHT1', 'Schneckenzaun Alt', 'Text davor', 'Garten', 0, 'Schneckenzaun Alt', 3], ['B0GENUG0001', 'Gut', '', '', 5, '', 1]], ['Schneckenzäune' => ['B0GESUCHT1']], 'co.uk');
+ok(isset($g35['B0GESUCHT1']) && !isset($g35['B0GENUG0001']) && $g35['B0GESUCHT1']['art'] === 'Schneckenzäune' && $g35['B0GESUCHT1']['land'] === 'co.uk' && $g35['B0GESUCHT1']['seiten'] === 3, 'Ersatz gesucht: ohne Kandidaten gemerkt, mit genug Kandidaten nicht, Produktart aus Gruppe');
+$g36 = SAB::ersatz_gesucht_merken([['B0GESUCHT1', 'Schneckenzaun Alt', '', '', 4, '', 3]], [], 'co.uk');
+ok(!isset($g36['B0GESUCHT1']), 'Ersatz gesucht: Eintrag fällt weg, sobald wieder Kandidaten da sind');
+unset($GLOBALS['opt']['sab_ersatz_gesucht']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

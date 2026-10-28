@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.34
+ * Version: 0.89.35
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.34';
+    const VERSION = '0.89.35';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6002,8 +6002,35 @@ JS;
 
     /** Eine Austausch-Karte zu einem Produkt (Kandidaten, eigene ASIN, Suchknöpfe); gemeinsam für den Reiter Austausch und den Umbau. */
     /** Fertiger Prompt für die Mac-/PC-Sitzung: je Produkt mit zu wenig Vorschlägen alle Angaben, Regeln und das Ausgabeformat; zum Kopieren mit einem Klick. */
+    /** Merkt sich Produkte, für die der Austausch (fast) keinen passenden Ersatz findet („Ersatz gesucht“); Einträge mit wieder genug Kandidaten fallen weg. Schreibt nur bei Änderung. @param array<int,array> $liste Zeilen wie in ersatz_prompt_html */
+    public static function ersatz_gesucht_merken(array $liste, array $gruppen = [], string $land = ''): array {
+        $alt = (array) get_option('sab_ersatz_gesucht', []); $neu = $alt; $jetzt = time();
+        foreach ($liste as $r) {
+            $a = (string) $r[0]; $art = ''; foreach ($gruppen as $gn => $asins) { if (in_array($a, $asins, true)) { $art = (string) $gn; break; } }
+            if ((int) $r[4] >= 2) { unset($neu[$a]); continue; }
+            $neu[$a] = ['name' => mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r[1])), 0, 120), 'art' => $art !== '' ? $art : (string) $r[3], 'land' => $land, 'seiten' => (int) $r[6], 'kontext' => mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r[2])), 0, 120), 'n' => (int) $r[4], 'ts' => (int) ($alt[$a]['ts'] ?? $jetzt)];
+        }
+        foreach ($neu as $a => $e) { if ($jetzt - (int) $e['ts'] > 45 * DAY_IN_SECONDS) { unset($neu[$a]); } }
+        if ($neu != $alt) { update_option('sab_ersatz_gesucht', $neu, false); }
+        return $neu;
+    }
+
+    /** Abschnitt „Ersatz gesucht“ für die Helferaufgaben: Liste und kopierbare Zeilen. */
+    private static function ersatz_gesucht_html(array $gesucht): string {
+        $im_bestand = array_flip(self::alle_asins()); $gesucht = array_filter($gesucht, fn($k) => isset($im_bestand[$k]), ARRAY_FILTER_USE_KEY);
+        if (!$gesucht) { return ''; }
+        $land = self::land(''); $host = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST))); $z = '';
+        $h = '<h3 style="margin-top:2em">Ersatz gesucht (' . count($gesucht) . ')</h3><p class="description">Hier hat das Plugin selbst festgestellt, dass der Bestand und die Ersatz-Datenbank keinen (oder nur einen) passenden Ersatz kennen. Die Helfer-Sitzungen suchen bei Amazon (' . esc_html(self::LAENDER[$land][0]) . ') nach dem Titel und tragen den Fund in die Ersatz-Datenbank ein (Reiter Score) und die Handdaten nach. Keine tötenden oder verletzenden Produkte.</p><table class="widefat striped" style="max-width:980px"><thead><tr><th>Produkt</th><th>Produktart</th><th>Seiten</th><th>Kandidaten</th></tr></thead><tbody>';
+        foreach ($gesucht as $a => $e) {
+            $h .= '<tr><td><code>' . esc_html((string) $a) . '</code> ' . esc_html((string) $e['name']) . '</td><td>' . esc_html((string) $e['art']) . '</td><td>' . (int) $e['seiten'] . '</td><td>' . (int) $e['n'] . '</td></tr>';
+            $z .= str_replace('|', '/', (string) $e['art']) . ' | ' . $land . ' | ' . $a . ' | ' . str_replace('|', ' ', (string) $e['name']) . ' | ' . $host . ' | ' . str_replace('|', ' ', (string) $e['kontext']) . "\n";
+        }
+        return $h . '</tbody></table><p class="description"><strong>Auftragszeilen zum Kopieren</strong> (Produktart | Land | ALTE ASIN | Titel | Seite | Text vor dem Link). Antwort der Sitzung je Fund im Format der Ersatz-Datenbank: <code>Produktart | Land | NEUE ASIN | neu | Datum | Quelle</code>:</p><textarea readonly rows="' . min(10, count($gesucht) + 1) . '" class="large-text code" onclick="this.select()">' . esc_textarea($z) . '</textarea>';
+    }
+
     private static function ersatz_prompt_html(array $liste): string {
-        if (!$liste) { return ''; }
+        $gs = self::ersatz_gesucht_html(self::ersatz_gesucht_merken($liste, self::gruppen(), self::land('')));
+        if (!$liste) { return $gs; }
         $host = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST))); $dat = gmdate('Y-m-d');
         usort($liste, fn($a, $b) => ((int) $a[4] <=> (int) $b[4]));
         $p = "Aufgabe: Suche bei Amazon (" . self::LAENDER[self::land('')][0] . ") Ersatzprodukte für die folgenden Produkte der Seite $host. Zu jedem Produkt mindestens 8, besser 12 Kandidaten, die zum Produkt passen.\n\n"
@@ -6013,7 +6040,7 @@ JS;
             $mk = []; foreach (self::merkmale($r[1] . ' ' . $r[5] . ' ' . $r[2]) as $g => $w) { $mk[] = $g . ': ' . implode('/', $w); }
             $p .= ($i + 1) . '. ' . $r[0] . ' | Titel/Name: ' . (self::generischer_linktext((string) $r[1]) || trim((string) $r[1]) === '' ? '(Textlink ohne Produktnamen: Satz davor beachten)' : trim(preg_replace('/\s+/', ' ', $r[1]))) . ($r[3] !== '' ? ' | Kategorie: ' . $r[3] : '') . ' | Seite: ' . $host . ' (' . (int) $r[6] . ' Artikel) | Text davor: ' . ($r[2] !== '' ? '„' . trim(preg_replace('/\s+/', ' ', $r[2])) . '“' : '–') . (($sbg = self::schluesselbegriffe((string) $r[2])) ? ' | Suchbegriffe aus dem Satz: ' . implode(', ', $sbg) : '') . ($mk ? ' | Merkmale: ' . implode(', ', $mk) : '') . ' | bisher ' . (int) $r[4] . ' Vorschläge' . "\n";
         }
-        return '<div class="notice notice-info inline" style="padding:8px 14px"><p><strong>Prompt für die Suche-Sitzung (' . count($liste) . ' Produkte mit weniger als 4 Vorschlägen).</strong> Mit einem Klick kopieren und im Hauptthread einfügen.</p><textarea readonly id="sab-prompt" rows="6" class="large-text code">' . esc_textarea($p) . '</textarea><p><button type="button" class="button button-primary sab-kopieren" data-ziel="sab-prompt">Prompt kopieren</button> <a class="button" download="suchauftrag-' . esc_attr($host) . '-' . esc_attr($dat) . '.txt" href="data:text/plain;charset=utf-8,' . rawurlencode($p) . '">als Datei herunterladen</a> <span class="description sab-kopiert" style="display:none">Kopiert.</span></p></div>';
+        return '<div class="notice notice-info inline" style="padding:8px 14px"><p><strong>Prompt für die Suche-Sitzung (' . count($liste) . ' Produkte mit weniger als 4 Vorschlägen).</strong> Mit einem Klick kopieren und im Hauptthread einfügen.</p><textarea readonly id="sab-prompt" rows="6" class="large-text code">' . esc_textarea($p) . '</textarea><p><button type="button" class="button button-primary sab-kopieren" data-ziel="sab-prompt">Prompt kopieren</button> <a class="button" download="suchauftrag-' . esc_attr($host) . '-' . esc_attr($dat) . '.txt" href="data:text/plain;charset=utf-8,' . rawurlencode($p) . '">als Datei herunterladen</a> <span class="description sab-kopiert" style="display:none">Kopiert.</span></p></div>' . $gs;
     }
 
     /** Eigene Abschnitte unter der Austauschliste: Produkte ohne Kandidat („Wartet auf Amazon-Suche“) und Tierschädliches („Entscheidung nötig“). */
