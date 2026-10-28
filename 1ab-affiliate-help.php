@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.33
+ * Version: 0.89.34
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.33';
+    const VERSION = '0.89.34';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1398,7 +1398,6 @@ final class SAB {
         $gesamt = count($lauf['liste']);
         if ($lauf['neu']) { self::alarm('ausfall', 'Neue Produkte nicht mehr verfügbar', "Seit dem letzten Lauf ausgefallen:\n  " . implode("\n  ", $lauf['neu']) . "\n\nDas Plugin setzt, wo eine Ersatzliste hinterlegt ist, automatisch den nächsten Ersatz ein.\nÜbersicht: Seitenleiste > " . self::NAME . " > Ausfälle und Wartung"); }
         if ($gesamt > 0 && $lauf['unerreichbar'] === $gesamt) { self::alarm('api', 'Amazon-Schnittstelle antwortet nicht', "Beim täglichen Lauf konnte kein einziges Produkt von Amazon abgerufen werden.\nMögliche Ursachen: Zugangsdaten (Credentials) abgelaufen, Amazon-Konto gesperrt oder Amazon vorübergehend nicht erreichbar.\nDie Seiten zeigen weiter die zwischengespeicherten Daten, solange sie vorhanden sind.\nPrüfen: Seitenleiste > " . self::NAME . " > Übersicht."); }
-        self::auto_tausch();
         self::auto_tausch();
         self::wochenmail();
     }
@@ -6208,7 +6207,7 @@ JS;
             . '<p><button class="button">Speichern</button></p></form>';
         if ($log) {
             $nf = self::tausch_regeln();
-            $h .= '<h4>Automatisch getauscht (zur Kontrolle)</h4><p class="description">Links das alte, rechts das neue Produkt. „Rückgängig“ löscht die Austausch-Regel, das alte Produkt erscheint dann wieder. Ist alles geprüft, kannst du die Liste leeren (die Tausche bleiben).</p>';
+            $h .= '<h4 id="sab-auto-log">Automatisch getauscht (zur Kontrolle)</h4><p class="description">Links das alte, rechts das neue Produkt. „Rückgängig“ löscht die Austausch-Regel, das alte Produkt erscheint dann wieder. Ist alles geprüft, kannst du die Liste leeren (die Tausche bleiben).</p>';
             $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="auto_log">';
             $h .= '<table class="widefat striped" style="max-width:1000px"><thead><tr><th>Wann</th><th>Vorher</th><th>Nachher</th><th>Score</th><th></th></tr></thead><tbody>';
             $fa = self::fundstellen(array_values(array_unique(array_column($log, 'alt'))) ?: ['XXXXXXXXXX']);
@@ -6245,8 +6244,21 @@ JS;
         if (!$neu_regeln) { return; }
         $zeilen = []; foreach (array_merge($regeln, $neu_regeln) as $a => $b) { $zeilen[] = $a . ' => ' . $b; }
         update_option('sab_tausch', implode("\n", $zeilen), false); update_option('sab_auto_log', array_slice($log, -50), false); delete_transient('sab_alle_asins');
-        $t = []; foreach ($neu_regeln as $a => $b) { $t[] = '  ' . $a . ' => ' . $b; }
-        self::alarm('auto', 'Produkte automatisch ersetzt', "Das Plugin hat Produkte ersetzt, die Amazon nicht mehr kennt (Austausch-Regeln):\n" . implode("\n", $t) . "\n\nRückgängig: Seitenleiste > " . self::NAME . " > Produkte und Ersatzlisten > Austausch-Regeln, Zeile löschen.");
+        $namen = self::produkte(); $pl = [];
+        foreach ($neu_regeln as $a => $b) { $pl[$a] = ['neu' => $b, 'alt_name' => self::anzeige_name($a, (array) $d, $fund), 'neu_name' => self::anzeige_name($b, (array) $d, []), 'seiten' => array_map(fn($pid, $f) => ['titel' => (string) ($f['titel'] ?? ''), 'url' => add_query_arg('sab_zeige', $b, (string) get_permalink((int) $pid)), 'edit' => admin_url('post.php?post=' . (int) $pid . '&action=edit&sab_zeige=' . $b)], array_keys((array) ($fund[$a] ?? [])), array_values((array) ($fund[$a] ?? [])))]; }
+        self::alarm('auto', 'Produkte automatisch ersetzt', self::auto_mail_text($pl, (string) wp_parse_url(home_url(), PHP_URL_HOST), admin_url('admin.php?page=sab-austausch#sab-auto-log')));
+    }
+
+    /** Text der Mail „Produkte automatisch ersetzt“: je Produkt Backend-Link (Kontrolle/Rückgängig) und Frontend-Links zu den Artikeln, in denen getauscht wurde. @param array<string,array> $pl alte ASIN => [neu, alt_name, neu_name, seiten[titel,url,edit]] */
+    public static function auto_mail_text(array $pl, string $host, string $backend): string {
+        $t = "Seite: $host\nDas Plugin hat Produkte ersetzt, die Amazon nicht mehr kennt (Austausch-Regeln, schreibt nichts in die Artikel):\n";
+        foreach ($pl as $alt => $e) {
+            $t .= "\n" . ($e['alt_name'] !== '' ? $e['alt_name'] . ' ' : '') . "($alt) => " . ($e['neu_name'] !== '' ? $e['neu_name'] . ' ' : '') . '(' . $e['neu'] . ")\n";
+            $t .= "  Backend (Kontrolle, Rückgängig): $backend\n";
+            foreach (array_slice((array) $e['seiten'], 0, 5) as $sx) { $t .= '  Artikel „' . $sx['titel'] . '“: ' . $sx['url'] . "\n    im Backend: " . $sx['edit'] . "\n"; }
+            if (count((array) $e['seiten']) > 5) { $t .= '  … und ' . (count($e['seiten']) - 5) . " weitere Artikel\n"; }
+        }
+        return $t . "\nRückgängig: im Backend unter Austausch > „Automatisch getauscht (zur Kontrolle)“ auf „Rückgängig“ klicken. Die Automatik schaltest du dort unter „Automatik“ aus.";
     }
 
     /** Zu Produkten, die Amazon nicht mehr kennt: Ersatz-ASIN eingeben oder den Vorschlag (Favorit mit hohem Score, passende Art) übernehmen; tauscht in allen Artikeln, danach öffnet sich die Vorschau neu. */

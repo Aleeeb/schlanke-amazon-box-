@@ -1623,4 +1623,7 @@ $GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; public function get_c
 delete_transient("sab_alle_asins"); $rm33 = new ReflectionMethod("SAB", "alle_asins"); $rm33->setAccessible(true); $al33 = $rm33->invoke(null);
 ok(in_array('B0KARTE001', $al33, true) && in_array('B0KARTE002', $al33, true) && in_array('B0TITEL001', $al33, true) && in_array('B0BILD0001', $al33, true), 'Alle ASINs der Seite: Karten, Titel, Bild, einfache Anführungszeichen');
 $GLOBALS['wpdb'] = $wpdb_vor; delete_transient('sab_alle_asins');
+// 0.89.34: Mail „automatisch ersetzt“ mit Backend- und Frontend-Links
+$mt = SAB::auto_mail_text(['B0ALT00001' => ['neu' => 'B0NEU00001', 'alt_name' => 'Alter Zaun', 'neu_name' => 'Neuer Zaun', 'seiten' => [['titel' => 'Artikel A', 'url' => 'https://x.de/a/?sab_zeige=B0NEU00001', 'edit' => 'https://x.de/wp-admin/post.php?post=1&action=edit']]]], 'x.de', 'https://x.de/wp-admin/admin.php?page=sab-austausch#sab-auto-log');
+ok(strpos($mt, 'Seite: x.de') !== false && strpos($mt, 'page=sab-austausch#sab-auto-log') !== false && strpos($mt, 'https://x.de/a/?sab_zeige=B0NEU00001') !== false && strpos($mt, 'Alter Zaun (B0ALT00001) => Neuer Zaun (B0NEU00001)') !== false, 'Auto-Tausch-Mail: Seite, Backend-Link, Frontend-Link, Namen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
