@@ -1646,4 +1646,6 @@ ok($e1n === 2 && strpos($e1x, 'href="https://www.amazon.de/?tag=de-21" class="b"
 $rz = $GLOBALS['sc']['amz_rezension'](['asin' => 'B0ABCDEFGH', 'land' => 'co.uk'], 'Rezensionen ansehen');
 ok(strpos($rz, 'amazon.co.uk/product-reviews/B0ABCDEFGH?tag=uk-21') !== false && strpos($rz, 'sponsored') !== false, 'Baustein [amz_rezension]');
 unset($GLOBALS['opt']['sab_tags']);
+// 0.89.39: Knopf „Jetzt tauschen“ direkt unter dem Bild jedes Vorschlags
+ok(preg_match('#sab_einzeln" value="\' \. esc_attr\(\$alt\) \. \'" onclick="this\.closest#', file_get_contents(__DIR__ . '/schlanke-amazon-box.php')) === 1, 'Austausch: Tausch-Knopf unter dem Bild jeder Karte');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
