@@ -1735,4 +1735,15 @@ $l49b = SAB::sc_link(['asin' => 'B0TEXTLNK2', 'land' => 'es'], '');
 ok(preg_match('#<a [^>]*>[^<]+</a>#', $l49b) === 1, 'Textlink: nie ein Link ohne sichtbaren Text');
 ok(SAB::sc_aawp(['link' => 'KURZ'], 'Mein Text') === 'Mein Text', 'AAWP-Link mit kaputter ASIN: Text bleibt stehen');
 unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
+// 0.89.50: Bild und Textlink desselben Produkts zusammen tauschen
+$pb = fn($c, $n, $a) => (function () use ($c, $n, $a) { $f = new ReflectionMethod('SAB', 'stellen_finden'); $f->setAccessible(true); $st = $f->invoke(null, $c); return SAB::partner_bereich($c, $st[$n][1], strlen($st[$n][0]), $a); })();
+$k1 = '<p>[amz_bild asin="B0A1234567"][/amz_bild]<br>Titel A<br>[amz_link asin="B0A1234567"]Ansehen[/amz_link]</p>';
+$r = $pb($k1, 0, 'B0A1234567'); ok($r && substr($k1, $r[0], $r[1] - $r[0]) === substr($k1, 3, -4), 'Partner: Bild + Titel + Textlink = ein Bereich');
+$r = $pb($k1, 1, 'B0A1234567'); ok($r && $r[0] === 3, 'Partner: auch vom Textlink aus gefunden');
+$k2 = '<p>[amz_bild asin="B0A1234567"][/amz_bild] [amz_bild asin="B0B1234567"][/amz_bild]<br>[amz_link asin="B0A1234567"]A[/amz_link] [amz_link asin="B0B1234567"]B[/amz_link]</p>';
+ok($pb($k2, 0, 'B0A1234567') === null && $pb($k2, 3, 'B0B1234567') === null, 'Partner: nebeneinander stehende Produkte werden nicht gekoppelt');
+$k3 = '[amz_bild asin="B0A1234567"][/amz_bild]</p><p>[amz_link asin="B0A1234567"]A[/amz_link]';
+ok($pb($k3, 0, 'B0A1234567') === null, 'Partner: Absatzwechsel koppelt nicht');
+$k4 = '<a href="https://www.amazon.de/dp/B0A1234567?tag=x"><img src="a.jpg"></a><br><a href="https://www.amazon.de/dp/B0A1234567?tag=x">Text</a>';
+$f4 = SAB::partner_bereich($k4, 0, strpos($k4, '</a>') + 4, 'B0A1234567'); ok($f4 === [0, strlen($k4)], 'Partner: feste Links Bild + Text');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

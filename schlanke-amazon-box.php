@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.49
+ * Version: 0.89.50
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.49';
+    const VERSION = '0.89.50';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2634,6 +2634,37 @@ JS;
         wp_send_json_success(['asin' => $asin, 'nr' => max(1, (int) ($_POST['nth'] ?? 1))]);
     }
 
+    /**
+     * Bild und Textlink desselben Produkts, die direkt nebeneinander stehen (nur kurzer Titel/Zeilenumbruch dazwischen, kein Absatz-, Listen-, Zellen-, Spalten- oder Überschriftenwechsel),
+     * gehören zusammen und werden zusammen getauscht. Im Zweifel (anderes Produkt dazwischen, zwei mögliche Partner) wird NICHT gekoppelt.
+     * @return array{0:int,1:int}|null [von, bis] des gemeinsamen Bereichs
+     */
+    public static function partner_bereich(string $c, int $pos, int $len, string $asin): ?array {
+        $el = [];
+        foreach (self::stellen_finden($c) as [$t, $p]) { $el[$p] = [$p, $p + strlen($t), $t]; }
+        if (preg_match_all('#<a\b[^>]*>.*?</a>#is', $c, $m, PREG_OFFSET_CAPTURE)) {
+            foreach ($m[0] as [$t, $p]) { $drin = false; foreach ($el as $e) { if ($p >= $e[0] && $p < $e[1]) { $drin = true; break; } } if (!$drin) { $el[$p] = [$p, $p + strlen($t), $t]; } }
+        }
+        ksort($el); $el = array_values($el); $i = -1;
+        foreach ($el as $k => $e) { if ($e[0] === $pos) { $i = $k; break; } }
+        if ($i < 0 || $asin === '') { return null; }
+        $bild = fn(string $t): bool => stripos($t, '<img') !== false || preg_match('/^\[amz_(?:bild|produkt)\b/', $t) === 1 || preg_match('/^\[(?:aawp|amazon)\b[^\]]*value=["\'](?:thumb|image|thumbnail)/i', $t) === 1;
+        if (preg_match('/^\[amz_karte\b/', $el[$i][2])) { return null; }
+        $ich = $bild($el[$i][2]); $kand = [];
+        foreach ([$i - 1, $i + 1] as $j) {
+            if (!isset($el[$j]) || strpos($el[$j][2], $asin) === false || preg_match('/^\[amz_karte\b/', $el[$j][2]) || $bild($el[$j][2]) === $ich) { continue; }
+            [$a, $b] = $j < $i ? [$el[$j][1], $el[$i][0]] : [$el[$i][1], $el[$j][0]];
+            $gap = substr($c, $a, $b - $a);
+            if (strlen($gap) >= 400 || preg_match('#</?(?:p|h[1-6]|li|ul|ol|td|th|tr|table|div|hr|section|figure|blockquote)\b|<!--\s*/?wp:(?:column|columns|table|paragraph|heading|list|group)#i', $gap)) { continue; }
+            $txt = trim(str_replace("\xC2\xA0", ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', '', $gap)))));
+            if (mb_strlen($txt) > 160 || preg_match('#[.!?]\s*$#u', $txt) || preg_match('#[A-Z0-9]{10}#', $gap)) { continue; }
+            $kand[] = $j;
+        }
+        if (count($kand) !== 1) { return null; }
+        $j = $kand[0];
+        return [min($el[$i][0], $el[$j][0]), max($el[$i][1], $el[$j][1])];
+    }
+
     public static function ajax_stelle_tausch(): void {
         if (!empty($_POST['kurz'])) {
             [$post, $c, $tag, $pos, $kurz] = self::kurz_stelle();
@@ -2676,6 +2707,7 @@ JS;
             [$pre, $titel_ok] = self::titel_ersetzen(substr($c, 0, $pos), $ntitel, false);
             if ($titel_ok) { $d_ = strlen($pre) - $pos; $c = $pre . substr($c, $pos); $von += $d_; $bis += $d_; $pos += $d_; }
         }
+        if (!$in_td && ($pb = self::partner_bereich($c, $pos, strlen($tag), $quelle))) { $von = $pb[0]; $bis = $pb[1]; }   // Bild und Textlink desselben Produkts direkt nebeneinander: zusammen tauschen
         $seg = substr($c, $von, $bis - $von);
         $seg2 = preg_replace('/\btitel="[^"]*"/u', '', $seg);   // dein alter Titel passt nicht zum neuen Produkt
         if ($in_td) { [$seg2, $titel_ok] = self::titel_ersetzen($seg2, $ntitel, true); }
