@@ -1632,4 +1632,7 @@ ok(isset($g35['B0GESUCHT1']) && !isset($g35['B0GENUG0001']) && $g35['B0GESUCHT1'
 $g36 = SAB::ersatz_gesucht_merken([['B0GESUCHT1', 'Schneckenzaun Alt', '', '', 4, '', 3]], [], 'co.uk');
 ok(!isset($g36['B0GESUCHT1']), 'Ersatz gesucht: Eintrag fällt weg, sobald wieder Kandidaten da sind');
 unset($GLOBALS['opt']['sab_ersatz_gesucht']);
+// 0.89.36: WordPress-Mail zu automatischen Plugin-Updates standardmäßig aus
+ok(SAB::update_mail_filter(true) === false, 'Update-Mail von WordPress standardmäßig aus');
+$GLOBALS['opt']['sab_update_mail'] = '1'; ok(SAB::update_mail_filter(true) === true, 'Update-Mail mit Haken wieder an'); unset($GLOBALS['opt']['sab_update_mail']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
