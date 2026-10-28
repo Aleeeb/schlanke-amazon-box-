@@ -1648,4 +1648,10 @@ ok(strpos($rz, 'amazon.co.uk/product-reviews/B0ABCDEFGH?tag=uk-21') !== false &&
 unset($GLOBALS['opt']['sab_tags']);
 // 0.89.39: Knopf „Jetzt tauschen“ direkt unter dem Bild jedes Vorschlags
 ok(preg_match('#sab_einzeln" value="\' \. esc_attr\(\$alt\) \. \'" onclick="this\.closest#', file_get_contents(__DIR__ . '/schlanke-amazon-box.php')) === 1, 'Austausch: Tausch-Knopf unter dem Bild jeder Karte');
+// 0.89.40: Textlink ohne Plugin-Bild ist kein Austauschgrund
+[$bm1, $ba1] = SAB::bild_bedarf_text('<p>Video</p><p><a href="https://www.amazon.de/dp/B0TEXTONLY">Gartennetz ansehen</a></p>[amz_bild asin="B0MITBILD1"][/amz_bild]<a href="https://www.amazon.de/dp/B0LNKBILD1"><img src="x.jpg"></a>[amz_link asin="B0LNKTEXT1"]Hier[/amz_link]');
+ok(isset($ba1['B0TEXTONLY']) && !isset($bm1['B0TEXTONLY']) && isset($bm1['B0MITBILD1']) && isset($bm1['B0LNKBILD1']) && !isset($bm1['B0LNKTEXT1']) && isset($ba1['B0LNKTEXT1']), 'Bildbedarf: Textlink braucht kein Bild, Bild-/Bildlink schon');
+$tdm = new ReflectionMethod('SAB', 'tausch_dringlichkeit'); $tdm->setAccessible(true);
+$xo = ['bilder' => [], 'lieferbar' => true, 'preis' => '10 €', 'status' => 'IN_STOCK', 'sterne' => 4.5];
+ok($tdm->invoke(null, $xo, 70, true) === 100 && $tdm->invoke(null, $xo, 70, false) < 100, 'Dringlichkeit: fehlendes Bild zählt nur, wenn das Produkt ein Bild braucht');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.39
+ * Version: 0.89.40
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.39';
+    const VERSION = '0.89.40';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1052,9 +1052,32 @@ final class SAB {
         return $out;
     }
 
-    private static function tausch_dringlichkeit(array $x, int $score): int {
+    /** Braucht das Produkt an irgendeiner Stelle ein Bild? Steht es nur als Textlink im Artikel (z. B. unter einem Video), ist ein fehlendes Amazon-Bild kein Austauschgrund. Ohne Fundstelle: ja (vorsichtig). */
+    public static function braucht_bild(string $asin): bool {
+        static $menge = null, $gesehen = null;
+        if ($menge === null) {
+            $menge = []; $gesehen = []; global $wpdb;
+            if (isset($wpdb) && method_exists($wpdb, 'get_col')) {
+                $rows = (array) $wpdb->get_col("SELECT post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND (post_content LIKE '%amazon.%' OR post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %')");
+                foreach ($rows as $c) { [$m_, $g_] = self::bild_bedarf_text((string) $c); $menge += $m_; $gesehen += $g_; }
+            }
+        }
+        return isset($menge[$asin]) || !isset($gesehen[$asin]);
+    }
+
+    /** Aus einem Artikeltext: welche ASINs mit Bild verwendet werden (Bild-/Produkt-/Kartenplatzhalter, AAWP-Bild, Bildlink) und welche überhaupt vorkommen. @return array{0:array<string,bool>,1:array<string,bool>} */
+    public static function bild_bedarf_text(string $c): array {
+        $mit = []; $alle = [];
+        if (preg_match_all('/\b(?:asin|fields|box|link|data-sab-asin)\s*=\s*["\']?([A-Za-z0-9]{10})\b|\/(?:dp|gp\/product|product)\/([A-Za-z0-9]{10})\b/i', $c, $m, PREG_SET_ORDER)) { foreach ($m as $x) { $alle[strtoupper(($x[1] ?? '') !== '' ? $x[1] : ($x[2] ?? ''))] = true; } }
+        if (preg_match_all('/\[amz_(?:bild|produkt|karte)\b[^\]]*?\basin=["\']([A-Za-z0-9]{10})["\']/i', $c, $m)) { foreach ($m[1] as $a) { $mit[strtoupper($a)] = true; } }
+        if (preg_match_all('/\[(?:aawp|amazon)\b[^\]]*\b(?:fields|box)=["\']([^"\']+)["\'][^\]]*\]/i', $c, $m)) { foreach ($m[0] as $i => $whole) { if (preg_match('/box=|thumb|image/i', $whole)) { foreach (explode(',', $m[1][$i]) as $a) { $mit[strtoupper(trim($a))] = true; } } } }
+        if (preg_match_all('#<a\b[^>]*?(?:/dp/|/gp/product/|/product/)([A-Za-z0-9]{10})[^>]*>\s*(?:<[^>]+>\s*)*<img\b#i', $c, $m)) { foreach ($m[1] as $a) { $mit[strtoupper($a)] = true; } }
+        return [$mit, $alle];
+    }
+
+    private static function tausch_dringlichkeit(array $x, int $score, bool $braucht_bild = true): int {
         $nicht = empty($x['trotz']) && (empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK' || ($x['preis'] ?? '') === '');
-        if ($nicht || (array_key_exists('bilder', $x) && empty($x['bilder']) && empty($x['bild']))) { return 100; }   // nicht lieferbar, kein Preis oder kein Bild
+        if ($nicht || ($braucht_bild && array_key_exists('bilder', $x) && empty($x['bilder']) && empty($x['bild']))) { return 100; }   // nicht lieferbar, kein Preis oder kein Bild
         $q = self::dringlichkeit_werte();
         $primeUnklar = array_key_exists('manuell_stand', $x) && ($x['prime'] ?? null) === null;
         if ($primeUnklar && (($x['preis'] ?? '') === '' || ($x['kaufen'] ?? null) === false)) { return 100; }   // ohne Preis oder Buy Box und ohne Prime: wohl nicht mehr zu haben
@@ -2910,7 +2933,7 @@ JS;
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $q = self::dringlichkeit_werte();
         $bsp = null;
         foreach ((array) ($d['items'] ?? []) as $asin => $x) {
-            $x['trotz'] = false; [$sc, , $det] = self::score($x); $dr = self::tausch_dringlichkeit($x, $sc);
+            $x['trotz'] = false; [$sc, , $det] = self::score($x); $dr = self::tausch_dringlichkeit($x, $sc, self::braucht_bild((string) $asin));
             if ($dr > 0 && $dr < 100 && (!$bsp || $dr > $bsp['dr'])) { $bsp = ['asin' => (string) $asin, 'x' => $x, 'sc' => $sc, 'det' => $det, 'dr' => $dr]; }
         }
         $h = '<div style="background:#fff;border:2px solid #2271b1;border-radius:8px;padding:14px 18px;margin:10px 0 20px;max-width:1000px"><h2 style="margin-top:0">So entsteht die Priorität (Reihenfolge in Übersicht und Austausch)</h2>'
@@ -3734,7 +3757,7 @@ JS;
         foreach ($nv as $a) { $faelle[$a] = 'Nicht lieferbar'; }
         foreach ($p1x as $a) { $faelle[$a] = 'Priorität 1: Prime-Status unklar, vermutlich nicht verfügbar'; }
         foreach ($p2x as $a) { $faelle[$a] = 'Priorität 2: ' . ($grund2[$a] ?? 'schwach'); }
-        $gew = function ($a) use ($fund, $d, $p2x) { $n = array_sum(array_column($fund[$a] ?? [], 'n')); return in_array($a, $p2x, true) ? self::tausch_dringlichkeit((array) $d['items'][$a], self::score((array) $d['items'][$a])[0]) * $n : 1000000 + $n; };
+        $gew = function ($a) use ($fund, $d, $p2x) { $n = array_sum(array_column($fund[$a] ?? [], 'n')); return in_array($a, $p2x, true) ? self::tausch_dringlichkeit((array) $d['items'][$a], self::score((array) $d['items'][$a])[0], self::braucht_bild((string) $a)) * $n : 1000000 + $n; };
         uksort($faelle, fn($a, $b) => $gew($b) <=> $gew($a));
         $h .= self::doppel_html((array) $d) . '<hr style="margin:2em 0">' . self::weg_html($weg, (array) $d, $fund, $trotz, $dp) . '<hr style="margin:2em 0">' . '<p class="description">Der alte Tausch-Assistent ist durch die Austausch-Ansicht ersetzt (dieselbe wie im Reiter „Austausch“):</p>' . self::austausch_html() . '<hr style="margin:2em 0"><h3>Alle Problemprodukte als Liste</h3>';
         $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="problem"><input type="hidden" name="sab_form" value="tausch_neu">'
@@ -4222,7 +4245,7 @@ JS;
             $rang = isset($x['rang']) && $x['rang'] !== null ? '<span title="' . esc_attr((string) ($x['kategorie'] ?? '')) . '">' . number_format((int) $x['rang'], 0, ',', '.') . '</span>' : '–';
             $fs = $fund[$asin] ?? []; $ns = count($fs); $nl = array_sum(array_column($fs, 'n')); $mx = $fs ? max(array_column($fs, 'n')) : 0;
             $seiten = $ns ? '<span title="' . esc_attr($nl . ' Links insgesamt, höchstens ' . $mx . ' auf einer Seite') . '"><strong>' . $ns . '</strong> <small>(' . $nl . '×' . ($mx > 2 ? ', max <b style="color:#a00">' . $mx . '</b>' : ', max ' . $mx) . ')</small>' . ($ns > 10 ? ' <span class="sab-chip">allgemein</span>' : '') . '</span>' : '0';
-            $dr = self::tausch_dringlichkeit($x, $sc); $prio = $dr * $ns;
+            $dr = self::tausch_dringlichkeit($x, $sc, self::braucht_bild((string) $asin)); $prio = $dr * $ns;
             [$pot, $potwhy] = self::potenzial($x, $sc, $ns, (((array) get_option('sab_marken', []))[$asin] ?? '') === 'fav');
             $k = $kz[$asin] ?? null; $nk = $k ? (int) $k['n'] : 0;
             $klick = $k ? '<span title="Bild ' . (int) $k['b'] . ', Text/Button ' . (int) $k['x'] . '; zurückgekommen ' . (int) $k['z'] . '">' . $nk . '</span>' : '0';
@@ -4273,7 +4296,7 @@ JS;
                 continue;
             }
             $sc = self::score($x)[0];
-            $pr_ = $ns > 0 ? self::tausch_dringlichkeit($x, $sc) * $ns : ($sc >= 60 ? $sc - 50 : -1);
+            $pr_ = $ns > 0 ? self::tausch_dringlichkeit($x, $sc, self::braucht_bild((string) $asin)) * $ns : ($sc >= 60 ? $sc - 50 : -1);
             $zl[] = ['asin' => $asin, 'v' => ['score' => $sc, 'preis' => self::preiszahl((string) ($x['preis'] ?? '')) ?: null, 'prov' => self::provision_satz($x), 'rang' => isset($x['rang']) && $x['rang'] !== null ? (int) $x['rang'] : null, 'seiten' => $ns, 'prio' => $pr_], 'prio' => $ns > 0 ? self::tausch_dringlichkeit($x, $sc) * $ns : ($sc >= 60 ? $sc - 50 : -1), 'dr' => self::tausch_dringlichkeit($x, $sc), 'sc' => $sc, 'h' => self::uebersicht_zeile($asin, $x, $namen, $kz, $fund, $dp, true)];
         }
         usort($zl, fn($a, $b) => [(int) ($b['dr'] >= 100 && $b['prio'] > 0), $b['prio'], $b['dr'], $a['sc']] <=> [(int) ($a['dr'] >= 100 && $a['prio'] > 0), $a['prio'], $a['dr'], $b['sc']]);   // wichtigste zuerst, dann dringlichste, dann schwächster Score
@@ -6201,7 +6224,7 @@ JS;
             if (!$x0) { if (self::amazon_unbekannt((string) $a0, (array) $d)) { $dring[$a0] = 100; } continue; }
             $x0['trotz'] = isset($trotz[$a0]);
             if (empty($x0['bild']) && empty($x0['bilder']) && self::bild_frisch($land, (string) $a0)) { $x0['bild'] = 'lokal'; $x0['bilder'] = ['lokal']; }   // Bild liegt bereits auf dem Server: nicht als „ohne Bild“ melden
-            $sc0 = self::score($x0)[0]; $dr0 = self::tausch_dringlichkeit($x0, $sc0);
+            $sc0 = self::score($x0)[0]; $dr0 = self::tausch_dringlichkeit($x0, $sc0, self::braucht_bild((string) $a0));
             if (($marken[$a0] ?? '') === 'ers') { $dr0 = max($dr0, 100); }
             if ($dr0 > 0) {
                 $dring[$a0] = $dr0;
@@ -6224,7 +6247,7 @@ JS;
         $zb = []; $zr = [];
         foreach ($zeilen as $z_) {
             $a_ = (string) $z_['alt'];
-            $z_['bl'] = isset($bf[$a_]) || !isset($d['items'][$a_]) || (empty($d['items'][$a_]['bilder']) && !is_file(self::bild_pfad($land, $a_, 0)));
+            $z_['bl'] = isset($bf[$a_]) || !isset($d['items'][$a_]) || (empty($d['items'][$a_]['bilder']) && !is_file(self::bild_pfad($land, $a_, 0)) && self::braucht_bild($a_));
             if ($z_['bl']) { $zb[] = $z_; } else { $zr[] = $z_; }
         }
         usort($zb, fn($a, $b) => [$b['seiten'], $b['n']] <=> [$a['seiten'], $a['n']]);
