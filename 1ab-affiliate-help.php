@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.41
+ * Version: 0.89.42
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.41';
+    const VERSION = '0.89.42';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -330,6 +330,7 @@ final class SAB {
                 $tag = preg_match('#[?&]tag=([^&\\#]*)#', $query, $tm) ? rawurldecode($tm[1]) : '';
                 $asin = ''; $laenge = 0;
                 if (preg_match('#/(?:dp|gp/product|product-reviews|product)/([A-Za-z0-9]+)#', $pfad, $am)) { $laenge = strlen($am[1]); $asin = strtoupper($am[1]); }
+                if ($tag === '' && (self::seite_art($u) === 'liste' || preg_match('#/gp/help|/help/|/gp/css|/privacy|nodeId=|/gp/customer-reviews/guidelines|/conditionsofuse|/gp/aw/help#i', $pfad . '?' . $query))) { $e['ausnahmen'] = ($e['ausnahmen'] ?? 0) + 1; continue; }   // Hilfe-, Datenschutz- und Ausnahmeseiten brauchen keine Partner-ID
                 $buche($land, $tag, $asin, 'link');
                 if ($asin !== '' && $laenge !== 10 && $laenge >= 11 && $laenge <= 16 && count($e['probleme']) < 400) { $e['probleme'][] = ['typ' => 'asin', 'grund' => 'ungewöhnliche ASIN mit ' . $laenge . ' Zeichen', 'asin' => $asin, 'tag' => $tag, 'land' => $land, 'pid' => $pid]; }
             }
@@ -401,11 +402,11 @@ final class SAB {
             . 'k.onclick=function(){k.disabled=true;f=0;if(weiter){schritt()}else{post("sab_scan_start",function(s){zeig(s);if(s.fertig){location.reload()}else{schritt()}},function(){t.textContent="Start nicht möglich.";k.disabled=false})}};})();</script>';
         if (!$e || (!$fertig && !$e['artikel'])) { return $h . '<p>Noch kein Scan vorhanden.</p>'; }
         $erw = self::scan_erwartet(); $namen = self::produkte();
-        $nprob = count($e['probleme']); $nbild = count((array) get_option('sab_bildfehler', []));
+        $nprob = count($e['probleme']); [$nbild, $nbild_st] = self::bildfehler_zaehlen();
         $karte = function (string $zahl, string $text, string $farbe = '#1d2327') { return '<div style="flex:1 1 150px;max-width:220px;background:#fff;border:1px solid #dcdcde;border-radius:10px;padding:12px 16px"><div style="font-size:30px;font-weight:700;color:' . $farbe . '">' . $zahl . '</div><div style="color:#50575e">' . $text . '</div></div>'; };
         $h .= '<p class="description">Stand: ' . esc_html(wp_date('d.m.Y H:i', (int) ($s['ts'] ?? time()))) . ($fertig ? '' : ' (unvollständig: Scan nicht zu Ende gelaufen)') . '</p><div style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0">'
             . $karte((string) (int) $e['artikel'], 'Artikel gescannt') . $karte((string) (int) $e['links'], 'Amazon-Links') . $karte((string) count($e['asin']), 'verschiedene Produkte')
-            . $karte((string) (int) $e['kurz']['n'], 'Kurzlinks (kein Alarm)', '#50575e') . $karte((string) $nprob, 'Ausreißer', $nprob ? '#b32d2e' : '#1a7f37') . $karte((string) $nbild, 'Produkte ohne Bild', $nbild ? '#b32d2e' : '#1a7f37') . '</div>';
+            . $karte((string) (int) $e['kurz']['n'], 'Kurzlinks (kein Alarm)', '#50575e') . ((int) ($e['ausnahmen'] ?? 0) ? $karte((string) (int) $e['ausnahmen'], 'Hilfe-/Datenschutzlinks (ohne ID ok)', '#50575e') : '') . $karte((string) $nprob, 'Ausreißer', $nprob ? '#b32d2e' : '#1a7f37') . $karte((string) $nbild, 'Produkte ohne Bild' . ($nbild ? ' (auf ' . (int) $nbild_st . ' Stellen)' : ''), $nbild ? '#b32d2e' : '#1a7f37') . '</div>';
         // Balken je Partner-ID
         $max = 1; foreach ($e['ids'] as $x) { $max = max($max, (int) $x['n']); }
         $farbe = ['ok' => '#1a7f37', 'fremdland' => '#dba617', 'unbekannt' => '#b32d2e', 'ohne' => '#b32d2e'];
@@ -2751,6 +2752,7 @@ JS;
         $pfad = $m[2] ?? '';
         if (preg_match('#^/product-reviews/[A-Za-z0-9]{10}(?:/|$)#i', $pfad) || (preg_match('#/dp/[A-Za-z0-9]{10}#i', $pfad) && stripos($m[4] ?? '', 'customerReviews') !== false)) { return 'rezension'; }
         if ($pfad === '' || $pfad === '/') { return 'startseite'; }
+        if (preg_match('#^/s/?$#', $pfad) && preg_match('#[?&](?:k|field-keywords)=#', $m[3] ?? '')) { return 'suche'; }
         foreach (preg_split('/\R/', (string) get_option('sab_amz_seiten', '')) as $z) {
             $z = trim($z); if ($z === '') { continue; }
             $kern = preg_replace('#[?\#].*$#', '', $url);
@@ -2765,7 +2767,7 @@ JS;
         $c2 = preg_replace_callback('#<a\b([^>]*)>#i', function ($m) use (&$n) {
             if (!preg_match('#href=(["\'])(.*?)\1#is', $m[1], $h)) { return $m[0]; }
             $u = html_entity_decode($h[2]); $art = self::seite_art($u);
-            if ($art !== 'startseite' && $art !== 'rezension') { return $m[0]; }
+            if ($art !== 'startseite' && $art !== 'rezension' && $art !== 'suche') { return $m[0]; }
             $land = preg_match('#amazon\.(es|de|fr|it|co\.uk|com\.au|com|ca)#i', $u, $lm) ? strtolower($lm[1]) : ''; $tag = $land !== '' ? self::tag($land) : '';
             $neu_u = $u;
             if ($tag !== '' && !preg_match('#[?&]tag=#', $u)) { $anker = ''; if (strpos($u, '#') !== false) { [$u0, $anker] = explode('#', $u, 2); $anker = '#' . $anker; } else { $u0 = $u; } $neu_u = $u0 . (strpos($u0, '?') === false ? '?' : '&') . 'tag=' . rawurlencode($tag) . $anker; }
@@ -6392,7 +6394,8 @@ JS;
         $zb = []; $zr = [];
         foreach ($zeilen as $z_) {
             $a_ = (string) $z_['alt'];
-            $z_['bl'] = isset($bf[$a_]) || !isset($d['items'][$a_]) || (empty($d['items'][$a_]['bilder']) && !is_file(self::bild_pfad($land, $a_, 0)) && self::braucht_bild($a_));
+            $xi_ = $d['items'][$a_] ?? null; $unl_ = $xi_ && (empty($xi_['lieferbar']) || ($xi_['status'] ?? '') === 'OUT_OF_STOCK');   // nicht lieferbar: Amazon liefert dann oft keine Bild-URL, das Produkt hat aber eins; es steht ohnehin als „nicht lieferbar“ da
+            $z_['bl'] = !$xi_ || (!$unl_ && (isset($bf[$a_]) || (empty($xi_['bilder']) && !is_file(self::bild_pfad($land, $a_, 0)) && self::braucht_bild($a_))));
             if ($z_['bl']) { $zb[] = $z_; } else { $zr[] = $z_; }
         }
         usort($zb, fn($a, $b) => [$b['seiten'], $b['n']] <=> [$a['seiten'], $a['n']]);

@@ -1665,4 +1665,13 @@ $csv41 = SAB::scan_csv_text($e41);
 ok(strpos($csv41, '"Top-Probleme"') === 0 && strpos($csv41, '"ASIN-Details"') !== false && strpos($csv41, '"fremdland";') !== false, 'Scan: CSV mit Semikolon und Tabellen');
 $sh41 = new ReflectionMethod('SAB', 'scan_html'); $sh41->setAccessible(true); ok(strpos($sh41->invoke(null), 'Seite jetzt scannen') !== false, 'Scan-Reiter rendert');
 unset($GLOBALS['opt']['sab_tags']);
+// 0.89.42: Scan zählt geprüft, Hilfeseiten ohne ID ok, Suchlinks bekommen ID
+$GLOBALS['opt']['sab_tags'] = "de=de-21";
+$e42 = (function () { $r = new ReflectionMethod('SAB', 'scan_neu'); $r->setAccessible(true); return $r->invoke(null); })();
+SAB::scan_text('<a href="https://www.amazon.de/gp/help/customer/display.html?nodeId=201909010">Datenschutz</a> <a href="https://www.amazon.de/dp/B0SCANNN09">ohne ID</a>', 9, SAB::scan_erwartet(), $e42);
+ok(($e42['ausnahmen'] ?? 0) === 1 && count($e42['probleme']) === 1 && $e42['probleme'][0]['typ'] === 'ohne', 'Scan: Datenschutz-/Hilfelink ohne ID ist kein Ausreißer, Produktlink ohne ID schon');
+ok(SAB::seite_art('https://www.amazon.de/s?k=schneckenzaun') === 'suche' && SAB::seite_art('https://www.amazon.de/s') === '', 'Suchlink erkannt');
+[$e42x, $e42n] = SAB::seitenlinks_ergaenzen('<a href="https://www.amazon.de/s?k=zaun">Suche</a>');
+ok($e42n === 1 && strpos($e42x, 'k=zaun&tag=de-21') !== false && strpos($e42x, 'sponsored') !== false, 'Suchlink: ID und rel ergänzt');
+unset($GLOBALS['opt']['sab_tags']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
