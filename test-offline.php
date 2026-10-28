@@ -1685,4 +1685,11 @@ $kh = new ReflectionMethod('SAB', 'kd_html'); $kh->setAccessible(true); $khh = $
 ok(substr_count($khh, 'name="kd_preset"') === 5 && strpos($khh, 'kd_gimmick') !== false && strpos($khh, 'Bewertungen zeigen wir nicht') !== false, 'Kartendesign-Reiter: fünf Designs, Farbe, Tierchen');
 $GLOBALS['opt']['sab_kd'] = ['preset' => 'kaputt']; SAB::$kd_cache = false; ok(SAB::kd_opt() === null, 'Kartendesign: ungültiges Design wird ignoriert');
 unset($GLOBALS['opt']['sab_kd']); SAB::$kd_cache = false;
+// 0.89.44: Textlink ohne Titel: Suchbegriff aus dem Text direkt vor dem Link
+$GLOBALS['opt']['sab_tags'] = "co.uk=uk-21\ncom=us-20\nde=de-21"; $GLOBALS['opt']['sab_geo'] = '1'; ob_start(); SAB::geo_skript(); $g4 = ob_get_clean();
+$gj4 = tempnam(sys_get_temp_dir(), 'gp') . '.js';
+file_put_contents($gj4, "var window={},document={readyState:'x',addEventListener:function(){},querySelectorAll:function(){return A}},navigator={};function mk(h,txt){var o={href:h,_a:{},nodeType:1,nodeName:'A',previousSibling:txt===null?null:{nodeType:3,textContent:txt,previousSibling:null},getAttribute:function(){return null},hasAttribute:function(){return false},setAttribute:function(){}};return o}\nvar A=[mk('https://www.amazon.com/dp/B0WOLLE001?tag=us-20','In the United States you can order fresh sheep wool here. '),mk('https://www.amazon.com/dp/B0WOLLE002?tag=us-20','Schneckenzaun aus Kupfer kaufen: '),mk('https://www.amazon.com/dp/B0WOLLE003?tag=us-20',null)];\n" . preg_replace('#^<script>|</script>$#', '', trim($g4)) . "\nwindow.sabGeoRun('Europe/Berlin','de-DE');console.log(JSON.stringify(A.map(function(a){return a.href})));");
+exec('node ' . escapeshellarg($gj4) . ' 2>&1', $go4, $grc4);
+ok($grc4 === 0 && trim(implode('', $go4)) === '["https://www.amazon.de/s?k=fresh%20sheep%20wool&tag=de-21","https://www.amazon.de/s?k=Schneckenzaun%20aus%20Kupfer&tag=de-21","https://www.amazon.com/dp/B0WOLLE003?tag=us-20"]', 'Länder-Umschaltung: Textlink ohne Titel sucht mit dem Satz vor dem Link (' . implode(' ', $go4) . ')');
+unset($GLOBALS['opt']['sab_geo'], $GLOBALS['opt']['sab_tags']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

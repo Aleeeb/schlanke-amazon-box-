@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.43
+ * Version: 0.89.44
  * Requires PHP: 7.4
  */
 
@@ -48,7 +48,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.43';
+    const VERSION = '0.89.44';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2307,13 +2307,21 @@ if(/^Europe\/Rome$/.test(tz))return 'it';
 if(/^(Europe\/Madrid|Atlantic\/Canary)$/.test(tz))return 'es';
 var m={US:'com',CA:'ca',AU:'com.au',NZ:'com.au',GB:'co.uk',IE:'co.uk',DE:'de',AT:'de',CH:'de',FR:'fr',IT:'it',ES:'es',MX:'com',BR:'com',AR:'com',CL:'com',CO:'com',PE:'com',VE:'com',EC:'com',UY:'com',PY:'com',BO:'com',CR:'com',PA:'com',GT:'com',DO:'com'};
 return m[r]||null}
+function pre(a){var s='',n=a.previousSibling,l=0,B=/^(P|DIV|LI|TD|TH|TR|H[1-6]|UL|OL|TABLE|SECTION|ARTICLE|BR|FIGURE|BLOCKQUOTE)$/i;
+while(n&&l<400){var x=null;if(n.nodeType===3)x=n.textContent;else if(n.nodeType===1&&!B.test(n.nodeName))x=n.textContent;if(x===null)break;s=x+s;l+=x.length;n=n.previousSibling}
+s=s.replace(/\s+/g,' ').trim().replace(/[\s.!?:;,—–-]+$/,'');var q=s.split(/[.!?:;—]\s+/);s=(q[q.length-1]||'').trim();
+var F=/^(here|hier|now|jetzt|there|dort|click|klick|link|ici|aqui|aquí|qui|on|at|bei|auf|via|amazon|offer|angebot|the|a|an|and|or|und|oder|der|die|das|ein|eine|el|la|le)$/i,w=s.split(' ');
+while(w.length&&F.test(w[w.length-1].replace(/[^\wÀ-ɏ.]/g,'')))w.pop();s=w.join(' ');
+var T=/\b(order|buy|get|find|purchase|shop|kaufen|kauf|bestellen|bestellst|findest|erhältst|erhaeltst|comprar|compras|encuentras|acheter|trouver|trouve|ordina|compra|trovi)\b/ig,m,e=-1,i0=0;while((m=T.exec(s))){e=m.index+m[0].length;i0=m.index}
+if(e>=0&&e<s.length)s=s.slice(e).trim();else if(e>0&&i0>0)s=s.slice(0,i0).trim();else if(e<0){var z=s.split(' ');s=z.slice(-4).join(' ')}
+return s.replace(/^(the|a|an|some|our|ein|eine|einen|den|die|das|frische|el|la|los|las|un|una|le|les|des)\s+/i,function(x){return /^(frische)\s/i.test(x)?x:''})}
 function run(tz,lang){var w=pick(tz,lang);if(!w||!T[w])return 0;var n=0,all=document.querySelectorAll('a[href*="amazon."]');
 for(var i=0;i<all.length;i++){var a=all[i],u;try{u=new URL(a.href)}catch(e){continue}
 var h=u.hostname.match(/(?:^|\.)amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)$/);if(!h||h[1]===w)continue;
 var tag=u.searchParams.get('tag'),ok=false;for(var k in T){if(T[k]===tag)ok=true}if(!ok)continue;
 var t=a.getAttribute('data-sab-t')||a.getAttribute('data-aawp-product-title')||a.getAttribute('title')||'';
 if(!t){var sg=(u.pathname.split('/')[1]||'');if(!/^(dp|gp|product|s|exec|d|o|ref|stores|hz|b)$/i.test(sg)&&!/^[A-Z0-9]{10}$/.test(sg))t=sg.replace(/-/g,' ')}
-t=t.replace(/[^\wÀ-ɏ ]+/g,' ').replace(/\s+/g,' ').trim().split(' ').slice(0,8).join(' ');if(!t)continue;
+if(!t)t=pre(a);t=t.replace(/[^\wÀ-ɏ ]+/g,' ').replace(/\s+/g,' ').trim().split(' ').slice(0,8).join(' ');if(!t)continue;
 var ma=null,lm=a.getAttribute('data-sab-l');if(lm){lm.split(',').forEach(function(x){var q=x.split(':');if(q[0]===w&&/^[A-Z0-9]{10}$/.test(q[1]||''))ma=q[1]})}
 a.setAttribute('data-sab-z',w+':'+(ma?'a':'s'));a.href=ma?'https://www.amazon.'+w+'/dp/'+ma+'?tag='+T[w]:'https://www.amazon.'+w+'/s?k='+encodeURIComponent(t)+'&tag='+T[w];
 if(a.hasAttribute('data-aawp-tracking-id'))a.setAttribute('data-aawp-tracking-id',T[w]);n++}
