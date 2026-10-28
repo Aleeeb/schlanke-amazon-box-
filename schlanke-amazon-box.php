@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.48
+ * Version: 0.89.49
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.48';
+    const VERSION = '0.89.49';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2162,7 +2162,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $out = '';
         foreach (explode(',', (string) $a[$quelle]) as $roh) {
             $asin = substr(self::asin($roh), 0, 10);
-            if (strlen($asin) !== 10) { continue; }
+            if (strlen($asin) !== 10) { if ($quelle === 'link' && trim((string) $inhalt) !== '') { $out .= esc_html((string) $inhalt); } continue; }   // der Text bleibt wenigstens stehen
             if ($quelle === 'box') {
                 $out .= self::sc_produkt(['asin' => $asin, 'land' => $a['land'], 'tag' => $tg], '');
             } elseif ($quelle === 'link') {
@@ -2906,9 +2906,10 @@ JS;
         $link = $p['link'] ?? '';
         if (!$link) { // Amazon nicht erreichbar und kein frischer Stand: schlichter Link mit Partner-ID
             $land = self::land($a['land']); $tag = self::tag($land);
-            if (!$asin || !$tag) { return esc_html($inhalt); }
-            $link = 'https://' . self::LAENDER[$land][0] . '/dp/' . $asin . '?tag=' . rawurlencode($tag);
+            if (strlen($asin) !== 10) { return esc_html($inhalt); }   // ohne ASIN gibt es nichts zu verlinken
+            $link = 'https://' . self::LAENDER[$land][0] . '/dp/' . $asin . ($tag !== '' ? '?tag=' . rawurlencode($tag) : '');   // auch ohne Partner-ID für dieses Land bleibt der Textlink klickbar (der Scan meldet die fehlende ID)
         }
+        if (trim(strip_tags((string) $inhalt)) === '') { $inhalt = (string) ((self::produkte()[$asin] ?? '') ?: ($p['titel'] ?? '') ?: (self::BUTTON_TEXT[self::land($a['land'])] ?? self::BUTTON_TEXT['de'])); }   // nie ein Link ohne sichtbaren Text
         $link = self::lnk($link, (string) $a['tag']);
         $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $a['class']));
         $a_html = '<a' . ($cls ? ' class="' . esc_attr($cls) . '"' : '') . ' href="' . esc_url($link) . '"' . self::a_attr($asin) . '>' . esc_html($inhalt ?: ($p['titel'] ?? '')) . '</a>';

@@ -1727,4 +1727,12 @@ ok(strpos((string) ($p2['link'] ?? ''), 'amazon.co.uk') !== false && (get_option
 ob_start(); $aa48 = (new ReflectionMethod('SAB', 'a_attr')); $aa48->setAccessible(true); $x48 = $aa48->invoke(null, 'B0HEIMAT01'); ob_end_clean();
 ok(strpos($x48, 'data-sab-fix="1"') !== false && strpos((string) (function () { $r = new ReflectionMethod('SAB', 'a_attr'); $r->setAccessible(true); return $r->invoke(null, 'B0ANDERES1'); })(), 'data-sab-fix') === false, 'Heimat-Store: Link ist für die Länder-Umschaltung gesperrt');
 unset($GLOBALS['opt']['sab_heimat_liste'], $GLOBALS['opt']['sab_asin_land']);
+// 0.89.49: Textlinks bleiben immer klickbar
+$GLOBALS['opt']['sab_tags'] = "es=t-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; $GLOBALS['tr'] = [];
+$l49 = SAB::sc_link(['asin' => 'B0TEXTLNK1', 'land' => 'com'], 'Angebot');
+ok(strpos($l49, '<a ') === 0 && strpos($l49, 'amazon.com/dp/B0TEXTLNK1') !== false && strpos($l49, 'sponsored') !== false, 'Textlink: auch ohne Partner-ID des Landes klickbar (' . $l49 . ')');
+$l49b = SAB::sc_link(['asin' => 'B0TEXTLNK2', 'land' => 'es'], '');
+ok(preg_match('#<a [^>]*>[^<]+</a>#', $l49b) === 1, 'Textlink: nie ein Link ohne sichtbaren Text');
+ok(SAB::sc_aawp(['link' => 'KURZ'], 'Mein Text') === 'Mein Text', 'AAWP-Link mit kaputter ASIN: Text bleibt stehen');
+unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
