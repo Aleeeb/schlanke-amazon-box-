@@ -2049,4 +2049,10 @@ ok(isset($w31['block-31']) && $w31['block-31']['fertig'] === true && count($w31[
 [$ns31, $n31] = SAB::widget_start_umbauen($w31['block-31']['inhalt']);
 ok($n31 === 1 && strpos($ns31, '[amz_startseite land="es"]Amazon[/amz_startseite]') !== false && strpos($ns31, 'ebay.es') !== false, 'Widget: Startseiten-Link wird zu [amz_startseite], eBay bleibt (' . $ns31 . ')');
 unset($GLOBALS['opt']['widget_block']);
+// 0.92.22: Phantomprodukte
+$GLOBALS['opt']['sab_produkte'] = "B0PHANTOM1 | Geist";
+delete_transient('sab_alle_asins');
+$phs = SAB::phantome_finden();
+ok(isset($phs['B0PHANTOM1']) && in_array('Produktliste', $phs['B0PHANTOM1'], true), 'Phantome: Produkt in der Liste ohne Artikel wird gefunden');
+unset($GLOBALS['opt']['sab_produkte']); delete_transient('sab_alle_asins');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

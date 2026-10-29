@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.21
+ * Version: 0.92.22
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.21';
+    const VERSION = '0.92.22';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3060,6 +3060,30 @@ JS;
         update_option('sab_alarm', $al, false);
         $ar = count(self::umbau_artikelliste());
         return 'Neu eingelesen: ' . $ar . ' Artikel mit Amazon-Links, ' . count($alle) . ' Produkte in Artikeln und Listen. Entfernt: ' . $bw . ' veraltete Bildwarnung(en), ' . $nw . ' Namenshinweis(e), ' . $aw . ' Alarm(e) zu Produkten, die in keinem Artikel mehr stehen. Die Amazon-Daten werden beim nächsten Aufruf frisch geholt.';
+    }
+
+    /** Phantomprodukte: ASINs, die in Listen/Regeln des Plugins stehen, aber in keinem veröffentlichten Artikel. @return array<string,string[]> ASIN => Listen, in denen sie stehen */
+    public static function phantome_finden(): array {
+        $fund = self::fundstellen(self::alle_asins() ?: ['XXXXXXXXXX']);
+        $quellen = ['sab_produkte' => 'Produktliste', 'sab_slots' => 'Ersatzlisten', 'sab_tests' => 'Tests', 'sab_gruppen' => 'Gruppen', 'sab_tausch' => 'Tausch-Regeln', 'sab_ersatz' => 'Ersatz-Datenbank', 'sab_amz_alt' => 'Amazons Alternativen', 'sab_such_kand' => 'Suchtreffer', 'sab_auch_gekauft' => 'Mitgekauft', 'sab_manuell' => 'Handdaten'];
+        $out = [];
+        foreach (self::alle_asins() as $a) {
+            $a = (string) $a; if (strlen($a) !== 10 || !empty($fund[$a])) { continue; }
+            $wo = [];
+            foreach ($quellen as $o => $n) { if (stripos((string) get_option($o, ''), $a) !== false) { $wo[] = $n; } }
+            foreach (['sab_marken' => 'Markierung', 'sab_trotz' => '„trotzdem behalten“', 'sab_bonus' => 'Bonus', 'sab_austausch_hinten' => 'ans Ende geschoben', 'sab_austausch_okay' => 'okay belassen'] as $o => $n) { if (isset(((array) get_option($o, []))[$a])) { $wo[] = $n; } }
+            $out[$a] = $wo ?: ['Test- oder Alarmliste'];
+        }
+        return $out;
+    }
+
+    private static function phantome_html(): string {
+        $ph = self::phantome_finden();
+        $h = '<h3 style="margin-top:1.5em">Phantomprodukte (' . count($ph) . ')</h3><p class="description" style="max-width:820px">Produkte, die in Listen oder Regeln des Plugins stehen, aber in keinem veröffentlichten Artikel oder keiner Seite. Sie können nichts blockieren, tauchen aber manchmal in Zählungen auf. Mit dem Knopf fliegen sie aus allen Listen (Produktliste, Ersatzlisten, Gruppen, Tausch-Regeln, Markierungen).</p>';
+        if (!$ph) { return $h . '<p>Keine.</p>'; }
+        $h .= '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau')) . '">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="phantome"><ul style="list-style:disc;margin-left:18px">';
+        foreach ($ph as $a => $wo) { $h .= '<li><code>' . esc_html($a) . '</code> ' . esc_html((string) (self::produkte()[$a] ?? '')) . ' <small>· steht in: ' . esc_html(implode(', ', $wo)) . '</small></li>'; }
+        return $h . '</ul><input type="hidden" name="sab_phantome" value="' . esc_attr(implode(',', array_keys($ph))) . '"><button class="button" onclick="return confirm(\'' . count($ph) . ' Phantomprodukte aus allen Listen entfernen?\')">Alle aus den Listen entfernen</button></form>';
     }
 
     /** Knopf „Neu scannen“ oben auf Umbau und Austausch. */
@@ -8816,6 +8840,11 @@ JS;
                 $meldung = self::widget_umbau_lauf();
             } elseif ($form === 'umbau_scan') {
                 $meldung = self::umbau_scan();
+            } elseif ($form === 'phantome') {
+                $kand = array_values(array_filter(array_map([__CLASS__, 'asin'], explode(',', (string) ($_POST['sab_phantome'] ?? '')))));
+                $fund = self::fundstellen($kand ?: ['XXXXXXXXXX']);
+                $weg = array_values(array_filter($kand, fn($a) => empty($fund[$a])));   // nur, was wirklich in keinem Artikel steht
+                $meldung = self::verwaiste_entfernen($weg) . ' Phantomprodukte aus allen Listen entfernt.';
             } elseif ($form === 'ersatz_suchen') {
                 delete_transient('sab_alle_asins'); delete_transient('sab_such_pruefung'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
                 $meldung = 'Ersatz wird neu gesucht: Bestand und Amazon-Treffer werden neu bewertet, die Daten der Treffer holt das Plugin im Hintergrund. Oben auf der Seite steht der Prompt für Produkte, die noch zu wenig Vorschläge haben.';
@@ -9135,7 +9164,7 @@ JS;
             }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
-            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::umbau_widgets_html() . self::umbau_textreste_html()
+            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::phantome_html() . self::umbau_widgets_html() . self::umbau_textreste_html()
                . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
                . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'
