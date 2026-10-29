@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.56
+ * Version: 0.89.57
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.56';
+    const VERSION = '0.89.57';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2614,18 +2614,34 @@ JS;
     /** Frontend „＋ Karte“: setzt hinter den Absatz mit dem Textlink eine einzelne Karte (Bild + Textlink) desselben Produkts. Mit Sicherung, Rückgängig wie beim Tausch. */
     public static function ajax_stelle_karte(): void {
         [$post, $c, $st, $ord, $tag, $pos, $quelle, $asin] = self::stelle_pruefen();
-        if ($ord > 0 || stripos($tag, '<a') !== 0) { wp_send_json_error('Hier steht schon eine Karte oder Box. „Karte hinzufügen“ gibt es nur für reine Textlinks.'); }
+        $fest = $ord < 1 && stripos($tag, '<a') === 0;
+        $ph_bild = $ord > 0 && preg_match('/^\[amz_bild\b/i', $tag) === 1;
+        $ph_text = $ord > 0 && preg_match('/^\[amz_link\b/i', $tag) === 1;
+        if (!$fest && !$ph_bild && !$ph_text) { wp_send_json_error('Hier steht schon eine Karte oder Box. „Karte“ gibt es nur für Bild- und Textlinks.'); }
         if (!self::neues_produkt_vorladen($asin)) { wp_send_json_error('Amazon liefert zu ' . $asin . ' gerade kein Bild. Keine Karte eingefügt. Bitte später noch einmal versuchen.'); }
-        $land = ''; if (preg_match('/\bhref=(["\'])(.*?)\1/is', $tag, $hm)) { foreach (self::LAENDER as $k => $v) { if (stripos($hm[2], $v[0]) !== false) { $land = $k; break; } } }
-        $sc = '[amz_karten][amz_karte asin="' . $asin . '"' . ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . '][/amz_karten]';
-        if (strpos($c, '<!-- wp:') !== false) { $sc = "<!-- wp:shortcode -->\n" . $sc . "\n<!-- /wp:shortcode -->"; }
-        $ende = $pos + strlen($tag); $ins = $ende;
-        $pe = stripos($c, '</p>', $ende);
-        if ($pe !== false && $pe - $ende < 3000) {
-            $zw = substr($c, $ende, $pe - $ende);
-            if (!preg_match('#<p[\s>]|</?li\b|</?td\b|</?div\b#i', $zw)) { $ins = $pe + 4; if (preg_match('#\G\s*<!-- /wp:paragraph -->#', $c, $m2, 0, $ins)) { $ins += strlen($m2[0]); } }
+        $land = '';
+        if ($fest && preg_match('/\bhref=(["\'])(.*?)\1/is', $tag, $hm)) { foreach (self::LAENDER as $k => $v) { if (stripos($hm[2], $v[0]) !== false) { $land = $k; break; } } }
+        elseif (!$fest && preg_match('/\bland=["\']([a-z.]+)["\']/i', $tag, $lm) && isset(self::LAENDER[strtolower($lm[1])])) { $land = strtolower($lm[1]); }
+        $kopf = static function (string $titel) use ($asin, $land): string { return '[amz_karten][amz_karte asin="' . $asin . '"' . ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . ($titel !== '' ? ' titel="' . $titel . '"' : '') . '][/amz_karten]'; };
+        $pb = self::partner_bereich($c, $pos, strlen($tag), $quelle);
+        if ($pb) {   // getrennter Bild- und Textlink desselben Produkts: beide werden zu EINER Karte (ein Affiliate-Link)
+            $gap = ''; $inner = substr($c, $pb[0], $pb[1] - $pb[0]);
+            $gt = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', preg_replace(['#<a\b[^>]*>.*?</a>#is', '#\[amz_(bild|link)\b[^\]]*\].*?\[/amz_\1\]#is'], ' ', $inner))))));
+            if ($gt !== '' && mb_strlen($gt) <= 90) { $gap = str_replace(['"', '[', ']'], '', $gt); }
+            $c2 = substr($c, 0, $pb[0]) . $kopf($gap) . substr($c, $pb[1]);
+        } elseif ($ph_bild) {
+            $c2 = substr($c, 0, $pos) . $kopf('') . substr($c, $pos + strlen($tag));
+        } else {
+            $sc = $kopf('');
+            if (strpos($c, '<!-- wp:') !== false) { $sc = "<!-- wp:shortcode -->\n" . $sc . "\n<!-- /wp:shortcode -->"; }
+            $ende = $pos + strlen($tag); $ins = $ende;
+            $pe = stripos($c, '</p>', $ende);
+            if ($pe !== false && $pe - $ende < 3000) {
+                $zw = substr($c, $ende, $pe - $ende);
+                if (!preg_match('#<p[\s>]|</?li\b|</?td\b|</?div\b#i', $zw)) { $ins = $pe + 4; if (preg_match('#\G\s*<!-- /wp:paragraph -->#', $c, $m2, 0, $ins)) { $ins += strlen($m2[0]); } }
+            }
+            $c2 = substr($c, 0, $ins) . "\n\n" . $sc . "\n\n" . substr($c, $ins);
         }
-        $c2 = substr($c, 0, $ins) . "\n\n" . $sc . "\n\n" . substr($c, $ins);
         $b = (array) get_post_meta($post->ID, '_sab_stelle_backup', true);
         $b = array_slice(array_merge($b, [['ts' => time(), 'hash' => md5($c2), 'vorher' => $c, 'alt' => $asin, 'neu' => $asin]]), -5);
         update_post_meta($post->ID, '_sab_stelle_backup', wp_slash($b));
@@ -2808,7 +2824,8 @@ JS;
            . '});}'
            . 'function mk(e){var o=e.getAttribute("data-sab-ord");if(!o||seen[o]){return}seen[o]=1;var box=e.closest(".sab-karte,.sab-produkt,td")||e.parentNode;if(getComputedStyle(box).position==="static"){box.style.position="relative"}'
            . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.className="sab-tb";b.setAttribute("data-o",o);b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b);'
-           . 'if(C.e){var b3=el("button","position:absolute;top:30px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","✎ bearbeiten");b3.type="button";b3.title="Öffnet den Editor an dieser Stelle (neuer Tab)";b3.onclick=function(ev){ev.preventDefault();ev.stopPropagation();window.open(C.e+encodeURIComponent(e.getAttribute("data-sab-asin")),"_blank")};box.appendChild(b3)}}'
+           . 'if(C.e){var b3=el("button","position:absolute;top:30px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","✎ bearbeiten");b3.type="button";b3.title="Öffnet den Editor an dieser Stelle (neuer Tab)";b3.onclick=function(ev){ev.preventDefault();ev.stopPropagation();window.open(C.e+encodeURIComponent(e.getAttribute("data-sab-asin")),"_blank")};box.appendChild(b3)}'
+           . 'if(!e.closest(".sab-karte")){var b5=el("button","position:absolute;top:"+(C.e?56:30)+"px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","▦ Karte");b5.type="button";b5.title="Macht aus Bild und Textlink dieses Produkts eine Karte (ein Link, mit Sicherung)";b5.onclick=function(ev){ev.preventDefault();ev.stopPropagation();b5.textContent="…";post("sab_stelle_karte",{ord:o,asin:e.getAttribute("data-sab-asin")},function(r){if(r.success){location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr}else{b5.textContent="▦ Karte";alert(r.data)}})};box.appendChild(b5)}}'
            . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}'
            . 'var hs=document.querySelectorAll("a[href]"),cn={},al={},kz={};for(var j=0;j<hs.length;j++){var a=hs[j],hr=a.getAttribute("href")||"",m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(hr);var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as&&/^https?:\/\/(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)\//i.test(hr)&&!a.closest("#wpadminbar")&&a.closest("article,.entry-content,.hentry,main,.post")){kz[hr]=(kz[hr]||0)+1;(function(a,hr,nth){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn2(t,f,tb){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(tb){b.className="sab-tb"}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}kn2("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim(),kurz:hr};oeffne(0,"")},1);if(C.e){kn2("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(hr.replace(/[?#].*$/,"").replace(/\/+$/,"").split("/").pop()),"_blank")})}var ik=C.ko.indexOf(hr)>=0;kn2(ik?"✓ so gelassen – wieder prüfen":"✓ okay, so lassen",function(){var fd=new FormData();fd.append("action","sab_kurz_ok");fd.append("n",C.n);fd.append("post",C.p);fd.append("kurz",hr);fd.append("ok",ik?"0":"1");fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){if(r.success){location.reload()}})});a.parentNode.insertBefore(sp,a.nextSibling)})(a,hr,kz[hr]);continue}if(!as){continue}al[as]=(al[as]||0)+1;'
            . 'if(a.hasAttribute("data-sab-asin")||a.closest("[data-sab-ord],#wpadminbar,.sab-karte,.sab-produkt")||!a.closest("article,.entry-content,.hentry,main,.post")){continue}cn[as]=(cn[as]||0)+1;'
@@ -6957,6 +6974,108 @@ JS;
         return count((array) $ids) . ' Artikel auf den Zustand vor dem Umbau zurückgesetzt.';
     }
 
+    // ---------- Widgets in der Seitenleiste umbauen (Umbau-Reiter) ----------
+
+    const WIDGET_OPT = ['widget_block' => ['block', 'content'], 'widget_text' => ['text', 'text'], 'widget_custom_html' => ['custom_html', 'content']];
+    private static $wi_vorschau = [];
+
+    /** Widgets mit Amazon-/AAWP-Links. @return array<string,array> Widget-ID => Angaben */
+    private static function widgets_finden(): array {
+        $out = []; $sb = (array) get_option('sidebars_widgets', []);
+        foreach (self::WIDGET_OPT as $opt => [$typ, $feld]) {
+            foreach ((array) get_option($opt, []) as $nr => $w) {
+                if (!is_int($nr) || !is_array($w)) { continue; }
+                $c = (string) ($w[$feld] ?? '');
+                $id = $typ . '-' . $nr;
+                if (!preg_match('#amazon\.|amzn\.|aawp|\[amazon\b|tidd\.ly|\[amz_#i', $c)) { continue; }
+                $leiste = '';
+                foreach ($sb as $sn => $ids) { if (is_array($ids) && in_array($id, $ids, true)) { $leiste = (string) $sn; break; } }
+                $asins = [];
+                foreach (['#(?:dp|gp/product)/([A-Za-z0-9]{10})#', '#aawp-product-asin=["\']([A-Za-z0-9]{10})#', '#\[(?:aawp|amazon)\b[^\]]*\b(?:box|fields|link)=["\']([A-Za-z0-9]{10})#i', '#[?&]asin=([A-Za-z0-9]{10})#i', '#\[amz_[a-z]+\b[^\]]*\basin=["\']([A-Za-z0-9]{10})#'] as $re) { if (preg_match_all($re, $c, $m)) { foreach ($m[1] as $a_) { $asins[strtoupper($a_)] = 1; } } }
+                $out[$id] = ['id' => $id, 'opt' => $opt, 'nr' => $nr, 'feld' => $feld, 'inhalt' => $c, 'leiste' => $leiste, 'asins' => array_map('strval', array_keys($asins)), 'fertig' => (bool) preg_match('#\[amz_(?:widget|karten?|bild|link|produkt)\b#', $c) && !preg_match('#aawp|amazon\.[a-z.]+/|amzn\.|tidd\.ly#i', preg_replace('#\[amz_widget\b[^\]]*\]#', '', $c)), 'block' => $typ === 'block'];
+            }
+        }
+        return $out;
+    }
+
+    /** Vorbelegung für die Buch-Karte aus dem alten Widget-Inhalt (Titel, Text, zweiter Link). */
+    private static function widget_felder(array $w): array {
+        $c = (string) $w['inhalt'];
+        $titel = ''; $text = ''; $alt_u = ''; $alt_t = '';
+        if (preg_match('#<(?:h[1-6]|strong|b)\b[^>]*>(.*?)</(?:h[1-6]|strong|b)>#is', $c, $m)) { $titel = trim(html_entity_decode(strip_tags($m[1]))); }
+        if (preg_match_all('#<p\b[^>]*>(.*?)</p>#is', $c, $pm)) { foreach ($pm[1] as $p_) { $t = trim(html_entity_decode(strip_tags($p_))); if (mb_strlen($t) >= 25 && $t !== $titel) { $text = $t; break; } } }
+        if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $am, PREG_SET_ORDER)) {
+            foreach ($am as $a_) { if (!preg_match('#amazon\.|amzn\.|aawp|/dp/#i', $a_[2]) && ($t = trim(html_entity_decode(strip_tags($a_[3])))) !== '' && mb_strlen($t) <= 60) { $alt_u = html_entity_decode($a_[2]); $alt_t = $t; break; } }
+        }
+        return ['asin' => (string) ($w['asins'][0] ?? ''), 'marke' => 'Buchtipp', 'titel' => mb_substr($titel, 0, 90), 'text' => mb_substr($text, 0, 220), 'knopf' => '', 'alt_text' => $alt_t, 'alt_url' => $alt_u];
+    }
+
+    private static function widget_code(array $f): string {
+        $q = fn(string $v): string => str_replace(['"', '[', ']'], ['″', '(', ')'], trim($v));
+        $a = ['typ' => 'buch', 'asin' => self::asin($f['asin'] ?? '')];
+        foreach (['marke', 'titel', 'text', 'knopf', 'alt_text'] as $k) { if (trim((string) ($f[$k] ?? '')) !== '') { $a[$k] = $q((string) $f[$k]); } }
+        if (esc_url((string) ($f['alt_url'] ?? '')) !== '') { $a['alt_url'] = esc_url_raw((string) $f['alt_url']); }
+        $o = '[amz_widget'; foreach ($a as $k => $v) { $o .= ' ' . $k . '="' . $v . '"'; } return $o . ']';
+    }
+
+    private static function widget_speichern(string $id, string $inhalt): bool {
+        foreach (self::WIDGET_OPT as $opt => [$typ, $feld]) {
+            if (strpos($id, $typ . '-') !== 0) { continue; }
+            $nr = (int) substr($id, strlen($typ) + 1); $o = (array) get_option($opt, []);
+            if (!isset($o[$nr]) || !is_array($o[$nr])) { return false; }
+            $o[$nr][$feld] = $inhalt; update_option($opt, $o); return true;
+        }
+        return false;
+    }
+
+    /** Formularverarbeitung: vorschau (nichts gespeichert), speichern (mit Sicherung), zurueck. */
+    private static function widget_umbau_lauf(): string {
+        $id = preg_replace('/[^a-z_0-9-]/', '', (string) wp_unslash($_POST['sab_wid'] ?? '')); $akt = (string) ($_POST['sab_wakt'] ?? '');
+        $alle = self::widgets_finden(); $bk = (array) get_option('sab_widget_backup', []);
+        if ($akt === 'zurueck') {
+            if (!isset($bk[$id])) { return 'Keine Sicherung für dieses Widget.'; }
+            $ok = self::widget_speichern($id, (string) $bk[$id]['vorher']); unset($bk[$id]); update_option('sab_widget_backup', $bk, false);
+            return $ok ? 'Widget ' . $id . ' wieder auf den Zustand vorher gesetzt.' : 'Widget nicht gefunden.';
+        }
+        if (!isset($alle[$id])) { return 'Widget nicht gefunden.'; }
+        $f = []; foreach (['asin', 'marke', 'titel', 'text', 'knopf', 'alt_text', 'alt_url'] as $k) { $f[$k] = sanitize_text_field(wp_unslash($_POST['sab_w_' . $k] ?? '')); }
+        if (strlen(self::asin($f['asin'])) !== 10) { self::$wi_vorschau[$id] = $f; return 'Bitte eine gültige ASIN eintragen.'; }
+        self::$wi_vorschau[$id] = $f;
+        if ($akt !== 'speichern') { return 'Vorschau unten. Es wurde nichts gespeichert.'; }
+        if (!self::neues_produkt_vorladen(self::asin($f['asin']))) { return 'Amazon liefert zu ' . $f['asin'] . ' gerade kein Bild oder keine Daten. Nicht umgebaut.'; }
+        $code = self::widget_code($f); if ($alle[$id]['block']) { $code = "<!-- wp:shortcode -->\n" . $code . "\n<!-- /wp:shortcode -->"; }
+        $bk[$id] = ['ts' => time(), 'vorher' => $alle[$id]['inhalt']]; update_option('sab_widget_backup', $bk, false);
+        if (!self::widget_speichern($id, $code)) { return 'Widget nicht gespeichert.'; }
+        delete_transient('sab_alle_asins'); unset(self::$wi_vorschau[$id]);
+        return 'Widget ' . $id . ' umgebaut (Sicherung gespeichert, Rückgängig unten). Bitte im Frontend ansehen.';
+    }
+
+    private static function umbau_widgets_html(): string {
+        $ws = self::widgets_finden(); if (!$ws) { return ''; }
+        $bk = (array) get_option('sab_widget_backup', []);
+        $offen = array_filter($ws, fn($w) => !$w['fertig']);
+        $h = '<h3 style="margin-top:1.5em">Widgets in der Seitenleiste (' . count($offen) . ' mit alten Amazon-Links)</h3><p class="description" style="max-width:820px">Hier stehen Widgets (Block-, Text- und HTML-Widgets) mit Amazon- oder AAWP-Links. Die Buch-Karte unten ist vorbelegt; Felder ändern, „Vorschau“ ansehen und erst dann „Umbauen“. Vor dem Speichern wird der alte Inhalt gesichert, „Rückgängig“ stellt ihn wieder her.</p>';
+        foreach ($ws as $id => $w) {
+            $f = isset(self::$wi_vorschau[$id]) ? self::$wi_vorschau[$id] : self::widget_felder($w);
+            $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1000px"><strong>' . esc_html($id) . '</strong>' . ($w['leiste'] !== '' ? ' · Bereich <code>' . esc_html($w['leiste']) . '</code>' : '') . ' · ASIN: ' . ($w['asins'] ? esc_html(implode(', ', $w['asins'])) : '<em>keine gefunden</em>')
+                . ($w['fertig'] ? ' · <span style="color:#1a7f37;font-weight:700">schon umgebaut</span>' : ' · <span style="color:#a00;font-weight:700">alte Links</span>')
+                . ' · <a href="' . esc_url(admin_url('widgets.php')) . '" target="_blank" rel="noopener">Widgets bearbeiten ↗</a> · <a href="' . esc_url(home_url('/')) . '" target="_blank" rel="noopener">Seite im Frontend ansehen ↗</a>';
+            if (!$w['fertig']) {
+                $h .= '<details style="margin-top:6px"><summary>Alter Inhalt</summary><pre style="white-space:pre-wrap;max-height:160px;overflow:auto;background:#f6f7f7;padding:6px;font-size:12px">' . esc_html(mb_substr((string) $w['inhalt'], 0, 1500)) . '</pre></details>'
+                    . '<form method="post" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '">'
+                    . '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">';
+                foreach (['asin' => 'ASIN des Buchs', 'marke' => 'Etikett (z. B. Buchtipp)', 'titel' => 'Titel', 'text' => 'Kurztext', 'knopf' => 'Knopftext (leer = Standard)', 'alt_text' => 'zweiter Link: Text (z. B. Thalia)', 'alt_url' => 'zweiter Link: Adresse'] as $k => $l) {
+                    $h .= '<label>' . esc_html($l) . '<br><input type="text" name="sab_w_' . esc_attr($k) . '" value="' . esc_attr((string) ($f[$k] ?? '')) . '" style="width:100%"></label>';
+                }
+                $h .= '</div><p><button class="button" name="sab_wakt" value="vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="speichern" onclick="return confirm(\'Dieses Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Umbauen</button></p></form>';
+                if (isset(self::$wi_vorschau[$id]) && strlen(self::asin((string) ($f['asin'] ?? ''))) === 10) { $h .= '<div style="background:#f1f3ee;padding:14px;border-radius:8px"><div style="width:300px">' . do_shortcode(self::widget_code($f)) . '</div></div>'; }
+            }
+            if (isset($bk[$id])) { $h .= '<form method="post" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="zurueck">Rückgängig (alter Inhalt von ' . esc_html(wp_date('d.m.Y H:i', (int) $bk[$id]['ts'])) . ')</button></form>'; }
+            $h .= '</div>';
+        }
+        return $h;
+    }
+
     // ---------- Widgets für die Seitenleiste ----------
 
     const WIDGET_CSS = '.sab-wb,.sab-wt,.sab-wl{box-sizing:border-box;max-width:340px;margin:0 auto 18px;font-family:inherit}.sab-wb{position:relative;background:#fff;border:1px solid #dfe6d8;border-radius:14px;padding:18px 16px 14px;box-shadow:0 2px 10px rgba(40,70,30,.08);text-align:center}.sab-wb .sab-wtag{position:absolute;top:-10px;left:14px;background:#e8873a;color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 10px;border-radius:999px}.sab-wb .sab-wcover{margin:6px auto 12px}.sab-wb .sab-wcover img{display:block;margin:0 auto;max-height:210px;width:auto;max-width:70%;height:auto;border-radius:4px 10px 10px 4px;box-shadow:-4px 4px 0 #cfd9c7,0 6px 14px rgba(0,0,0,.2)}.sab-wb h4{margin:0 0 6px;font-size:17px;line-height:1.25}.sab-wb p{margin:0 0 12px;font-size:14px;line-height:1.45;color:#44543f}.sab-wb a.sab-wbtn{display:block;background:#2f7a3d;color:#fff!important;text-decoration:none!important;font-weight:700;padding:11px 12px;border-radius:9px;font-size:15px}.sab-wb a.sab-wbtn:hover{background:#256331}.sab-wb a.sab-wbtn:after{content:"";position:absolute;inset:0;border-radius:14px}.sab-wb a.sab-walt{position:relative;z-index:2;display:inline-block;margin-top:9px;font-size:13px;color:#2f7a3d}.sab-wb .sab-wnote{font-size:11px;color:#7b8a76;margin-top:8px}.sab-wt{background:linear-gradient(160deg,#fff7e8,#ffeccb);border-radius:14px;padding:16px;border:1px solid #f1d9a8}.sab-wt b{display:block;font-size:17px;margin-bottom:6px}.sab-wt p{margin:0 0 10px;font-size:14px;line-height:1.45}.sab-wt a{display:inline-block;background:#e8873a;color:#fff!important;text-decoration:none!important;font-weight:700;padding:9px 14px;border-radius:9px;font-size:14px}.sab-wl{background:#fff;border-radius:14px;padding:14px 16px;border:1px solid #dfe6d8}.sab-wl h4{margin:0 0 10px;font-size:16px}.sab-wl ol{margin:0;padding:0;list-style:none;counter-reset:n}.sab-wl li{counter-increment:n;display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #edf1e9;font-size:14px}.sab-wl li:first-child{border-top:0}.sab-wl li:before{content:counter(n);flex:none;width:24px;height:24px;border-radius:50%;background:#2f7a3d;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}.sab-wl li a{color:inherit;text-decoration:none}';
@@ -7465,6 +7584,8 @@ JS;
             } elseif ($form === 'asin_diag') {
                 $da = trim((string) wp_unslash($_POST['sab_diag_asin'] ?? ''));
                 $meldung = $da !== '' ? self::asin_rohantwort($da) : 'Bitte eine ASIN eintragen (mehrere mit Komma, höchstens 10).';
+            } elseif ($form === 'widget_umbau') {
+                $meldung = self::widget_umbau_lauf();
             } elseif ($form === 'umbau_scan') {
                 $meldung = self::umbau_scan();
             } elseif ($form === 'ersatz_suchen') {
@@ -7781,7 +7902,7 @@ JS;
             }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
-            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau')
+            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::umbau_widgets_html()
                . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
                . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'

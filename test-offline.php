@@ -1762,4 +1762,18 @@ ok(strpos($wt, 'sab-wt') !== false && strpos($wt, '<style') === false && strpos(
 ok(SAB::sc_widget(['typ' => 'buch', 'asin' => 'kaputt']) === '', 'Widget: Buch ohne gültige ASIN bleibt leer');
 $wh = new ReflectionMethod('SAB', 'widgets_html'); $wh->setAccessible(true); $whh = (string) $wh->invoke(null);
 ok(strpos($whh, 'Shortcode kopieren') !== false && strpos($whh, 'Top-3-Liste') !== false, 'Widgets-Reiter rendert mit Vorlagen');
+// 0.89.57: Widgets im Umbau-Reiter
+$GLOBALS['opt']['widget_block'] = [16 => ['content' => '<!-- wp:paragraph --><p><strong>Haufenweise Lebensräume</strong></p><p>Ein langer Beschreibungstext über Igel und Laufkäfer im Garten.</p><p><a href="https://www.amazon.de/dp/3895663891?tag=x-21"><img src="https://x.de/aawp/public/image.php?a=1"></a></p><p><a href="https://tidd.ly/3zcGOHu">Bei Thalia ansehen</a></p><!-- /wp:paragraph -->'], 17 => ['content' => 'Nur Text'], '_multiwidget' => 1];
+$GLOBALS['opt']['sidebars_widgets'] = ['sidebar-1' => ['block-16']];
+$mWf = new ReflectionMethod('SAB', 'widgets_finden'); $mWf->setAccessible(true); $wf = $mWf->invoke(null);
+ok(isset($wf['block-16']) && !isset($wf['block-17']) && $wf['block-16']['asins'] === ['3895663891'] && $wf['block-16']['leiste'] === 'sidebar-1' && !$wf['block-16']['fertig'], 'Widgets: Block-Widget mit Amazon-Link gefunden, Seitenleiste und ASIN erkannt');
+$mWe = new ReflectionMethod('SAB', 'widget_felder'); $mWe->setAccessible(true); $wfe = $mWe->invoke(null, $wf['block-16']);
+ok($wfe['titel'] === 'Haufenweise Lebensräume' && $wfe['alt_url'] === 'https://tidd.ly/3zcGOHu' && strpos($wfe['text'], 'Igel') !== false, 'Widgets: Titel, Text und zweiter Link vorbelegt (' . json_encode($wfe, JSON_UNESCAPED_UNICODE) . ')');
+$mWc = new ReflectionMethod('SAB', 'widget_code'); $mWc->setAccessible(true); $wc = $mWc->invoke(null, $wfe);
+ok(strpos($wc, '[amz_widget typ="buch" asin="3895663891"') === 0 && strpos($wc, 'alt_url="https://tidd.ly/3zcGOHu"') !== false, 'Widgets: Shortcode erzeugt');
+$mWs = new ReflectionMethod('SAB', 'widget_speichern'); $mWs->setAccessible(true);
+ok($mWs->invoke(null, 'block-16', $wc) === true && strpos($GLOBALS['opt']['widget_block'][16]['content'], 'amz_widget') !== false && $mWf->invoke(null)['block-16']['fertig'] === true, 'Widgets: Speichern ersetzt den Inhalt, danach als umgebaut erkannt');
+$mWh = new ReflectionMethod('SAB', 'umbau_widgets_html'); $mWh->setAccessible(true);
+ok(strpos((string) $mWh->invoke(null), 'schon umgebaut') !== false, 'Widgets: Liste im Umbau-Reiter');
+unset($GLOBALS['opt']['widget_block'], $GLOBALS['opt']['sidebars_widgets']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
