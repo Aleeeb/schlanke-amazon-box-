@@ -1244,7 +1244,7 @@ $art = ['<p>[amz_bild asin="B0ALTNEST1"][/amz_bild] Text [amz_bild asin="B0NACHB
 $nm = ['B0NACHBAR1' => 'Schwalbennest Doppelnest Lehm', 'B0DOPPEL01' => 'Doppelnest Schlamm', 'B0EINZEL01' => 'Einzelnest Holzbeton'];
 ok($mB->invoke(null, 'B0ALTNEST1', 'B0DOPPEL01', $art, [], $nm) && !$mB->invoke(null, 'B0ALTNEST1', 'B0EINZEL01', $art, [], $nm), 'Produktvielfalt: gleiche Bauart in der Nähe wird nicht vorgeschlagen, andere Bauart schon');
 $kv = SAB::kurzname_varianten('Relaxdays Nistkasten Bausatz Vögel, 2er Set, 32 mm Einflugloch');
-ok(count($kv) >= 2 && count($kv) <= 3 && count(array_unique($kv)) === count($kv) && strpos($kv[0], ' | ') === false, 'Kurznamen-Vorschläge: zwei bis drei verschiedene Namen aus dem Titel');
+ok(count($kv) >= 2 && count($kv) <= 3 && count(array_unique($kv)) === count($kv), 'Kurznamen-Vorschläge: zwei bis drei verschiedene Namen aus dem Titel');
 $ar = SAB::aawp_reste('[aawp box="B0AAAAAAA1"] [aawp fields="B0AAAAAAA1" value="thumb"] [aawp fields="B0AAAAAAA1" value="price"] [aawp table="B0AAAAAAA1,B0AAAAAAA2"] [amazon bestseller="garden" items="5"] [aawp link="B0AAAAAAA1"]Text[/aawp]');
 ok(count($ar) === 3 && strpos($ar[0], 'price') !== false && strpos($ar[1], 'table') !== false && strpos($ar[2], 'bestseller') !== false, 'AAWP-Reste: nur nicht ersetzte Shortcodes (Preis, Tabelle, Bestseller) werden gemeldet');
 ok(SAB::asin_aus_text('https://www.amazon.de/Schwegler-Nistkasten/dp/B08VKRJ5D4/ref=sr_1_3?keywords=x') === 'B08VKRJ5D4' && SAB::asin_aus_text('b08vkrj5d4') === 'B08VKRJ5D4' && SAB::asin_aus_text('https://amazon.de/gp/product/B0037YHTMS') === 'B0037YHTMS', 'Eigene ASIN: Amazon-Link oder ASIN wird erkannt');
@@ -2034,4 +2034,12 @@ ok(isset(get_option('sab_austausch_okay', [])['B0OKAY0002']), 'Okay-belassen: wi
 SAB::belassen_setzen('B0OKAY0002', false);
 ok(!isset(get_option('sab_austausch_okay', [])['B0OKAY0002']), 'Okay-belassen: „Wieder prüfen“ nimmt es zurück');
 ok(strpos(SAB::kurztitel('Gardena Schlauchwagen 20 m Gartenschlauch Set für Garten'), 'Gardena') === 0 && strpos(SAB::kurztitel('Zoomfix Schneckenband Kupfer 5 m selbstklebend'), 'Zoomfix') === false && strpos(SAB::kurztitel('Schneckenzaun Set aus Kupfer 14-teilig'), 'Schneckenzaun') === 0, 'Kurztitel: weltbekannte Marke bleibt, unbekannte Firma weg, Produktwort bleibt (' . SAB::kurztitel('Gardena Schlauchwagen 20 m Gartenschlauch Set für Garten') . ' / ' . SAB::kurztitel('Zoomfix Schneckenband Kupfer 5 m selbstklebend') . ' / ' . SAB::kurztitel('Schneckenzaun Set aus Kupfer 14-teilig') . ')');
+$GLOBALS['opt']['sab_produkte'] = "B0STRICH01 | Wühlmauskorb | 8 Stück\nB0STRICH02 | Nur Name";
+$pm = (new ReflectionMethod('SAB', 'produkte')); $pm->setAccessible(true); $pmv = $pm->invoke(null);
+ok(($pmv['B0STRICH01'] ?? '') === 'Wühlmauskorb | 8 Stück' && ($pmv['B0STRICH02'] ?? '') === 'Nur Name', 'Produktliste: Strich im Kurznamen bleibt erhalten');
+unset($GLOBALS['opt']['sab_produkte']);
+$GLOBALS['opt']['sab_produkte'] = "B0STRICH03 | Solar-Maulwurfvertreiber   2er-Pack";
+$pmv = $pm->invoke(null);
+ok(($pmv['B0STRICH03'] ?? '') === 'Solar-Maulwurfvertreiber | 2er-Pack', 'Produktliste: drei Leerzeichen werden als Strich angezeigt');
+unset($GLOBALS['opt']['sab_produkte']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

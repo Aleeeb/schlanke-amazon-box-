@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.18
+ * Version: 0.92.19
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.18';
+    const VERSION = '0.92.19';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -254,12 +254,12 @@ final class SAB {
         return strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $a));
     }
 
-    /** Zeilen "ASIN | Kurzname" => [ASIN => Kurzname] */
+    /** Zeilen "ASIN | Kurzname" => [ASIN => Kurzname]; der Kurzname darf selbst einen Strich enthalten ("Wühlmauskorb | 8 Stück"). */
     private static function produkte(): array {
         $out = [];
         foreach (preg_split('/\R/', (string) get_option('sab_produkte', '')) as $z) {
-            $t = array_map('trim', explode('|', $z));
-            if ($t[0] !== '' && self::asin($t[0])) { $out[self::asin($t[0])] = $t[1] ?? ''; }
+            $t = array_map('trim', explode('|', $z, 2));   // alles nach dem ersten Strich ist der Name: „ASIN | Wühlmauskorb | 8 Stück“ behält den Strich im Namen
+            if ($t[0] !== '' && self::asin($t[0])) { $out[self::asin($t[0])] = preg_replace('/ {3,}/', ' | ', $t[1] ?? ''); }   // drei Leerzeichen waren früher der Ersatz für den Strich: wird als „ | “ angezeigt
         }
         return $out;
     }
@@ -5789,7 +5789,7 @@ JS;
     /** Zwei bis drei Kurznamen-Vorschläge aus dem Amazon-Titel (lang mit Merkmal, nur Produktart, Anfang des Titels); innen mit drei Leerzeichen wie in der Produktliste. */
     public static function kurzname_varianten(string $titel): array {
         $a = self::kurzname_aus_titel($titel); if ($a === '') { return []; }
-        $v = [str_replace(' | ', '   ', $a)];
+        $v = [$a];
         $art = trim(explode(' | ', $a)[0]);
         if ($art !== '' && $art !== $a) { $v[] = $art; }
         $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($titel))));
