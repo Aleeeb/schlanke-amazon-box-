@@ -1745,7 +1745,11 @@ $r = $pb($k1, 1, 'B0A1234567'); ok($r && $r[0] === 3, 'Partner: auch vom Textlin
 $k2 = '<p>[amz_bild asin="B0A1234567"][/amz_bild] [amz_bild asin="B0B1234567"][/amz_bild]<br>[amz_link asin="B0A1234567"]A[/amz_link] [amz_link asin="B0B1234567"]B[/amz_link]</p>';
 ok($pb($k2, 0, 'B0A1234567') === null && $pb($k2, 3, 'B0B1234567') === null, 'Partner: nebeneinander stehende Produkte werden nicht gekoppelt');
 $k3 = '[amz_bild asin="B0A1234567"][/amz_bild]</p><p>[amz_link asin="B0A1234567"]A[/amz_link]';
-ok($pb($k3, 0, 'B0A1234567') === null, 'Partner: Absatzwechsel koppelt nicht');
+ok($pb($k3, 0, 'B0A1234567') !== null, 'Partner: Absatzwechsel mit nur kurzem Zwischentext (Einzelprodukt) koppelt');
+$k3b = '[amz_bild asin="B0A1234567"][/amz_bild]</p><p>Das ist ein ganzer Satz über etwas anderes.</p><p>[amz_link asin="B0A1234567"]A[/amz_link]';
+ok($pb($k3b, 0, 'B0A1234567') === null, 'Partner: Absatzwechsel mit ganzem Satz koppelt nicht');
+$k3c = '[amz_bild asin="B0A1234567"][/amz_bild]</p><h3>Neues Thema</h3><p>[amz_link asin="B0A1234567"]A[/amz_link]';
+ok($pb($k3c, 0, 'B0A1234567') === null, 'Partner: Überschrift dazwischen koppelt nicht');
 $k4 = '<a href="https://www.amazon.de/dp/B0A1234567?tag=x"><img src="a.jpg"></a><br><a href="https://www.amazon.de/dp/B0A1234567?tag=x">Text</a>';
 $f4 = SAB::partner_bereich($k4, 0, strpos($k4, '</a>') + 4, 'B0A1234567'); ok($f4 === [0, strlen($k4)], 'Partner: feste Links Bild + Text');
 // 0.89.55: Neu scannen
@@ -2017,4 +2021,9 @@ $wAb = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000009', 't
 ob_start(); SAB::widget_css_fuss(); $fz = ob_get_clean();
 ok(strpos($wAb, 'id="sab-widget"') !== false && strpos($wAb, 'sab-ab-e') !== false && strpos($fz, 'id="sab-widget-fuss"') !== false && strpos($fz, '.sab-wb') !== false, 'Widget-CSS: auch wenn das erste Widget ein A/B-Test ist; zusätzlich im Seitenfuß');
 $GLOBALS['opt']['sab_ab'] = [];
+// 0.92.15: Einzelprodukt-Karte und Kurztitel
+ok(SAB::kurztitel('杭州 ABC123 Schneckenzaun Set aus Kupfer 14-teilig, Schutz für Beete und Garten, 5 m') !== '' && !preg_match('/[\x{4e00}-\x{9fff}]|ABC123/u', SAB::kurztitel('杭州 ABC123 Schneckenzaun Set aus Kupfer 14-teilig, Schutz für Beete und Garten, 5 m')), 'Kurztitel: Fremdschrift und Markencode am Anfang weg (' . SAB::kurztitel('杭州 ABC123 Schneckenzaun Set aus Kupfer 14-teilig, Schutz für Beete und Garten, 5 m') . ')');
+ok(mb_strlen(SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm')) <= 48 && preg_match('/\d/', SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm')) === 1, 'Kurztitel: kurz und mit Zahl (' . SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm') . ')');
+$ek = SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Schneckenzaun-Set', 'stil' => 'einzel']);
+ok(strpos($ek, 'sab-karte-einzel') !== false && strpos($ek, 'Haz clic en la imagen') !== false && strpos($ek, 'oferta en Amazon') !== false && substr_count($ek, '<a ') === 1 && strpos($ek, 'Schneckenzaun-Set') < strpos($ek, '<img'), 'Einzelprodukt-Karte: Titel über dem Bild, Klick-auf-das-Bild-Zeile, ein Link (' . $ek . ')');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

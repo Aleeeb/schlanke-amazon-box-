@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.14
+ * Version: 0.92.15
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.14';
+    const VERSION = '0.92.15';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2225,6 +2225,29 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     }
 
     /** [amz_titel asin="…"]: Produktname als reiner Text (Kurzname, sonst Amazon-Titel); folgt automatisch einem Austausch. */
+    /** Markenmüll am Anfang eines Amazon-Titels entfernen: Wörter in Fremdschrift (z. B. chinesisch), GROSSBUCHSTABEN-Marken, Buchstaben-Zahlen-Codes. Sonderzeichen werden zu Leerzeichen. */
+    public static function titel_ohne_marke(string $t): string {
+        $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($t), ENT_QUOTES, 'UTF-8')));
+        $t = trim((string) preg_replace('/[^\p{Latin}\p{N}\p{P}\p{S}\s]+/u', ' ', $t));   // Fremdschrift überall raus
+        $t = trim((string) preg_replace('/\s+/u', ' ', $t));
+        $w = $t === '' ? [] : preg_split('/\s+/u', $t);
+        while (count($w) > 2) {
+            $f = trim($w[0], " ,.;:-–|()[]„“\"'*®™");
+            $marke = $f === '' || (preg_match('/^[A-Z0-9]{3,9}$/u', $f) === 1 && preg_match('/[A-Z]/', $f) === 1) || (preg_match('/\d/u', $f) && preg_match('/[A-Za-z]/', $f) && mb_strlen($f) <= 8 && !preg_match('/^\d+[\p{L}]{0,3}$/u', $f));
+            if (!$marke) { break; }
+            array_shift($w);
+        }
+        return implode(' ', $w);
+    }
+
+    /** Kurztitel für Karten, Widgets und Tauschvorschläge: ohne Markenmüll, auf die Produktart gekürzt, am Ende wenn vorhanden eine Zahl, z. B. „Schneckenzaun-Set, 14-teilig“. */
+    public static function kurztitel(string $t, int $max = 48): string {
+        $e = explode(' | ', self::kurzname_aus_titel($t), 2); $art = $e[0]; $zahl = $e[1] ?? '';
+        $platz = $max - ($zahl !== '' ? mb_strlen($zahl) + 2 : 0);
+        if (mb_strlen($art) > $platz) { $art = rtrim(mb_substr($art, 0, max(12, $platz)), " ,.-–"); $art = preg_replace('/[\s,]+\S*$/u', '', $art) ?: $art; }
+        return trim($art . ($zahl !== '' ? ', ' . $zahl : ''), " ,.;:-–");
+    }
+
     public static function sc_titel($a, $inhalt = ''): string {
         $a = shortcode_atts(['asin' => '', 'land' => '', 'kurz' => '', 'titel' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig);
@@ -2235,13 +2258,14 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
             $p = self::produkt($asin, self::land($a['land']));
             $name = trim((string) ($p['titel'] ?? ''));
             $n = (int) $a['kurz'];
-            if ($n > 0 && mb_strlen($name) > $n) { $name = rtrim(mb_substr($name, 0, $n), " ,.-–") . '…'; }
+            if ($n > 0 && mb_strlen($name) > $n) { $kt = self::kurztitel($name, $n); $name = $kt !== '' ? $kt : rtrim(mb_substr($name, 0, $n), " ,.-–") . '…'; }
         }
         return esc_html($name !== '' ? $name : (string) $inhalt);
     }
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
-    const KARTE_CSS = '.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:block}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
+    const EINZEL_TEXT = ['de' => ['Klick auf das Bild zum', 'Angebot bei Amazon'], 'es' => ['Haz clic en la imagen para ver la', 'oferta en Amazon'], 'fr' => ["Cliquez sur l'image pour voir l'", 'offre sur Amazon'], 'it' => ["Clicca sull'immagine per vedere l'", 'offerta su Amazon'], 'co.uk' => ['Click the image to see the', 'offer on Amazon'], 'com' => ['Click the image to see the', 'offer on Amazon']];
+    const KARTE_CSS = '.sab-karte-einzel{max-width:340px;margin-left:auto;margin-right:auto;box-shadow:0 1px 4px rgba(0,0,0,.06)}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.05em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel a.sab-bild{gap:6px}.sab-karte-cta{display:block;font-size:.88em;line-height:1.35;color:#555}.sab-karte-cta-l{color:#1a6b3c;font-weight:700;text-decoration:underline}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;border:1px solid #e6e8e8;border-radius:10px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;max-height:200px;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:auto}.sab-karte-btn{display:block;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #d9dcdc;border-radius:8px;background:#f7f8f8;color:#1a1a1a!important;font-size:.88em;font-weight:600;text-decoration:none!important}.sab-karte-btn:hover{background:#eef0f0}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:block}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
@@ -2259,7 +2283,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
     public static function sc_karte($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
         if (strlen($asin) !== 10) { return ''; }
         self::$genutzt = true; self::$karten = true;
@@ -2267,6 +2291,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $p = self::produkt($asin, $land);
         // dein Titel aus dem Artikel bleibt stehen; nach einem Austausch kommt der Kurzname des neuen Produkts
         $titel = ($asin === $orig && trim((string) $a['titel']) !== '') ? esc_html(trim((string) $a['titel'])) : self::sc_titel(['asin' => $asin, 'land' => $land, 'kurz' => 70], '');
+        if ($asin === $orig && trim((string) $a['titel']) === '' && !isset(self::produkte()[$asin])) { $tk = self::kurztitel(html_entity_decode($titel, ENT_QUOTES, 'UTF-8')); if ($tk !== '') { $titel = esc_html($tk); } }   // nie der lange Amazon-Titel
         $bild = self::brauchbar($p) ? self::sc_bild(['asin' => $asin, 'land' => $land, 'tag' => $a['tag']], '') : self::bild_fehlt($asin, 'Karte');   // nie still ohne Bild: Platzhalter, für Redakteure rot, und Eintrag in der Warnliste
         $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn', 'tag' => $a['tag']], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
         $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
@@ -2276,6 +2301,11 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         if ($kd && self::brauchbar($p)) {   // Preis und Verfügbarkeit nur aus der Amazon-Abfrage (höchstens 1 Tag alt), mit Stand und Hinweis; Bewertungen werden nie angezeigt
             if ($kd['preis'] && !empty($p['preis'])) { $ex .= '<div class="sab-karte-preis">' . esc_html((string) $p['preis']) . '<small>Stand ' . esc_html(date_i18n('d.m.Y', (int) ($p['ts'] ?? time()))) . ', Preis kann sich ändern</small></div>'; }
             if ($kd['daten']) { $ex .= '<div class="sab-karte-daten">✓ Lieferbar bei Amazon</div>'; }
+        }
+        if ($a['stil'] === 'einzel' && preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb)) {   // Einzelprodukt-Karte: Titel über dem Bild, darunter „Klick auf das Bild zum Angebot bei Amazon“, alles EIN Link
+            $et = self::EINZEL_TEXT[$land] ?? self::EINZEL_TEXT['de'];
+            $cta = '<span class="sab-karte-cta">' . esc_html($et[0]) . ' <span class="sab-karte-cta-l">' . esc_html($a['text'] !== '' ? $a['text'] : $et[1]) . '</span></span>';
+            return '<div class="sab-karte sab-karte-einzel' . $kc . '">' . $mb[1] . $tt . $mb[2] . $ex . $cta . '</a>' . $ebay . '</div>';
         }
         // Bild, Titel und Button sind EIN Link (für Crawler zählt das als ein Affiliate-Link); data-sab-asin/-slot/-var bleiben für Statistik und Austausch am Link
         if (preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb) && preg_match('#^<a\b[^>]*>(.*)</a>$#s', $btn, $mt)) {
@@ -2655,17 +2685,24 @@ JS;
         $ph_bild = $ord > 0 && preg_match('/^\[amz_bild\b/i', $tag) === 1;
         $ph_text = $ord > 0 && preg_match('/^\[amz_link\b/i', $tag) === 1;
         if (!$fest && !$ph_bild && !$ph_text) { wp_send_json_error('Hier steht schon eine Karte oder Box. „Karte“ gibt es nur für Bild- und Textlinks.'); }
-        if (!self::neues_produkt_vorladen($asin)) { wp_send_json_error('Amazon liefert zu ' . $asin . ' gerade kein Bild. Keine Karte eingefügt. Bitte später noch einmal versuchen.'); }
+        if (!self::hat_bild(self::produkt($asin, self::land(''))) && !self::neues_produkt_vorladen($asin)) { wp_send_json_error('Amazon liefert zu ' . $asin . ' gerade kein Bild. Keine Karte eingefügt. Bitte später noch einmal versuchen.'); }
         $land = '';
         if ($fest && preg_match('/\bhref=(["\'])(.*?)\1/is', $tag, $hm)) { foreach (self::LAENDER as $k => $v) { if (stripos($hm[2], $v[0]) !== false) { $land = $k; break; } } }
         elseif (!$fest && preg_match('/\bland=["\']([a-z.]+)["\']/i', $tag, $lm) && isset(self::LAENDER[strtolower($lm[1])])) { $land = strtolower($lm[1]); }
-        $kopf = static function (string $titel) use ($asin, $land): string { return '[amz_karten][amz_karte asin="' . $asin . '"' . ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . ($titel !== '' ? ' titel="' . $titel . '"' : '') . '][/amz_karten]'; };
+        $kopf = static function (string $titel, bool $einzel = false) use ($asin, $land): string { return '[amz_karten][amz_karte asin="' . $asin . '"' . ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . ($titel !== '' ? ' titel="' . $titel . '"' : '') . ($einzel ? ' stil="einzel"' : '') . '][/amz_karten]'; };
         $pb = self::partner_bereich($c, $pos, strlen($tag), $quelle);
         if ($pb) {   // getrennter Bild- und Textlink desselben Produkts: beide werden zu EINER Karte (ein Affiliate-Link)
             $gap = ''; $inner = substr($c, $pb[0], $pb[1] - $pb[0]);
             $gt = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', ' ', preg_replace(['#<a\b[^>]*>.*?</a>#is', '#\[amz_(bild|link)\b[^\]]*\].*?\[/amz_\1\]#is'], ' ', $inner))))));
+            if (preg_match('/^(?:klick(?:e)?\s+auf\s+das\s+bild|zum|zur|hier|angebot|mehr|bei amazon|ansehen)\b/iu', $gt) || self::generischer_linktext($gt)) { $gt = ''; }
             if ($gt !== '' && mb_strlen($gt) <= 90) { $gap = str_replace(['"', '[', ']'], '', $gt); }
-            $c2 = substr($c, 0, $pb[0]) . $kopf($gap) . substr($c, $pb[1]);
+            $vor = substr($c, 0, $pb[0]);
+            // Produkttitel steht als eigene Zeile über dem Bild (Einzelprodukt): wird zum Kartentitel und aus dem Artikel genommen, damit er nicht doppelt steht
+            if ($gap === '' && preg_match('#(?:<!--\s*wp:(?:paragraph|heading)[^>]*-->\s*)?<(p|h[1-6])\b[^>]*>((?:(?!</?(?:p|h[1-6])\b).)*?)</\1>\s*(?:<!--\s*/wp:(?:paragraph|heading)\s*-->\s*)?$#is', $vor, $tm0, PREG_OFFSET_CAPTURE) && !preg_match('#<a\b|\[|<img#i', $tm0[2][0])) {
+                $tt0 = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($tm0[2][0]), ENT_QUOTES, 'UTF-8')));
+                if (mb_strlen($tt0) >= 3 && mb_strlen($tt0) <= 90 && !preg_match('/[.!?]\s*$/u', $tt0) && !self::generischer_linktext($tt0)) { $gap = str_replace(['"', '[', ']'], '', $tt0); $vor = substr($vor, 0, $tm0[0][1]); }
+            }
+            $c2 = $vor . $kopf($gap, true) . substr($c, $pb[1]);
         } elseif ($ph_bild) {
             $c2 = substr($c, 0, $pos) . $kopf('') . substr($c, $pos + strlen($tag));
         } else {
@@ -2708,7 +2745,7 @@ JS;
             if (!isset($el[$j]) || strpos($el[$j][2], $asin) === false || preg_match('/^\[amz_karte\b/', $el[$j][2]) || $bild($el[$j][2]) === $ich) { continue; }
             [$a, $b] = $j < $i ? [$el[$j][1], $el[$i][0]] : [$el[$i][1], $el[$j][0]];
             $gap = substr($c, $a, $b - $a);
-            if (strlen($gap) >= 400 || preg_match('#</?(?:p|h[1-6]|li|ul|ol|td|th|tr|table|div|hr|section|figure|blockquote)\b|<!--\s*/?wp:(?:column|columns|table|paragraph|heading|list|group)#i', $gap)) { continue; }
+            if (strlen($gap) >= 600 || preg_match('#</?(?:h[1-6]|li|ul|ol|td|th|tr|table|hr|section|blockquote)\b|<!--\s*/?wp:(?:column|columns|table|heading|list|group)#i', $gap)) { continue; }   // Absatz-, Zeilen- und Bildumbruch zwischen Bild und Text (Einzelprodukt: Bild, darunter „Klick auf das Bild zum“ + Textlink) gehört noch zum Paar
             $txt = trim(str_replace("\xC2\xA0", ' ', html_entity_decode(strip_tags(preg_replace('/\[[^\]]*\]/', '', $gap)))));
             if (mb_strlen($txt) > 160 || preg_match('#[.!?]\s*$#u', $txt) || preg_match('#[A-Z0-9]{10}#', $gap)) { continue; }
             $kand[] = $j;
@@ -2862,13 +2899,13 @@ JS;
            . 'function mk(e){var o=e.getAttribute("data-sab-ord");if(!o||seen[o]){return}seen[o]=1;var box=e.closest(".sab-karte,.sab-produkt,td")||e.parentNode;if(getComputedStyle(box).position==="static"){box.style.position="relative"}'
            . 'var b=el("button","position:absolute;top:4px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","⇄ tauschen");b.type="button";b.className="sab-tb";b.setAttribute("data-o",o);b.title="Nur für dich sichtbar (angemeldet)";b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();oeffne(o,e.getAttribute("data-sab-asin"))};box.appendChild(b);'
            . 'if(C.e){var b3=el("button","position:absolute;top:30px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","✎ bearbeiten");b3.type="button";b3.title="Öffnet den Editor an dieser Stelle (neuer Tab)";b3.onclick=function(ev){ev.preventDefault();ev.stopPropagation();window.open(C.e+encodeURIComponent(e.getAttribute("data-sab-asin")),"_blank")};box.appendChild(b3)}'
-           . 'if(!e.closest(".sab-karte")){var b5=el("button","position:absolute;top:"+(C.e?56:30)+"px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","▦ Karte");b5.type="button";b5.title="Macht aus Bild und Textlink dieses Produkts eine Karte (ein Link, mit Sicherung)";b5.onclick=function(ev){ev.preventDefault();ev.stopPropagation();b5.textContent="…";post("sab_stelle_karte",{ord:o,asin:e.getAttribute("data-sab-asin")},function(r){if(r.success){location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr}else{b5.textContent="▦ Karte";alert(r.data)}})};box.appendChild(b5)}}'
+           . 'if(!e.closest(".sab-karte")){var b5=el("button","position:absolute;top:"+(C.e?56:30)+"px;right:4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #2271b1;border-radius:12px;background:#fff;color:#2271b1;cursor:pointer;opacity:.9","▦ Karte");b5.type="button";b5.title="Macht aus Bild und Textlink dieses Produkts eine Karte (ein Link, mit Sicherung)";b5.onclick=function(ev){ev.preventDefault();ev.stopPropagation();b5.textContent="⏳ Karte wird gebaut …";b5.disabled=true;post("sab_stelle_karte",{ord:o,asin:e.getAttribute("data-sab-asin")},function(r){if(r.success){location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr}else{b5.disabled=false;b5.textContent="▦ Karte";alert(r.data)}})};box.appendChild(b5)}}'
            . 'var es=document.querySelectorAll("[data-sab-ord]");for(var i=0;i<es.length;i++){mk(es[i])}'
            . 'var hs=document.querySelectorAll("a[href]"),cn={},al={},kz={};for(var j=0;j<hs.length;j++){var a=hs[j],hr=a.getAttribute("href")||"",m=/(?:\/dp\/|\/gp\/product\/|\/product\/)([A-Z0-9]{10})(?![A-Za-z0-9])/.exec(hr);var as=m?m[1]:a.getAttribute("data-sab-asin");if(!as&&/^https?:\/\/(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)\//i.test(hr)&&!a.closest("#wpadminbar")&&a.closest("article,.entry-content,.hentry,main,.post")){kz[hr]=(kz[hr]||0)+1;(function(a,hr,nth){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn2(t,f,tb){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(tb){b.className="sab-tb"}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b)}kn2("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim(),kurz:hr};oeffne(0,"")},1);if(C.e){kn2("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(hr.replace(/[?#].*$/,"").replace(/\/+$/,"").split("/").pop()),"_blank")})}var ik=C.ko.indexOf(hr)>=0;kn2(ik?"✓ so gelassen – wieder prüfen":"✓ okay, so lassen",function(){var fd=new FormData();fd.append("action","sab_kurz_ok");fd.append("n",C.n);fd.append("post",C.p);fd.append("kurz",hr);fd.append("ok",ik?"0":"1");fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){if(r.success){location.reload()}})});a.parentNode.insertBefore(sp,a.nextSibling)})(a,hr,kz[hr]);continue}if(!as){continue}al[as]=(al[as]||0)+1;'
            . 'if(a.hasAttribute("data-sab-asin")||a.closest("[data-sab-ord],#wpadminbar,.sab-karte,.sab-produkt")||!a.closest("article,.entry-content,.hentry,main,.post")){continue}cn[as]=(cn[as]||0)+1;'
            . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(t.indexOf("tauschen")>0){b.className="sab-tb";b.setAttribute("data-o","h"+nth+as)}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b);return b}'
            . 'kn("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};oeffne(0,as)});'
-           . 'var kb=kn("＋ Karte",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};kb.textContent="…";post("sab_stelle_karte",{asin:as,ord:0},function(r){if(r.success){kb.textContent="✓ Karte da";location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr}else{kb.textContent="＋ Karte";alert(r.data)}})});kb.title="Fügt unter dem Absatz eine Karte mit Bild und Link ein (mit Sicherung, rückgängig im Tausch-Fenster)";'
+           . 'var kb=kn("＋ Karte",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};kb.textContent="⏳ Karte wird gebaut …";kb.disabled=true;post("sab_stelle_karte",{asin:as,ord:0},function(r){if(r.success){kb.textContent="✓ Karte da";location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr}else{kb.disabled=false;kb.textContent="＋ Karte";alert(r.data)}})});kb.title="Fügt unter dem Absatz eine Karte mit Bild und Link ein (mit Sicherung, rückgängig im Tausch-Fenster)";'
            . 'if(C.e){kn("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(as)+"&sab_nr="+nr,"_blank")})}'
            . 'a.parentNode.insertBefore(sp,a.nextSibling)})(a,as,cn[as],al[as])}'
            . 'function abBtn(box,top,left,t,title,f){var b=el("button","position:absolute;top:"+top+"px;"+(left?"left":"right")+":4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #8a5a00;border-radius:12px;background:#fff;color:#8a5a00;cursor:pointer;opacity:.9",t);b.type="button";b.title=title;b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f(b)};if(getComputedStyle(box).position==="static"){box.style.position="relative"}box.appendChild(b);return b}'
@@ -5761,7 +5798,7 @@ JS;
 
     /** Kurzname im Stil „Produktart | Merkmal“: Marke und Beiwerk fallen weg, hinten steht eine aussagekräftige Zahl (Anzahl oder Maß), z. B. „Cuello de caracol | Set de 12“. */
     public static function kurzname_aus_titel(string $t): string {
-        $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($t))));
+        $t = self::titel_ohne_marke($t);
         if ($t === '') { return ''; }
         $merk = '';
         if (preg_match('/(\d+(?:[.,]\d+)?\s*(?:m|cm|mm)\s*x\s*\d+(?:[.,]\d+)?\s*(?:m|cm|mm)|\d+(?:[.,]\d+)?(?:\s*x\s*\d+(?:[.,]\d+)?){1,2}\s*(?:m|cm|mm))\b/iu', $t, $m)) {
@@ -7145,7 +7182,7 @@ JS;
     private static function kurzname_wahl_html(string $alt, array $c, array $namen, array $x): string {
         if (($namen[$c['asin']] ?? '') !== '' || empty($x['titel'])) { return ''; }
         $v = self::kurzname_varianten((string) $x['titel']); if (!$v) { return ''; }
-        $h = '<span class="sab-kn" style="display:block;margin-top:6px;border-top:1px dashed #ccc;padding-top:4px"><small><strong>Name im Artikel:</strong></small>';
+        $h = '<span class="sab-kn" style="display:block;margin-top:6px;border-top:1px dashed #ccc;padding-top:4px"><small><strong>Name im Artikel:</strong> kurz, ohne Marke, wenn passend mit Zahl am Ende (z. B. „Schneckenzaun-Set, 14-teilig“)</small>';
         foreach ($v as $i => $n) { $h .= '<br><label style="display:inline"><input type="radio" name="sab_kn[' . esc_attr($alt) . '][' . esc_attr($c['asin']) . ']" value="' . esc_attr($n) . '"' . ($i === 0 ? ' checked' : '') . '> <small>' . esc_html($n) . '</small></label>'; }
         return $h . '</span>';
     }
