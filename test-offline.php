@@ -2009,4 +2009,12 @@ unset($GLOBALS['opt']['widget_block'], $GLOBALS['opt']['sab_widget_backup']);
 $wTi = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000008', 'titel' => 'Buch Y', 'text' => 'Text Y']);
 $GLOBALS['opt']['sab_widget_tiere'] = '1'; $wTi2 = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000008', 'titel' => 'Buch Y', 'text' => 'Text Y']); unset($GLOBALS['opt']['sab_widget_tiere']);
 ok(strpos($wTi, 'sab-tier') === false && strpos($wTi2, 'sab-tier') !== false && strpos($wTi2, 'class="sab-tw" style="display:none"') !== false, 'Widget: Tierchen standardmäßig aus, mit Option an und dann mit sicherem Ausgangszustand (versteckt)');
+// 0.92.13: Widget-CSS kommt auch bei A/B-Widget als erstes und im Fuß
+$GLOBALS['opt']['sab_ab'] = ['cafe0009' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0EZ000009'], 'b' => ['B0EZ000010'], 'w' => 1, 'wf' => ['titel' => 'Buch B', 'text' => 'Text B', 'marke' => 'Buchtipp', 'knopf' => '']]];
+unset($GLOBALS['tr']['sab_alle_asins']);
+$mCss = new ReflectionProperty('SAB', 'widget_css'); $mCss->setAccessible(true); $mCss->setValue(null, false);
+$wAb = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000009', 'titel' => 'Buch A', 'text' => 'Text A']);
+ob_start(); SAB::widget_css_fuss(); $fz = ob_get_clean();
+ok(strpos($wAb, 'id="sab-widget"') !== false && strpos($wAb, 'sab-ab-e') !== false && strpos($fz, 'id="sab-widget-fuss"') !== false && strpos($fz, '.sab-wb') !== false, 'Widget-CSS: auch wenn das erste Widget ein A/B-Test ist; zusätzlich im Seitenfuß');
+$GLOBALS['opt']['sab_ab'] = [];
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
