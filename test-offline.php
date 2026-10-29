@@ -2082,4 +2082,9 @@ $ul2 = $mUu->invoke(null, 'https://link.amazon/AbCdEfGh');
 ok($ul2 === null, 'link.amazon: reiner Kurzcode ohne ASIN wird nicht geraten');
 $ul3 = $mUu->invoke(null, 'https://www.amazon.de/gp/aw/d/B0ABCDEFGH/ref=x');
 ok(is_array($ul3) && $ul3[1] === 'B0ABCDEFGH', 'Amazon: /gp/aw/d/ASIN wird gelesen');
+// 0.92.28: weitere Amazon-Seiten ohne Produkt in Widgets
+$GLOBALS['opt']['widget_text'] = [41 => ['text' => "<a href='http://amazon.de/?tag=x-21&amp;linkCode=ur2'>Amazon</a> <a href=\"https://www.ebay.de/?mkcid=1&campid=5338424950\">eBay</a> <a href=\"https://www.amazon.de/gp/bestsellers/garden\">Bestseller</a>"]];
+$w41 = $mWf->invoke(null);
+ok(isset($w41['text-41']) && $w41['text-41']['fertig'] === true && $w41['text-41']['links'] === [] && count($w41['text-41']['start']) === 2, 'Widget (Text): Startseite ohne www, Amazon-Seite ohne Produkt und eBay sind kein alter Produktlink');
+unset($GLOBALS['opt']['widget_text']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

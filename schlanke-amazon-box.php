@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.27
+ * Version: 0.92.28
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.27';
+    const VERSION = '0.92.28';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -8054,6 +8054,19 @@ JS;
     private static $wi_meldung = [];
 
     /** Widgets mit Amazon-/AAWP-Links. @return array<string,array> Widget-ID => Angaben */
+    /** Art einer Amazon-Adresse in einem Widget: startseite, rezension, suche, liste, andere (Amazon-Seite ganz ohne Produkt) oder '' (Produktlink, kein Amazon). Kurzlinks werden aufgelöst. @return array{0:string,1:string} [Art, aufgelöste Adresse] */
+    private static function widget_seitenart(string $u): array {
+        $u = html_entity_decode(trim($u));
+        if (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $u)) {
+            if (self::umbau_url($u)) { return ['', $u]; }   // ASIN in der Adresse: Produkt
+            $z = self::kurzlink_aufloesen($u); if ($z === '') { return ['', $u]; }
+            $u = $z;
+        }
+        $a = self::seite_art($u); if ($a !== '') { return [$a, $u]; }
+        if (preg_match('#^https?://(?:[a-z0-9-]+\.)*amazon\.[a-z.]{2,6}(?:[/?\#]|$)#i', $u) && !self::umbau_url($u) && !preg_match('#(?:/dp/|/gp/product/|/gp/aw/d/|[?&]asin=)[A-Za-z0-9]{10}#i', $u)) { return ['andere', $u]; }
+        return ['', $u];
+    }
+
     private static function widgets_finden(): array {
         $out = []; $sb = (array) get_option('sidebars_widgets', []);
         foreach (self::WIDGET_OPT as $opt => [$typ, $feld]) {
@@ -8067,8 +8080,9 @@ JS;
                 $start = [];
                 $c_alt = preg_replace_callback('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', function ($m) use (&$start) {
                     $u = html_entity_decode($m[2]);
-                    if (!in_array(self::seite_art($u), ['startseite', 'rezension'], true)) { return $m[0]; }
-                    $start[] = ['url' => $u, 'text' => trim(html_entity_decode(strip_tags($m[3])))];
+                    [$art_, $uz_] = self::widget_seitenart($u);
+                    if ($art_ === '') { return $m[0]; }
+                    $start[] = ['url' => $u, 'art' => $art_, 'text' => trim(html_entity_decode(strip_tags($m[3])))];
                     return ' ';
                 }, $c);
                 $hat_alt = preg_match($re_alt, preg_replace('#\[amz_widget\b[^\]]*\]#', '', (string) $c_alt), $tm) === 1;
@@ -8081,7 +8095,7 @@ JS;
                 if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $am_, PREG_SET_ORDER)) {
                     foreach ($am_ as $a_) {
                         $u_ = html_entity_decode($a_[2]);
-                        if (!preg_match('#^https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co|link\.amazon)(?:[/?\#]|$)#i', $u_) || in_array(self::seite_art($u_), ['startseite', 'rezension'], true)) { continue; }
+                        if (!preg_match('#^https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co|link\.amazon)(?:[/?\#]|$)#i', $u_) || self::widget_seitenart($u_)[0] !== '') { continue; }
                         $uu = self::umbau_url($a_[2]);
                         $lk[] = ['url' => $u_, 'text' => trim(html_entity_decode(strip_tags($a_[3]))), 'asin' => $uu ? (string) $uu[1] : '', 'kurz' => (bool) preg_match('#amzn\.|a\.co/|link\.amazon#i', $u_)];
                     }
@@ -8148,8 +8162,7 @@ JS;
     public static function widget_start_umbauen(string $c): array {
         $n = 0;
         $neu = preg_replace_callback('#<a\b([^>]*)href=(["\'])(.*?)\2([^>]*)>(.*?)</a>#is', function ($m) use (&$n) {
-            $u = html_entity_decode($m[3]);
-            $art = self::seite_art($u);
+            [$art, $u] = self::widget_seitenart(html_entity_decode($m[3]));   // $u: bei Kurzlinks die aufgelöste Adresse
             if ($art !== 'startseite' && $art !== 'rezension') { return $m[0]; }
             $land = preg_match('#amazon\.(es|de|fr|it|co\.uk|com\.au|com|ca)#i', $u, $lm) ? strtolower($lm[1]) : '';
             $cls = preg_match('#\bclass=(["\'])(.*?)\1#i', $m[1] . $m[4], $cm) ? trim(preg_replace('/[^A-Za-z0-9 _-]/', '', $cm[2])) : '';
