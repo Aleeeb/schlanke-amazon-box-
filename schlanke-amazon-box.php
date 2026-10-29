@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.91.0
+ * Version: 0.91.1
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.91.0';
+    const VERSION = '0.91.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7914,6 +7914,45 @@ JS;
         return $h;
     }
 
+    // ---------- Sichtbare Shortcode-Reste finden (z. B. image_width="300") im Widget- und Artikeltext) ----------
+
+    private static $textreste = null;
+
+    /** Text ohne Tags und ohne vollständige [Klammern]: was dann noch wie Shortcode-Attribute aussieht, wird den Besuchern vermutlich als Text gezeigt. @return array<int,array{wo:string,treffer:string,link:string,edit:string}> */
+    public static function textreste_finden(): array {
+        $re = '/\b(?:image_(?:width|height|size)|tracking_id|fields|value)\s*=\s*(?:["“”″\']?)[^\s<>\[\]"“”″\')]{0,40}["“”″\']?\)?/u';
+        $pruefen = function (string $c) use ($re): string {
+            $t = preg_replace('/\[[^\[\]]*\]/', ' ', $c);
+            $t = html_entity_decode(strip_tags((string) $t), ENT_QUOTES, 'UTF-8');
+            return preg_match($re, $t, $m) ? trim($m[0]) : '';
+        };
+        $out = [];
+        foreach (self::WIDGET_OPT as $opt => [$typ, $feld]) {
+            foreach ((array) get_option($opt, []) as $nr => $w) {
+                if (!is_int($nr) || !is_array($w)) { continue; }
+                if (($tr = $pruefen((string) ($w[$feld] ?? ''))) !== '') { $id = $typ . '-' . $nr; $out[] = ['wo' => 'Widget ' . $id, 'treffer' => $tr, 'link' => add_query_arg('sab_widget', $id, self::widget_testseite()), 'edit' => admin_url('widgets.php')]; }
+            }
+        }
+        global $wpdb;
+        if (isset($wpdb)) {
+            $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND (post_content LIKE '%image\\_width%' OR post_content LIKE '%image\\_size%' OR post_content LIKE '%image\\_height%' OR post_content LIKE '%tracking\\_id%' OR post_content LIKE '%fields=%' OR post_content LIKE '%value=%')", ARRAY_A);
+            foreach ((array) $rows as $r) {
+                if (($tr = $pruefen((string) $r['post_content'])) !== '') { $out[] = ['wo' => 'Artikel „' . ((string) $r['post_title'] ?: ('Beitrag ' . $r['ID'])) . '“', 'treffer' => $tr, 'link' => (string) get_permalink((int) $r['ID']), 'edit' => admin_url('post.php?post=' . (int) $r['ID'] . '&action=edit')]; }
+            }
+        }
+        return $out;
+    }
+
+    private static function umbau_textreste_html(): string {
+        $h = '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-textreste')) . '" style="margin:10px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="textreste"><button class="button">Nach sichtbaren Shortcode-Resten suchen</button> <span class="description">Sucht in Widgets und Artikeln nach Textstücken wie <code>image_width="300")</code>, die Besucher als Text sehen könnten.</span></form>';
+        if (self::$textreste === null) { return $h; }
+        $h .= '<div id="sab-textreste" style="max-width:1000px;padding:8px 12px;background:#fff;border:1px solid ' . (self::$textreste ? '#d63638' : '#c3c4c7') . '">';
+        if (!self::$textreste) { return $h . '<strong style="color:#1a7f37">Keine sichtbaren Shortcode-Reste gefunden.</strong></div>'; }
+        $h .= '<strong>' . count(self::$textreste) . ' Fundstelle(n):</strong><ul style="margin:6px 0 0 16px;list-style:disc">';
+        foreach (array_slice(self::$textreste, 0, 60) as $t) { $h .= '<li>' . esc_html($t['wo']) . ': <code>' . esc_html(mb_substr($t['treffer'], 0, 70)) . '</code> <a href="' . esc_url($t['link']) . '" target="_blank" rel="noopener">ansehen ↗</a> · <a href="' . esc_url($t['edit']) . '" target="_blank" rel="noopener">bearbeiten ↗</a></li>'; }
+        return $h . '</ul></div>';
+    }
+
     // ---------- Widgets für die Seitenleiste ----------
 
     const WIDGET_CSS = '.sab-wb,.sab-wt,.sab-wl{box-sizing:border-box;max-width:340px;margin:0 auto 18px;font-family:inherit}.sab-wb{position:relative;background:#fff;border:1px solid #dfe6d8;border-radius:14px;padding:18px 16px 14px;box-shadow:0 2px 10px rgba(40,70,30,.08);text-align:center}.sab-wb .sab-wtag{position:absolute;top:-10px;left:14px;background:#e8873a;color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 10px;border-radius:999px}.sab-wb .sab-wcover{margin:6px auto 12px}.sab-wb .sab-wcover img{display:block;margin:0 auto;max-height:210px;width:auto;max-width:70%;height:auto;border-radius:4px 10px 10px 4px;box-shadow:-4px 4px 0 #cfd9c7,0 6px 14px rgba(0,0,0,.2)}.sab-wb h4{margin:0 0 6px;font-size:17px;line-height:1.25}.sab-wb p{margin:0 0 12px;font-size:14px;line-height:1.45;color:#44543f}.sab-wb a.sab-wbtn{display:block;background:#2f7a3d;color:#fff!important;text-decoration:none!important;font-weight:700;padding:11px 12px;border-radius:9px;font-size:15px}.sab-wb a.sab-wbtn:hover{background:#256331}.sab-wb a.sab-wbtn:after{content:"";position:absolute;inset:0;border-radius:14px}.sab-wb a.sab-walt{position:relative;z-index:2;display:inline-block;margin-top:9px;font-size:13px;color:#2f7a3d}.sab-wb .sab-wnote{font-size:11px;color:#7b8a76;margin-top:8px}.sab-wt{background:linear-gradient(160deg,#fff7e8,#ffeccb);border-radius:14px;padding:16px;border:1px solid #f1d9a8}.sab-wt b{display:block;font-size:17px;margin-bottom:6px}.sab-wt p{margin:0 0 10px;font-size:14px;line-height:1.45}.sab-wt a{display:inline-block;background:#e8873a;color:#fff!important;text-decoration:none!important;font-weight:700;padding:9px 14px;border-radius:9px;font-size:14px}.sab-wl{background:#fff;border-radius:14px;padding:14px 16px;border:1px solid #dfe6d8}.sab-wl h4{margin:0 0 10px;font-size:16px}.sab-wl ol{margin:0;padding:0;list-style:none;counter-reset:n}.sab-wl li{counter-increment:n;display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #edf1e9;font-size:14px}.sab-wl li:first-child{border-top:0}.sab-wl li:before{content:counter(n);flex:none;width:24px;height:24px;border-radius:50%;background:#2f7a3d;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}.sab-wl li a{color:inherit;text-decoration:none}';
@@ -8430,6 +8469,8 @@ JS;
                 $meldung = $da !== '' ? self::asin_rohantwort($da) : 'Bitte eine ASIN eintragen (mehrere mit Komma, höchstens 10).';
             } elseif ($form === 'ab_widget') {
                 $meldung = self::ab_widget_speichern();
+            } elseif ($form === 'textreste') {
+                self::$textreste = self::textreste_finden(); $meldung = self::$textreste ? count(self::$textreste) . ' Fundstelle(n) mit sichtbaren Shortcode-Resten, Liste im Umbau-Reiter unten bei den Widgets.' : 'Keine sichtbaren Shortcode-Reste gefunden.';
             } elseif ($form === 'widget_umbau') {
                 $meldung = self::widget_umbau_lauf();
             } elseif ($form === 'umbau_scan') {
@@ -8749,7 +8790,7 @@ JS;
             }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
-            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::umbau_widgets_html()
+            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::umbau_widgets_html() . self::umbau_textreste_html()
                . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
                . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'

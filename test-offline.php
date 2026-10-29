@@ -1965,4 +1965,9 @@ $mKh3 = new ReflectionMethod('SAB', 'ab_karte_html'); $mKh3->setAccessible(true)
 $k3 = $mKh3->invoke(null, 'cafe0003', $GLOBALS['opt']['sab_ab']['cafe0003'], ['r' => $n3, 'v' => [], 's' => ['/x/' => ['A' => ['n' => 5, 'k' => 1]]], 't' => ['2026-10-29' => ['C' => ['n' => 5, 'k' => 1]], '2026-10-30' => ['C' => ['n' => 9, 'k' => 2]]]], true);
 ok(strpos($k3, 'Klarer Sieger: Paar A') !== false && strpos($k3, 'Variante C') !== false && strpos($k3, 'Wahrscheinlichkeit, die beste zu sein') !== false && strpos($k3, 'sicher besser') !== false, 'A/B/C: Karte zeigt drei Varianten, Gesamttest und Vergleiche');
 $GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['tr']['sab_alle_asins']);
+// 0.89.63: sichtbare Shortcode-Reste
+$GLOBALS['opt']['widget_block'] = [16 => ['content' => '<p><img src="x.jpg"> image_width="300")<br><a href="https://tidd.ly/3zcGOHu">Buch bei Thalia ansehen</a></p>'], 17 => ['content' => '<p>[aawp fields="3895663891" value="thumb" image_size="large" image_width="300"]</p>']];
+$tr = SAB::textreste_finden();
+ok(count($tr) === 1 && $tr[0]['wo'] === 'Widget block-16' && strpos($tr[0]['treffer'], 'image_width') !== false, 'Textreste: sichtbares image_width="300") im Widget gefunden, vollständiger Shortcode nicht (' . json_encode($tr, JSON_UNESCAPED_UNICODE) . ')');
+unset($GLOBALS['opt']['widget_block']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
