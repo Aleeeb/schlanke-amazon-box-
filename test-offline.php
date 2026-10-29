@@ -2026,4 +2026,11 @@ ok(SAB::kurztitel('杭州 ABC123 Schneckenzaun Set aus Kupfer 14-teilig, Schutz 
 ok(mb_strlen(SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm')) <= 48 && preg_match('/\d/', SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm')) === 1, 'Kurztitel: kurz und mit Zahl (' . SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm') . ')');
 $ek = SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Schneckenzaun-Set', 'stil' => 'einzel']);
 ok(strpos($ek, 'sab-karte-einzel') !== false && strpos($ek, 'Haz clic en la imagen') !== false && strpos($ek, 'oferta en Amazon') !== false && substr_count($ek, '<a ') === 1 && strpos($ek, 'Schneckenzaun-Set') < strpos($ek, '<img'), 'Einzelprodukt-Karte: Titel über dem Bild, Klick-auf-das-Bild-Zeile, ein Link (' . $ek . ')');
+// 0.92.16: „Ist okay so, kann bleiben“ im Austausch
+$ob = ['B0OKAY0001' => ['ts' => 1, 'score' => 60]];
+ok(SAB::belassen_gilt('B0OKAY0001', 40, 55, $ob) && !SAB::belassen_gilt('B0OKAY0001', 40, 44, $ob) && !SAB::belassen_gilt('B0OKAY0001', 100, 60, $ob) && !SAB::belassen_gilt('B0ANDERS01', 0, 60, $ob), 'Okay-belassen: bleibt bei kleiner Änderung, kommt zurück bei Score-Absturz oder nicht lieferbar');
+SAB::belassen_setzen('B0OKAY0002', true);
+ok(isset(get_option('sab_austausch_okay', [])['B0OKAY0002']), 'Okay-belassen: wird gemerkt');
+SAB::belassen_setzen('B0OKAY0002', false);
+ok(!isset(get_option('sab_austausch_okay', [])['B0OKAY0002']), 'Okay-belassen: „Wieder prüfen“ nimmt es zurück');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

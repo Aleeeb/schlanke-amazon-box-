@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.15
+ * Version: 0.92.16
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.15';
+    const VERSION = '0.92.16';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -127,6 +127,7 @@ final class SAB {
         add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
         add_action('wp_ajax_sab_kurz_ok',        [__CLASS__, 'ajax_kurz_ok']);
         add_action('wp_ajax_sab_stelle_ok',      [__CLASS__, 'ajax_stelle_ok']);
+        add_action('wp_ajax_sab_stelle_belassen', [__CLASS__, 'ajax_stelle_belassen']);
         add_action('wp_footer',      [__CLASS__, 'fuss'], 5);
         add_action('wp_footer',      [__CLASS__, 'widget_css_fuss'], 6);
         add_filter('pre_set_site_transient_update_plugins', [__CLASS__, 'update_pruefen']);
@@ -2838,6 +2839,32 @@ JS;
         return '';
     }
 
+    /** „Ist okay so, kann bleiben“: Produkt verschwindet aus der Austausch-Liste, bis sich sein Score deutlich verschlechtert oder es nicht mehr lieferbar ist. */
+    public static function belassen_setzen(string $asin, bool $an): void {
+        $o = (array) get_option('sab_austausch_okay', []);
+        if ($an) {
+            $d = self::uebersicht_daten(self::land(''), false); $x = $d['items'][$asin] ?? null;
+            $o[$asin] = ['ts' => time(), 'score' => $x ? (int) self::score(array_merge((array) $x, ['trotz' => isset(((array) get_option('sab_trotz', []))[$asin])]))[0] : -1];
+        } else { unset($o[$asin]); }
+        update_option('sab_austausch_okay', $o, false);
+    }
+
+    /** Gilt „bleiben“ noch? Nein bei nicht lieferbar/dringend (dr >= 100) oder wenn der Score um 15 Punkte und mehr unter den gemerkten gefallen ist. */
+    public static function belassen_gilt(string $asin, int $dr, int $score_jetzt, array $o): bool {
+        if (!isset($o[$asin])) { return false; }
+        if ($dr >= 100) { return false; }
+        $alt = (int) ($o[$asin]['score'] ?? -1);
+        return $alt < 0 || $score_jetzt >= $alt - 15;
+    }
+
+    public static function ajax_stelle_belassen(): void {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0); $asin = self::asin((string) ($_POST['neu'] ?? ''));
+        if (!$pid || !current_user_can('edit_post', $pid) || strlen($asin) !== 10) { wp_send_json_error('Keine Berechtigung.'); }
+        self::belassen_setzen($asin, true);
+        wp_send_json_success(['weiter' => admin_url('admin.php?page=sab-austausch')]);
+    }
+
     public static function ajax_stelle_ok(): void {
         check_ajax_referer('sab_stelle', 'n');
         $pid = (int) ($_POST['post'] ?? 0); $neu = self::asin((string) ($_POST['neu'] ?? ''));
@@ -3052,7 +3079,7 @@ JS;
         $ed = $eid && current_user_can('edit_post', $eid) ? admin_url('post.php?post=' . $eid . '&action=edit&sab_zeige=' . rawurlencode($a)) : '';
         $nr = max(1, (int) ($_GET['sab_nr'] ?? 1));
         $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch'), 'v' => self::kontrolle_code($eid, strtoupper($a)), 't' => self::kontrolle_tab_id($eid, strtoupper($a)) !== '']) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
-        echo '<script>(function(){var KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
+        echo '<script>(function(){var OKX=' . ($eid && current_user_can('edit_post', $eid) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'w' => admin_url('admin.php?page=sab-austausch')]) : 'null') . ',KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
            . 's=(function(l){var o=[],bk="p,div,td,li,figure,h1,h2,h3,h4,h5,h6,section",ck="td,li,.sab-karte,.sab-produkt,.wp-block-column",last=null,lc=null;for(var i=0;i<l.length;i++){var b=l[i].closest(bk)||l[i].parentNode,c=l[i].closest(ck);if(last&&(b===last||(c&&c===lc))){continue}last=b;lc=c;o.push(l[i])}return o})(Array.prototype.slice.call(s));'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px/1.4 sans-serif;text-align:center;display:flex;flex-wrap:wrap;gap:8px 10px;justify-content:center;align-items:center;max-height:45vh;overflow:auto;box-sizing:border-box";'
            . 'var t=document.createElement("span");t.style.cssText="flex:1 1 100%";b.appendChild(t);document.body.appendChild(b);'
@@ -3065,6 +3092,7 @@ JS;
            . 'if(s.length>1){btn("◀ vorige",function(){zeige(idx-1)});btn("nächste ▶",function(){zeige(idx+1)})}'
            . 'btn("⇄ Hier tauschen",function(){var o=s[idx].closest("[data-sab-ord]"),q=o?document.querySelector("button.sab-tb[data-o=\""+o.getAttribute("data-sab-ord")+"\"]"):null;if(!q){var bx=s[idx].closest(".sab-karte,.sab-produkt,td")||s[idx].parentNode;q=bx&&bx.querySelector("button.sab-tb")}if(q){q.scrollIntoView({block:"center"});q.click()}else{t.textContent="Hier gibt es keinen Tauschen-Knopf (feste Stelle im Text): bitte im Editor bearbeiten."}});'
            . 'function kpost(act,f){var fd=new FormData();fd.append("action",act);fd.append("n",KC.n);fd.append("post",KC.p);fd.append("neu",KC.a);fetch(KC.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){t.textContent="Verbindungsfehler"})}'
+           . 'if(OKX&&/^[A-Z0-9]{10}$/.test(a)){var ob=btn("✓ Ist okay so, kann bleiben",function(){var fd=new FormData();fd.append("action","sab_stelle_belassen");fd.append("n",OKX.n);fd.append("post",OKX.p);fd.append("neu",a);fetch(OKX.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){if(r.success){t.textContent="Gemerkt: "+a+" bleibt, bis sich Score oder Lieferbarkeit deutlich ändern. Zurück: Reiter Austausch, Abschnitt „Als okay belassen“.";ob.style.display="none"}else{t.textContent=r.data}}).catch(function(){t.textContent="Verbindungsfehler"})});ob.title="Nimmt das Produkt aus der Austausch-Liste, solange sich Score und Lieferbarkeit nicht stark ändern (rückgängig im Reiter Austausch)"}'
            . 'if(KC&&KC.v&&KC.v.nachher){btn("Code anzeigen",function(e){var d=document.getElementById("sab-code");if(d){d.remove();return}d=document.createElement("textarea");d.id="sab-code";d.readOnly=true;d.style.cssText="position:fixed;left:8px;right:8px;top:56px;height:42vh;z-index:99998;font:12px monospace;padding:8px";d.value="VORHER:\n"+KC.v.vorher+"\n\nNACHHER:\n"+KC.v.nachher;document.body.appendChild(d);d.select()})}'
            . 'if(KC){var ok=btn("✓ Kontrolliert, passt",function(){kpost("sab_stelle_ok",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});ok.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2";var rg=btn("✗ Passt nicht, rückgängig"+(KC.t?" (alle Artikel dieses Tauschs)":""),function(){kpost("sab_stelle_zurueck",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});rg.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2"}'
            . 'if(ed){le=btn("Im Editor bearbeiten",function(e){window.open(e.href,"_blank")});le.href=ed+"&sab_nr="+(idx+1);le.target="_blank";le.onclick=null}'
@@ -7602,7 +7630,7 @@ JS;
         if (count($k['liste']) < 4) { $ohneVorschlag[] = [$alt, $z['name'] !== '' ? (string) $z['name'] : (string) ($xalt['titel'] ?? ''), self::text_vor_stelle((string) $alt, (array) $z['f']), (string) ($xalt['kategorie'] ?? ''), count($k['liste']), (string) ($xalt['titel'] ?? ''), (int) $z['seiten']]; }
         $suchtitel = self::suchtext_aus_satz((string) $z['name'], (string) $alt, self::text_vor_stelle((string) $alt, (array) $z['f']));
         if (!$k['liste']) { $h .= '<p style="margin:0"><em>' . ($z['dr'] < 100 ? 'Kein besserer Ersatz im Bestand: das Produkt ist lieferbar, kein Kandidat hat einen deutlich höheren Score.' : 'Kein passender Kandidat gefunden: <strong>Amazon-Suche nötig</strong> (Titel oder Text davor als Suchwort).') . '</em> <a class="button button-small" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></p>'; }
-        $h .= '</div>'; $optzeile = '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:2px 0 12px;padding:10px 12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:6px;font-size:14px"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="40" style="font-size:14px;padding:4px 6px" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button>' . (self::$tk_sammeln ? (isset(((array) get_option('sab_austausch_hinten', []))[$alt]) ? '<button class="button" name="sab_vorn" value="' . esc_attr($alt) . '" title="Wieder an die ursprüngliche Stelle der Liste">Wieder nach vorn</button>' : '<button class="button" name="sab_hinten" value="' . esc_attr($alt) . '" title="Stellt das Produkt ans Ende der Liste, damit es beim Durchgehen nicht stört">Ans Ende</button>') : '') . '<a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div>'; $h = str_replace('<!--SABOPT' . $alt . '-->', $optzeile, $h); $h .= self::satz_feld_html((string) $alt, (array) $z['f'], (string) $z['name']) . '<div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off" value="' . esc_attr(implode(' ', $sb)) . '"></label> <button type="button" class="button sab-ps-go">Suchen</button>' . ($sb ? '<div style="margin:4px 0"><small>Suchbegriffe aus dem Satz: ' . implode(' ', array_map(fn($w) => '<a href="#" class="sab-ps-chip" data-q="' . esc_attr($w) . '" style="display:inline-block;padding:1px 8px;margin:0 3px 3px 0;border-radius:10px;background:#f0f6fc;border:1px solid #c5d9ed;text-decoration:none">' . esc_html($w) . '</a>', $sb)) . '</small></div>' : '') . '<div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
+        $h .= '</div>'; $optzeile = '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin:2px 0 12px;padding:10px 12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:6px;font-size:14px"><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value=""' . ($voraus ? '' : ' checked') . '> <strong>Nichts tauschen</strong></label><label><input type="radio" name="sab_a[' . esc_attr($alt) . ']" value="__eigen" id="sabr_' . esc_attr($alt) . '"> <strong>Eigene ASIN:</strong> <input type="text" name="sab_eigen[' . esc_attr($alt) . ']" size="40" style="font-size:14px;padding:4px 6px" placeholder="Amazon-Link oder ASIN" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><label><strong>Kurzname:</strong> <input type="text" name="sab_eigen_name[' . esc_attr($alt) . ']" size="22" maxlength="60" placeholder="optional, z. B. Teichfolie 4×6 m" oninput="document.getElementById(\'sabr_' . esc_attr($alt) . '\').checked=true"></label><button class="button button-primary" name="sab_einzeln" value="' . esc_attr($alt) . '" title="Tauscht nur dieses Produkt mit der angewählten Karte oder eigenen ASIN">Jetzt tauschen</button>' . (self::$tk_sammeln ? '<button class="button" name="sab_okay" value="' . esc_attr($alt) . '" title="Nimmt das Produkt aus dieser Liste, solange sich Score und Lieferbarkeit nicht stark ändern">✓ Ist okay so, kann bleiben</button>' : '') . (self::$tk_sammeln ? (isset(((array) get_option('sab_austausch_hinten', []))[$alt]) ? '<button class="button" name="sab_vorn" value="' . esc_attr($alt) . '" title="Wieder an die ursprüngliche Stelle der Liste">Wieder nach vorn</button>' : '<button class="button" name="sab_hinten" value="' . esc_attr($alt) . '" title="Stellt das Produkt ans Ende der Liste, damit es beim Durchgehen nicht stört">Ans Ende</button>') : '') . '<a class="button" href="' . esc_url(self::such_link($suchtitel)) . '" target="_blank" rel="noopener">Bei Amazon nach dem Titel suchen</a></div>'; $h = str_replace('<!--SABOPT' . $alt . '-->', $optzeile, $h); $h .= self::satz_feld_html((string) $alt, (array) $z['f'], (string) $z['name']) . '<div class="sab-ps" data-alt="' . esc_attr($alt) . '" style="margin:10px 0 0"><label><strong>Im ganzen Bestand suchen:</strong> <input type="search" class="sab-ps-in" size="34" placeholder="Name, Stichwort oder ASIN eintippen" autocomplete="off" value="' . esc_attr(implode(' ', $sb)) . '"></label> <button type="button" class="button sab-ps-go">Suchen</button>' . ($sb ? '<div style="margin:4px 0"><small>Suchbegriffe aus dem Satz: ' . implode(' ', array_map(fn($w) => '<a href="#" class="sab-ps-chip" data-q="' . esc_attr($w) . '" style="display:inline-block;padding:1px 8px;margin:0 3px 3px 0;border-radius:10px;background:#f0f6fc;border:1px solid #c5d9ed;text-decoration:none">' . esc_html($w) . '</a>', $sb)) . '</small></div>' : '') . '<div class="sab-ps-out" style="margin-top:4px;max-width:760px"></div></div><p style="margin:6px 0 0">' . ''
             . ($k['aussortiert'] ? ' <small class="description">· ' . count($k['aussortiert']) . ' Vorschläge aussortiert, weil sie nicht zum Produkt passen (z. B. „' . esc_html(mb_substr((string) $k['aussortiert'][0]['titel'], 0, 50)) . '“)</small>' : '') . '</p></div>';
         return $h;
     }
@@ -7638,6 +7666,15 @@ JS;
             if ($seiten === 0) { continue; }   // steht in keinem Artikel: kein Handlungsbedarf
             $toet = self::toetend_asin((string) $alt, (array) $d);   // steht schon in Artikeln, obwohl es Tiere töten kann: ganz nach oben, Ersatz suchen
             $zeilen[] = ['alt' => $alt, 'grund' => $toet ? 'Tierschutz-Prüfung: Begriff „' . self::toetend_wort((string) $alt, (array) $d) . '“ im Titel, bitte prüfen' : $grund, 'seiten' => $seiten, 'n' => $n, 'name' => (preg_match('/^\s*(angebote?\s+bei\s+amazon|bei\s+amazon|amazon|hier|jetzt|zum\s+produkt|ansehen|link)\b/iu', (string) self::anzeige_name($alt, (array) $d, $fund)) ? '' : self::anzeige_name($alt, (array) $d, $fund)), 'prio' => $toet ? 1000 * max(1, $seiten) : ($dring[$alt] ?? 100) * max(1, $seiten), 'dr' => $toet ? 1000 : ($dring[$alt] ?? 100), 'f' => $f];
+        }
+        $okay = (array) get_option('sab_austausch_okay', []); $okay_liste = [];
+        if ($okay) {   // „Ist okay so, kann bleiben“: ausblenden, solange Score und Lieferbarkeit sich nicht stark ändern
+            $zeilen = array_values(array_filter($zeilen, function ($z_) use ($okay, $d, $trotz, &$okay_liste) {
+                $a_ = (string) $z_['alt']; $x_ = $d['items'][$a_] ?? null;
+                $sc_ = $x_ ? (int) self::score(array_merge((array) $x_, ['trotz' => isset($trotz[$a_])]))[0] : 0;
+                if (self::belassen_gilt($a_, (int) $z_['dr'], $sc_, $okay)) { $okay_liste[$a_] = [$z_, $sc_]; return false; }
+                return true;
+            }));
         }
         usort($zeilen, fn($a, $b) => [(int) ($b['dr'] >= 100), $b['prio'], $b['n']] <=> [(int) ($a['dr'] >= 100), $a['prio'], $a['n']]);   // zuerst alles Nicht-Lieferbare/ohne Bild, darin nach Priorität; danach der Rest
         // Produkte ohne Bild (laut Warnliste, von Amazon unbekannt oder ohne Bild und ohne eigenes Bild) kommen als eigene Dringend-Liste nach oben: zuerst die auf den meisten Seiten
@@ -7679,6 +7716,11 @@ JS;
         $n_karten = max(0, min($zaehler, $ladeLimit)); $n_warte = count(self::$tk_warte); $n_toet = count(self::$tk_toet);
         $h = str_replace('<!--SAB_ZZ-->', '(' . count($zeilen) . ' Produkte: ' . $n_karten . ' als Karte' . ($n_warte ? ', ' . $n_warte . ' warten auf die Amazon-Suche' : '') . ($n_toet ? ', ' . $n_toet . ' tierschädlich mit Entscheidung nötig' : '') . (count($zeilen) > $ladeLimit ? ', Rest später' : '') . '; ein Produkt zählt einmal, egal wie viele Bild- und Textlinks es hat)', $h);
         $h .= self::austausch_abschnitte_html($d, $land);
+        if ($okay_liste) {
+            $h .= '<h3 style="margin:22px 0 6px;color:#555">Als okay belassen (' . count($okay_liste) . ')</h3><p class="description">Diese Produkte hast du als „Ist okay so, kann bleiben“ markiert. Sie kommen von selbst zurück, wenn der Score um 15 Punkte oder mehr fällt oder das Produkt nicht mehr lieferbar ist.</p><ul>';
+            foreach ($okay_liste as $a_ => [$z_, $sc_]) { $h .= '<li><code>' . esc_html($a_) . '</code> ' . esc_html((string) $z_['name']) . ' <small>(Score jetzt ' . (int) $sc_ . ', gemerkt ' . (int) ($okay[$a_]['score'] ?? 0) . ')</small> <button class="button button-small" name="sab_okay_weg" value="' . esc_attr($a_) . '">Wieder prüfen</button></li>'; }
+            $h .= '</ul>';
+        }
         $h .= ($zeilen ? '<p><button class="button button-primary button-hero">Auswahl tauschen (jeweils mit Sicherung)</button> <span class="description">Der Tausch gilt in allen Artikeln, Titel und Textlinks folgen dem neuen Bildprodukt. Bis zu 10 pro Klick.</span></p>' : '<p>Nichts zu tauschen.</p>') . '</form>';
         $pr_ = self::ersatz_prompt_html($ohneVorschlag); $no_ = self::name_offen_html();   // Hilfsmittel für die Suche-Sitzung stehen unten, damit die Tauschliste oben beginnt
         $h = str_replace('<!--SAB_HINWEIS-->', ($pr_ !== '' || $no_ !== '') ? '<p class="description">Aufgaben für die Helfer-Sitzungen (Suche-Prompt, Kurznamen prüfen) stehen im Reiter <a href="' . esc_url(admin_url('admin.php?page=sab-helfer')) . '">Helferaufgaben</a>.</p>' : '', $h);
@@ -8709,7 +8751,11 @@ JS;
                 $meldung = 'Angefordert. Die Mac-Sitzung sucht vor der nächsten Austauschrunde bei Amazon und trägt die Treffer hier ein.';
             } elseif ($form === 'austausch_viele') {
                 $hv = self::asin((string) ($_POST['sab_hinten'] ?? '')); $vo = self::asin((string) ($_POST['sab_vorn'] ?? '')); $eb = self::asin((string) ($_POST['sab_ebay_ein'] ?? ''));
-                if ($eb !== '') {
+                $ok1 = self::asin((string) ($_POST['sab_okay'] ?? '')); $ok0 = self::asin((string) ($_POST['sab_okay_weg'] ?? ''));
+                if ($ok1 !== '' || $ok0 !== '') {
+                    self::belassen_setzen($ok1 !== '' ? $ok1 : $ok0, $ok1 !== '');
+                    $meldung = $ok1 !== '' ? $ok1 . ' bleibt, wie es ist, und steht nicht mehr in der Liste (unten unter „Als okay belassen“ wieder holbar).' : $ok0 . ' wird wieder geprüft.';
+                } elseif ($eb !== '') {
                     $meldung = self::ebay_einfuegen($eb, trim(sanitize_text_field(wp_unslash((string) ($_POST['sab_ebay_term'][$eb] ?? '')))));
                 } elseif ($hv !== '' || $vo !== '') {
                     $hl = (array) get_option('sab_austausch_hinten', []);
