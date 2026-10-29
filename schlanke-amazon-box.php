@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.62
+ * Version: 0.91.0
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.62';
+    const VERSION = '0.91.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -112,10 +112,13 @@ final class SAB {
         add_filter('do_shortcode_tag',     [__CLASS__, 'ord_post'], 10, 4);
         add_filter('the_content',          [__CLASS__, 'ord_reset'], 9);
         add_filter('the_content',          [__CLASS__, 'attr_reparieren'], 8);
+        add_filter('the_content',          [__CLASS__, 'ab_inhalt'], 7);
         add_action('wp_footer',            [__CLASS__, 'stellen_skript'], 97);
         add_action('wp_footer',            [__CLASS__, 'widget_zeige_skript'], 100);
         add_action('wp_footer',            [__CLASS__, 'geo_skript'], 98);
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
+        add_action('wp_ajax_sab_ab_schalten',    [__CLASS__, 'ajax_ab_schalten']);
+        add_action('wp_ajax_sab_ab_einzel',      [__CLASS__, 'ajax_ab_einzel']);
         add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
         add_action('wp_ajax_sab_stelle_karte',   [__CLASS__, 'ajax_stelle_karte']);
         add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
@@ -1932,6 +1935,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     private static function a_attr(string $asin, string $slot = '', string $var = ''): string {
         self::$genutzt = true;
         self::$links++;
+        if ($slot === '' && $var === '' && self::$ab_ctx) { $slot = self::$ab_ctx['slot']; $var = self::$ab_ctx['var']; }   // Karte gehört zu einem Viererblock-Test: Klick zählt für Paar A oder B
         // data-Attribute: die Mini-Statistik kann Klicks damit dem Produkt und der Ersatzliste zuordnen
         $gt = '';
         $nm = (string) (self::produkte()[$asin] ?? ''); if ($nm === '') { $pp = self::produkt($asin, self::land('')); $nm = (string) ($pp['titel'] ?? ''); }
@@ -2240,7 +2244,12 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         // wpautop macht aus den Zeilenumbrüchen zwischen den Karten <br> und <p>: das würde im Raster zusätzliche Spalten erzeugen
         $inhalt = preg_replace('#</?p\b[^>]*>|<br\s*/?>#i', '', (string) $inhalt);
         $n = max(1, min(4, substr_count($inhalt, '[amz_karte')));
-        return '<div class="sab-karten" style="grid-template-columns:repeat(' . $n . ',minmax(0,1fr))">' . do_shortcode(trim($inhalt)) . '</div>';
+        $ab = self::ab_karten_start($a);
+        $abx = is_array($a) && !empty($a['abx']) && preg_match('/^[a-f0-9]{8}$/', (string) $a['abx']) ? (string) $a['abx'] : '';
+        if ($ab) { self::$ab_ctx = ['slot' => 'ab-' . $ab['id'], 'var' => $ab['v']]; }
+        $html = do_shortcode(trim($inhalt));
+        self::$ab_ctx = null;
+        return '<div class="sab-karten" style="grid-template-columns:repeat(' . $n . ',minmax(0,1fr))"' . ($ab ? ' data-sab-ab="' . esc_attr($ab['id']) . '" data-sab-abv="' . $ab['v'] . '" data-sab-abo="' . (int) $ab['o'] . '" data-sab-abi="' . (int) $ab['i'] . '"' : '') . ($abx !== '' ? ' data-sab-abx="' . $abx . '"' : '') . '>' . $html . '</div>' . ($ab && $ab['i'] === 2 ? self::ab_skript($ab) : '');
     }
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
@@ -2249,6 +2258,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
         if (strlen($asin) !== 10) { return ''; }
         self::$genutzt = true; self::$karten = true;
+        if (!self::$ab_in && !self::$ab_ctx && ($ez = self::ab_einzel($orig))) { $eh = self::ab_einzel_html($a, $ez); if ($eh !== '') { return $eh; } }
         $p = self::produkt($asin, $land);
         // dein Titel aus dem Artikel bleibt stehen; nach einem Austausch kommt der Kurzname des neuen Produkts
         $titel = ($asin === $orig && trim((string) $a['titel']) !== '') ? esc_html(trim((string) $a['titel'])) : self::sc_titel(['asin' => $asin, 'land' => $land, 'kurz' => 70], '');
@@ -2856,6 +2866,22 @@ JS;
            . 'var kb=kn("＋ Karte",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};kb.textContent="…";post("sab_stelle_karte",{asin:as,ord:0},function(r){if(r.success){kb.textContent="✓ Karte da";location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr}else{kb.textContent="＋ Karte";alert(r.data)}})});kb.title="Fügt unter dem Absatz eine Karte mit Bild und Link ein (mit Sicherung, rückgängig im Tausch-Fenster)";'
            . 'if(C.e){kn("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(as)+"&sab_nr="+nr,"_blank")})}'
            . 'a.parentNode.insertBefore(sp,a.nextSibling)})(a,as,cn[as],al[as])}'
+           . 'function abBtn(box,top,left,t,title,f){var b=el("button","position:absolute;top:"+top+"px;"+(left?"left":"right")+":4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #8a5a00;border-radius:12px;background:#fff;color:#8a5a00;cursor:pointer;opacity:.9",t);b.type="button";b.title=title;b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f(b)};if(getComputedStyle(box).position==="static"){box.style.position="relative"}box.appendChild(b);return b}'
+           . 'function abAus(id,b){b.textContent="…";post("sab_ab_schalten",{id:id,an:0},function(r){if(r.success){location.reload()}else{b.textContent="Fehler";alert(r.data)}})}'
+           . 'var xs=document.querySelectorAll(".sab-karten[data-sab-abx]"),sx={};for(var xi=0;xi<xs.length;xi++){var x=xs[xi],xid=x.getAttribute("data-sab-abx");if(sx[xid]){continue}sx[xid]=1;(function(x,xid,on){abBtn(x,4,1,on?"⚖ A/B-Test läuft: beenden":"⚖ A/B-Test starten","Viererblock als A/B-Test: Besucher sehen nur eines der beiden Paare (nur für dich sichtbar)",function(b){if(on){if(confirm("A/B-Test beenden? Die Zahlen bleiben gespeichert.")){abAus(xid,b)}return}if(!confirm("A/B-Test starten? Besucher sehen dann je zur Hälfte nur das erste oder das zweite Paar. Ziel: 1000 Besuche.")){return}b.textContent="…";post("sab_ab_schalten",{id:xid,an:1},function(r){if(r.success){location.reload()}else{b.textContent="⚖ A/B-Test starten";alert(r.data)}})})})(x,xid,x.hasAttribute("data-sab-ab"))}'
+           . 'function abOeffne(o,asin,id){var ov=el("div","position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto");'
+           . 'var bx=el("div","background:#fff;color:#222;max-width:640px;width:100%;border-radius:10px;padding:18px;font:14px/1.4 sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)");ov.appendChild(bx);ov.onclick=function(e){if(e.target===ov){ov.remove()}};document.body.appendChild(ov);'
+           . 'var BS="padding:6px 12px;border:0;border-radius:6px;background:#8a5a00;color:#fff;cursor:pointer;font-weight:600";bx.appendChild(el("h3","margin:0 0 6px;font-size:18px","A/B-Test: dieses Produkt gegen ein anderes"));var inf=el("p","margin:0 0 10px;color:#555","");bx.appendChild(inf);'
+           . 'if(id){inf.textContent="Für dieses Produkt läuft ein Test. Zahlen: Plugin, Reiter A/B-Tests und Statistik.";var st=el("button",BS,"Test beenden");st.type="button";st.onclick=function(){abAus(id,st)};bx.appendChild(st);return}'
+           . 'inf.textContent="Lade Vorschläge …";var lst=el("div","");bx.appendChild(lst);'
+           . 'function los(neu){if(!confirm("A/B-Test starten? Besucher sehen dann je zur Hälfte das jetzige Produkt oder dieses. Ziel: 1000 Besuche.")){return}inf.style.color="#555";inf.textContent="Starte …";post("sab_ab_einzel",{asin:asin,neu:neu},function(r){if(r.success){location.reload()}else{inf.textContent="Nicht möglich: "+r.data;inf.style.color="#a00"}})}'
+           . 'function zeile(c,sub){var row=el("div","display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eee");if(c.img){var im=el("img","width:56px;height:56px;object-fit:contain;flex:none");im.src=c.img;row.appendChild(im)}var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555",sub));row.appendChild(tx);var bt=el("button",BS,"Dagegen testen");bt.type="button";bt.onclick=function(){los(c.asin)};row.appendChild(bt);return row}'
+           . 'post("sab_stelle_kand",{ord:o,asin:asin},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}inf.textContent="Jetzt: "+r.data.alt+". Der Artikel bleibt unverändert; beide Produkte zählen Klicks, danach siehst du den Sieger.";'
+           . 'var fr=el("div","display:flex;gap:8px;padding:0 0 10px");var ip=el("input","flex:1;padding:6px;border:1px solid #bbb;border-radius:6px");ip.placeholder="Eigene ASIN oder Amazon-Produktlink einfügen";var b2=el("button",BS,"Starten");b2.type="button";b2.onclick=function(){los(ip.value)};fr.appendChild(ip);fr.appendChild(b2);lst.appendChild(fr);'
+           . 'r.data.liste.forEach(function(c){lst.appendChild(zeile(c,"Score "+(c.score===null?"?":c.score)+(c.preis?" · "+c.preis:"")+" · "+c.quelle+(c.ok?"":" · nicht lieferbar")))});'
+           . 'var si=el("input","display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:6px;border:1px solid #bbb;border-radius:6px");si.type="search";si.placeholder="Im Bestand suchen: Name, Stichwort oder ASIN";var so=el("div","");bx.appendChild(si);bx.appendChild(so);'
+           . 'si.oninput=function(){var q=si.value.toLowerCase().trim().split(/\s+/).filter(Boolean);so.textContent="";if(!q.length||si.value.trim().length<2){return}var rs=[];(r.data.ps||[]).forEach(function(p){var h=(p[0]+" "+p[1]+" "+p[2]).toLowerCase(),c=0;q.forEach(function(w){if(h.indexOf(w)>=0){c++}});if(c&&p[0]!==asin){rs.push([c,p])}});rs.sort(function(a,b){return b[0]-a[0]||b[1][3]-a[1][3]});rs.slice(0,8).forEach(function(x){var p=x[1];so.appendChild(zeile({asin:p[0],name:p[1]||p[2]||p[0]},(p[3]>=0?"Score "+p[3]+" · ":"")+p[0]))});if(!rs.length){so.appendChild(el("p","margin:6px 0;color:#555","Kein Treffer im Bestand."))}}})}'
+           . 'var ks=document.querySelectorAll(".sab-karte");for(var qi=0;qi<ks.length;qi++){(function(k){var l=k.querySelector("a[data-sab-ord]");if(!l||k.closest(".sab-karten[data-sab-ab]")){return}var vb=k.closest(".sab-ab-ep");if(vb&&vb.getAttribute("data-v")==="B"){return}var w=k.closest(".sab-ab-e"),o=l.getAttribute("data-sab-ord"),as=l.getAttribute("data-sab-asin");if(getComputedStyle(k).position==="static"){k.style.position="relative"}abBtn(k,56,0,w?"⚖ A/B läuft":"⚖ A/B-Test","Dieses Produkt gegen ein anderes testen (nur für dich sichtbar)",function(){abOeffne(o,as,w?w.getAttribute("data-sab-abe"):"")})})(ks[qi])}'
            . '})();</script>';
     }
 
@@ -3071,13 +3097,692 @@ JS;
         return [is_string($c2) ? $c2 : $c, $n];
     }
 
+    // ---------- A/B-Test der Viererblöcke (zwei Zweierblöcke gegeneinander, ohne Cookie, ohne IP) ----------
+
+    const AB_ZIEL = 1000;   // Standardziel: Besuche (Einblendungen) insgesamt je Test
+    private static int $ab_n = 0;
+    private static ?array $ab_ctx = null;
+    private static array $ab_gesehen = [];
+
+    private static function ab_optionen(): array { $o = get_option('sab_ab', []); return is_array($o) ? $o : []; }
+
+    private static function ab_editor(): bool { return function_exists('is_user_logged_in') && is_user_logged_in() && current_user_can('edit_posts'); }
+
+    private static function ab_aktiv(): array {
+        $out = [];
+        foreach (self::ab_optionen() as $id => $o) { if (!empty($o['an']) && preg_match('/^[a-f0-9]{8}$/', (string) $id)) { $out[(string) $id] = $o; } }
+        return $out;
+    }
+
+    private static function seiten_tabelle(): string { global $wpdb; return $wpdb->prefix . 'sab_seiten'; }
+
+    private static function ab_tabelle(): string { global $wpdb; return $wpdb->prefix . 'sab_ab_ansicht'; }
+
+    /** ASINs aus einer Liste von [amz_karte]-Platzhaltern. */
+    private static function ab_karten_asins(array $karten): array {
+        $as = [];
+        foreach ($karten as $k) { if (preg_match('/\basin\s*=\s*["\']?([A-Za-z0-9]{10})/', $k, $m)) { $as[] = strtoupper($m[1]); } }
+        return $as;
+    }
+
+    /**
+     * Viererblöcke eines Artikels: zwei benachbarte Kartenblöcke mit je zwei Produkten oder ein Kartenblock mit vier Produkten.
+     * Das Paar mit dem kleineren ASIN-Schlüssel ist immer „A“, so zählen gleiche Blöcke auf mehreren Seiten zusammen.
+     * @return array<int,array{s:int,e:int,id:string,p:array}> p = zwei Einträge in Artikelreihenfolge [v => Buchstabe, k => Karten, asins => …]
+     */
+    public static function ab_finde(string $c): array {
+        $out = [];
+        if (stripos($c, '[amz_karten') === false || !preg_match_all('#\[amz_karten(?:\s[^\]]*)?\](.*?)\[/amz_karten\]#is', $c, $km, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { return $out; }
+        $bl = [];
+        foreach ($km as $m) {
+            preg_match_all('#\[amz_karte\b[^\]]*\]#i', $m[1][0], $kk);
+            $bl[] = ['s' => $m[0][1], 'e' => $m[0][1] + strlen($m[0][0]), 'k' => $kk[0], 'ab' => stripos($m[0][0], ' ab=') !== false];
+        }
+        $n = count($bl);
+        for ($i = 0; $i < $n; $i++) {
+            $b = $bl[$i];
+            if ($b['ab']) { continue; }
+            $f = null;
+            if (count($b['k']) === 4) {
+                $f = self::ab_einheit($b['s'], $b['e'], array_slice($b['k'], 0, 2), array_slice($b['k'], 2, 2));
+            } elseif (count($b['k']) === 2 && isset($bl[$i + 1]) && count($bl[$i + 1]['k']) === 2 && !$bl[$i + 1]['ab']) {
+                $gap = substr($c, $b['e'], $bl[$i + 1]['s'] - $b['e']);
+                if (preg_match('#^(?:\s|<p[^>]*>|</p>|<br\s*/?>|&nbsp;|<!--.*?-->)*$#is', $gap)) {
+                    $f = self::ab_einheit($b['s'], $bl[$i + 1]['e'], $b['k'], $bl[$i + 1]['k']);
+                    if ($f) { $i++; }
+                }
+            }
+            if ($f) { $out[] = $f; }
+        }
+        return $out;
+    }
+
+    private static function ab_einheit(int $s, int $e, array $ka, array $kb): ?array {
+        $a = self::ab_karten_asins($ka); $b = self::ab_karten_asins($kb);
+        if (count($a) !== 2 || count($b) !== 2 || count(array_unique($a)) !== 2 || count(array_unique($b)) !== 2 || array_intersect($a, $b)) { return null; }
+        $sa = $a; sort($sa); $sb = $b; sort($sb);
+        $ka_ = implode(',', $sa); $kb_ = implode(',', $sb);
+        $tausch = strcmp($ka_, $kb_) > 0;
+        return ['s' => $s, 'e' => $e, 'id' => substr(md5($tausch ? $kb_ . '|' . $ka_ : $ka_ . '|' . $kb_), 0, 8),
+                'p' => [['v' => $tausch ? 'B' : 'A', 'k' => $ka, 'asins' => $a], ['v' => $tausch ? 'A' : 'B', 'k' => $kb, 'asins' => $b]]];
+    }
+
+    /** the_content (vor den Platzhaltern): Kartenblöcke eines laufenden Tests bekommen die Test-Kennung; Inhalt und Datenbank bleiben unverändert. */
+    public static function ab_inhalt($c) {
+        if (!is_string($c) || stripos($c, '[amz_karten') === false || (function_exists('is_feed') && is_feed())) { return $c; }
+        $akt = self::ab_aktiv(); $ed = self::ab_editor();
+        if (!$akt && !$ed) { return $c; }
+        $neu = ''; $pos = 0;
+        foreach (self::ab_finde($c) as $f) {
+            $neu .= substr($c, $pos, $f['s'] - $pos); $pos = $f['e'];
+            if (empty($akt[$f['id']])) {   // kein Test: nur für angemeldete Redakteure eine Markierung, damit der Knopf „A/B-Test starten“ erscheint
+                $neu .= $ed ? preg_replace('#\[amz_karten\]#i', '[amz_karten abx="' . $f['id'] . '"]', substr($c, $f['s'], $f['e'] - $f['s'])) : substr($c, $f['s'], $f['e'] - $f['s']);
+                continue;
+            }
+            $o = ++self::$ab_n;
+            foreach ($f['p'] as $i => $p) { $neu .= '[amz_karten ab="' . $f['id'] . '" abv="' . $p['v'] . '" abo="' . $o . '" abi="' . ($i + 1) . '"' . ($ed ? ' abx="' . $f['id'] . '"' : '') . ']' . implode('', $p['k']) . '[/amz_karten]'; }
+        }
+        return $pos ? $neu . substr($c, $pos) : $c;
+    }
+
+    /** Kontext für sc_karten: Kennung des Tests, Zweier-Block und das Skript, das einen der beiden zeigt. */
+    private static function ab_karten_start($a): ?array {
+        if (!is_array($a) || empty($a['ab']) || !preg_match('/^[a-f0-9]{8}$/', (string) $a['ab']) || !in_array($a['abv'] ?? '', ['A', 'B'], true)) { return null; }
+        return ['id' => (string) $a['ab'], 'v' => (string) $a['abv'], 'o' => max(1, (int) ($a['abo'] ?? 1)), 'i' => ((int) ($a['abi'] ?? 1)) === 2 ? 2 : 1];
+    }
+
+    private static function ab_skript(array $ab): string {
+        $css = '';
+        if (!self::$ab_gesehen) { $css = '<style>.sab-karten[data-sab-abi="2"]{display:none}</style><noscript><style>.sab-karten[data-sab-abi="2"]{display:grid!important}</style></noscript>'; }
+        self::$ab_gesehen[$ab['id']] = 1;
+        $ed = self::ab_editor() ? 'true' : 'false';
+        return $css . '<script>(function(o,id,ed){var p=document.querySelectorAll(\'.sab-karten[data-sab-abo="\'+o+\'"]\');if(p.length!==2)return;'
+            . 'var f=(location.search.match(/[?&]sab_ab=([AB])/)||[])[1],i=f?(p[0].getAttribute("data-sab-abv")===f?0:1):(ed?0:(Math.random()<.5?0:1));'
+            . 'p[1-i].style.setProperty("display","none","important");p[i].style.setProperty("display","grid","important");'
+            . 'if(!f&&!ed){(window.sabAB=window.sabAB||[]).push({b:id,v:p[i].getAttribute("data-sab-abv")})}})(' . (int) $ab['o'] . ',' . wp_json_encode($ab['id']) . ',' . $ed . ');</script>';
+    }
+
+    // ---- Mathe: zwei Klickraten vergleichen ----
+
+    /** Standardnormalverteilung, Verteilungsfunktion (Abramowitz/Stegun 26.2.17, Fehler < 1e-7). */
+    private static function ab_phi(float $x): float {
+        $t = 1 / (1 + 0.2316419 * abs($x)); $d = 0.3989423 * exp(-$x * $x / 2);
+        $p = $d * $t * (0.3193815 + $t * (-0.3565638 + $t * (1.781478 + $t * (-1.821256 + $t * 1.330274))));
+        return $x > 0 ? 1 - $p : $p;
+    }
+
+    /** Wilson-Bereich (95 %) für eine Rate. @return array{0:float,1:float} */
+    private static function ab_wilson(int $k, int $n): array {
+        if ($n < 1) { return [0.0, 0.0]; }
+        $z = 1.959964; $p = $k / $n; $z2 = $z * $z;
+        $mitte = ($p + $z2 / (2 * $n)) / (1 + $z2 / $n);
+        $halb = $z * sqrt($p * (1 - $p) / $n + $z2 / (4 * $n * $n)) / (1 + $z2 / $n);
+        return [max(0.0, $mitte - $halb), min(1.0, $mitte + $halb)];
+    }
+
+    /** Besuche je Variante, damit eine Rate $p1 gegen $p2 mit 80 % Trefferquote (5 % Fehlalarm) erkannt wird. */
+    private static function ab_bedarf(float $p1, float $p2): ?int {
+        $d = abs($p1 - $p2);
+        if ($d < 1e-9 || $p1 <= 0 && $p2 <= 0) { return null; }
+        $n = pow(1.959964 + 0.841621, 2) * ($p1 * (1 - $p1) + $p2 * (1 - $p2)) / ($d * $d);
+        return $n > 5000000 ? null : (int) ceil($n);
+    }
+
+    /**
+     * Kleinster Unterschied (absolut), den ein Test mit $n Besuchen je Variante bei der Rate $p mit 80 % Trefferquote erkennt.
+     */
+    private static function ab_kleinster_unterschied(float $p, int $n): float {
+        if ($n < 1 || $p <= 0 || $p >= 1) { return 0.0; }
+        return (1.959964 + 0.841621) * sqrt(2 * $p * (1 - $p) / $n);
+    }
+
+    /**
+     * Auswertung eines Tests. n = Einblendungen, k = Klicks je Variante; $ziel = Besuche insgesamt.
+     * @return array<string,mixed>
+     */
+    public static function ab_bewerten(int $nA, int $kA, int $nB, int $kB, int $ziel = self::AB_ZIEL): array {
+        $pA = $nA > 0 ? min(1, $kA / $nA) : 0.0; $pB = $nB > 0 ? min(1, $kB / $nB) : 0.0;
+        $r = ['nA' => $nA, 'kA' => $kA, 'nB' => $nB, 'kB' => $kB, 'pA' => $pA, 'pB' => $pB, 'ziel' => $ziel, 'gesamt' => $nA + $nB];
+        $r['sdA'] = sqrt($pA * (1 - $pA)); $r['sdB'] = sqrt($pB * (1 - $pB));   // Streuung eines einzelnen Besuchs (Klick ja/nein)
+        $r['seA'] = $nA > 0 ? sqrt($pA * (1 - $pA) / $nA) : 0.0; $r['seB'] = $nB > 0 ? sqrt($pB * (1 - $pB) / $nB) : 0.0;   // Standardfehler der Rate
+        $r['ciA'] = self::ab_wilson($kA, $nA); $r['ciB'] = self::ab_wilson($kB, $nB);
+        $r['fortschritt'] = $ziel > 0 ? min(1, ($nA + $nB) / $ziel) : 1.0;
+        $r['status'] = 'leer'; $r['sieger'] = ''; $r['p_wert'] = null; $r['wahrsch_A'] = null; $r['diff'] = $pA - $pB; $r['diff_ci'] = [0.0, 0.0]; $r['noch'] = null; $r['kleinster'] = null;
+        if ($nA < 1 || $nB < 1) { return $r; }
+        $sd = sqrt($r['seA'] ** 2 + $r['seB'] ** 2);
+        $r['diff_ci'] = [$r['diff'] - 1.959964 * $sd, $r['diff'] + 1.959964 * $sd];
+        // Zweiseitiger Test auf gleiche Raten (gemeinsame Rate unter der Annahme „kein Unterschied“)
+        $pg = ($kA + $kB) / ($nA + $nB); $se0 = sqrt($pg * (1 - $pg) * (1 / $nA + 1 / $nB));
+        if ($se0 > 0) { $z = $r['diff'] / $se0; $r['z'] = $z; $r['p_wert'] = min(1.0, 2 * (1 - self::ab_phi(abs($z)))); }
+        // Wahrscheinlichkeit „A ist wirklich besser“: Beta-Verteilungen (Gleichverteilung als Startwissen), Normalnäherung der Differenz
+        $aA = 1 + $kA; $bA = 1 + $nA - $kA; $aB = 1 + $kB; $bB = 1 + $nB - $kB;
+        $mA = $aA / ($aA + $bA); $mB = $aB / ($aB + $bB);
+        $vA = $aA * $bA / ((($aA + $bA) ** 2) * ($aA + $bA + 1)); $vB = $aB * $bB / ((($aB + $bB) ** 2) * ($aB + $bB + 1));
+        $r['wahrsch_A'] = self::ab_phi(($mA - $mB) / sqrt($vA + $vB));
+        $mehr = max($r['wahrsch_A'], 1 - $r['wahrsch_A']); $vorn = $r['wahrsch_A'] >= 0.5 ? 'A' : 'B';
+        $r['sicherheit'] = $mehr; $r['vorn'] = $vorn;
+        $nm = min($nA, $nB);
+        $nb = self::ab_bedarf($pA, $pB);
+        $r['noch'] = $nb === null ? null : max(0, $nb - $nm);
+        $r['bedarf'] = $nb;
+        $pm = ($pA + $pB) / 2;
+        $r['kleinster'] = $pm > 0 ? self::ab_kleinster_unterschied($pm, (int) max(1, $ziel / 2)) : null;   // bei Ziel-Besuchen, je Hälfte
+        if ($nA + $nB < $ziel) { $r['status'] = 'laeuft'; return $r; }
+        if ($kA + $kB < 10) { $r['status'] = 'wenig'; return $r; }
+        if ($r['p_wert'] !== null && $r['p_wert'] < 0.05) { $r['status'] = 'klar'; $r['sieger'] = $vorn; }
+        elseif ($mehr >= 0.90) { $r['status'] = 'tendenz'; $r['sieger'] = $vorn; }
+        else { $r['status'] = 'gleich'; }
+        return $r;
+    }
+
+
+    // ---- Einzelprodukt-Test: eine Karte gegen ein anderes Produkt (nur [amz_karte]) ----
+    private static bool $ab_in = false;
+
+    /** Laufender Test für diese ASIN: ['id' => …, 'b' => ASIN] oder null. */
+    private static function ab_einzel(string $asin): ?array {
+        foreach (self::ab_aktiv() as $id => $o) {
+            if (!empty($o['e']) && ($o['a'][0] ?? '') === $asin && strlen((string) ($o['b'][0] ?? '')) === 10) { return ['id' => $id, 'b' => (string) $o['b'][0]]; }
+        }
+        return null;
+    }
+
+    /** Zwei Karten in einer Hülle (display:contents, bleibt im Raster eine Zelle); das Skript zeigt eine davon. */
+    private static function ab_einzel_html(array $a, array $ez): string {
+        self::$ab_in = true; $o = ++self::$ab_n;
+        self::$ab_ctx = ['slot' => 'ab-' . $ez['id'], 'var' => 'A']; $ha = self::sc_karte($a);
+        $b = $a; $b['asin'] = $ez['b']; $b['titel'] = ''; $b['ebay'] = ''; $b['campid'] = '';
+        self::$ab_ctx = ['slot' => 'ab-' . $ez['id'], 'var' => 'B']; $hb = self::sc_karte($b);
+        self::$ab_ctx = null; self::$ab_in = false;
+        if ($ha === '' || $hb === '') { return ''; }
+        return self::ab_huelle($ez['id'], [$ha, $hb], $o);
+    }
+
+    /** Zwei Varianten in einer Hülle (display:contents, bleibt im Raster oder in der Seitenleiste eine Zelle); das Skript zeigt eine davon. */
+    private static function ab_huelle(string $id, array $panes, int $o): string {
+        $ed = self::ab_editor() ? 'true' : 'false'; $h = '';
+        foreach (array_values($panes) as $i => $x) { $h .= '<div class="sab-ab-ep" data-v="' . chr(65 + $i) . '" style="display:' . ($i === 0 ? 'contents' : 'none') . '">' . $x . '</div>'; }
+        return '<div class="sab-ab-e" data-sab-abe="' . esc_attr($id) . '" data-sab-abo="' . $o . '" style="display:contents">' . $h . '</div>'
+            . '<script>(function(o,id,ed){var w=document.querySelector(\'.sab-ab-e[data-sab-abo="\'+o+\'"]\');if(!w)return;var p=w.children,n=p.length,f=(location.search.match(/[?&]sab_ab=([ABC])/)||[])[1],i=f?Math.min(n-1,f.charCodeAt(0)-65):(ed?0:Math.floor(Math.random()*n)),j;'
+            . 'for(j=0;j<n;j++){p[j].style.setProperty("display",j===i?"contents":"none","important")}'
+            . 'if(!f&&!ed){(window.sabAB=window.sabAB||[]).push({b:id,v:p[i].getAttribute("data-v")})}})(' . $o . ',' . wp_json_encode($id) . ',' . $ed . ');</script>';
+    }
+
+    // ---- Widget-Test (Seitenleiste): Buch-Karte gegen ein anderes Produkt ----
+    private static function ab_widget(string $asin): ?array {
+        foreach (self::ab_aktiv() as $id => $o) {
+            if (!empty($o['w']) && ($o['a'][0] ?? '') === $asin && strlen((string) ($o['b'][0] ?? '')) === 10) { return ['id' => $id, 'f' => (array) ($o['wf'] ?? []), 'b' => (string) $o['b'][0], 'c' => strlen((string) ($o['c'][0] ?? '')) === 10 ? (string) $o['c'][0] : '', 'fc' => (array) ($o['wfc'] ?? [])]; }
+        }
+        return null;
+    }
+
+    private static function ab_widget_html(array $a, array $wz): string {
+        self::$ab_in = true; $o = ++self::$ab_n;
+        self::$ab_ctx = ['slot' => 'ab-' . $wz['id'], 'var' => 'A']; $ha = self::sc_widget($a);
+        $b = $a; $b['asin'] = $wz['b']; $b['alt_text'] = ''; $b['alt_url'] = '';
+        foreach (['titel', 'text', 'marke', 'knopf'] as $k) { $b[$k] = (string) ($wz['f'][$k] ?? ''); }
+        self::$ab_ctx = ['slot' => 'ab-' . $wz['id'], 'var' => 'B']; $hb = self::sc_widget($b);
+        $panes = [$ha, $hb];
+        if ($wz['c'] !== '') {
+            $c = $a; $c['asin'] = $wz['c']; $c['alt_text'] = ''; $c['alt_url'] = '';
+            foreach (['titel', 'text', 'marke', 'knopf'] as $k) { $c[$k] = (string) ($wz['fc'][$k] ?? ''); }
+            self::$ab_ctx = ['slot' => 'ab-' . $wz['id'], 'var' => 'C']; $panes[] = self::sc_widget($c);
+        }
+        self::$ab_ctx = null; self::$ab_in = false;
+        foreach ($panes as $x) { if ($x === '') { return ''; } }
+        return self::ab_huelle($wz['id'], $panes, $o);
+    }
+
+    /** Formular im Umbau-Reiter unter einem fertigen Widget: Test starten oder beenden. */
+    private static function ab_widget_form_html(string $id, array $w): string {
+        if (!preg_match('#\[amz_widget\b[^\]]*\btyp="buch"[^\]]*\basin="([A-Za-z0-9]{10})"#', (string) $w['inhalt'], $m) && !preg_match('#\[amz_widget\b[^\]]*\basin="([A-Za-z0-9]{10})"[^\]]*\btyp="buch"#', (string) $w['inhalt'], $m)) { return ''; }
+        $asin = strtoupper($m[1]); $lauf = null;
+        foreach (self::ab_aktiv() as $tid => $o) { if (!empty($o['w']) && ($o['a'][0] ?? '') === $asin) { $lauf = [$tid, $o]; } }
+        $kopf = '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:8px;border-top:1px solid #eee;padding-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="ab_widget"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><input type="hidden" name="sab_abw_asin" value="' . esc_attr($asin) . '">';
+        if ($lauf) {
+            return $kopf . '<strong>&#9878; A/B-Test läuft:</strong> ' . esc_html($asin) . ' gegen ' . esc_html((string) $lauf[1]['b'][0]) . (!empty($lauf[1]['c'][0]) ? ' gegen ' . esc_html((string) $lauf[1]['c'][0]) : '') . ' (Zahlen im Reiter A/B-Tests und in der Statistik) <button class="button" name="sab_abw" value="stop:' . esc_attr($lauf[0]) . '" onclick="return confirm(\'Test beenden? Die Zahlen bleiben gespeichert.\')">Test beenden</button></form>';
+        }
+        return $kopf . '<details><summary><strong>&#9878; A/B-Test: dieses Widget gegen ein anderes Produkt</strong></summary><p class="description">Besucher sehen je zur Hälfte (mit dritter Variante je zu einem Drittel) diese Karte oder die Karte mit dem anderen Produkt. Das Widget selbst bleibt unverändert. Leere Felder bleiben leer (außer dem Titel, der dann der Kurzname des Produkts ist).</p>'
+            . '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">'
+            . '<label>ASIN oder Amazon-Link des anderen Produkts<br><input type="text" name="sab_abw_neu" style="width:100%"></label><label>Etikett<br><input type="text" name="sab_abw_marke" style="width:100%"></label><label>Titel<br><input type="text" name="sab_abw_titel" style="width:100%"></label><label>Kurztext<br><input type="text" name="sab_abw_text" style="width:100%"></label><label>Knopftext (leer = Standard)<br><input type="text" name="sab_abw_knopf" style="width:100%"></label></div>'
+            . '<p class="description" style="margin-top:10px"><strong>Dritte Variante (optional, A/B/C-Test):</strong> ASIN leer lassen für einen reinen A/B-Test.</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">'
+            . '<label>ASIN oder Amazon-Link<br><input type="text" name="sab_abw_c_neu" style="width:100%"></label><label>Etikett<br><input type="text" name="sab_abw_c_marke" style="width:100%"></label><label>Titel<br><input type="text" name="sab_abw_c_titel" style="width:100%"></label><label>Kurztext<br><input type="text" name="sab_abw_c_text" style="width:100%"></label><label>Knopftext (leer = Standard)<br><input type="text" name="sab_abw_c_knopf" style="width:100%"></label></div>'
+            . '<p><button class="button button-primary" name="sab_abw" value="start" onclick="return confirm(\'A/B-Test starten? Besucher sehen dann je zur Hälfte die eine oder die andere Karte. Ziel: 1000 Besuche.\')">Test starten</button></p></details></form>';
+    }
+
+    /** Speichern aus dem Umbau-Reiter. @return string Meldung */
+    private static function ab_widget_speichern(): string {
+        $akt = (string) ($_POST['sab_abw'] ?? ''); $opt = self::ab_optionen();
+        if (strpos($akt, 'stop:') === 0) {
+            $tid = substr($akt, 5);
+            if (!isset($opt[$tid])) { return 'Test nicht gefunden.'; }
+            $opt[$tid]['an'] = 0; update_option('sab_ab', $opt, false); delete_transient('sab_alle_asins');
+            return 'A/B-Test beendet, die Zahlen bleiben gespeichert.';
+        }
+        $asin = self::asin((string) ($_POST['sab_abw_asin'] ?? '')); $neu = self::asin_aus_text((string) wp_unslash($_POST['sab_abw_neu'] ?? ''));
+        if (strlen($asin) !== 10 || strlen($neu) !== 10 || $neu === $asin) { return 'Bitte ein anderes Produkt eintragen (gültige ASIN oder Amazon-Link mit /dp/…). Nichts gestartet.'; }
+        foreach (self::ab_aktiv() as $o) { if (!empty($o['w']) && ($o['a'][0] ?? '') === $asin) { return 'Für dieses Widget läuft schon ein Test.'; } }
+        if (!self::neues_produkt_vorladen($neu)) { return 'Amazon liefert zu ' . $neu . ' gerade kein Bild oder keine Daten. Nichts gestartet.'; }
+        $feld = function (string $pre) use ($neu): array {
+            $t = sanitize_text_field(wp_unslash($_POST[$pre . 'titel'] ?? ''));
+            return ['titel' => $t, 'text' => sanitize_text_field(wp_unslash($_POST[$pre . 'text'] ?? '')), 'marke' => sanitize_text_field(wp_unslash($_POST[$pre . 'marke'] ?? '')), 'knopf' => sanitize_text_field(wp_unslash($_POST[$pre . 'knopf'] ?? ''))];
+        };
+        $wf = $feld('sab_abw_'); if ($wf['titel'] === '') { $wf['titel'] = (string) (self::produkte()[$neu] ?? ''); }
+        $c = ''; $wfc = [];
+        if (trim((string) wp_unslash($_POST['sab_abw_c_neu'] ?? '')) !== '') {
+            $c = self::asin_aus_text((string) wp_unslash($_POST['sab_abw_c_neu']));
+            if (strlen($c) !== 10 || $c === $asin || $c === $neu) { return 'Die dritte Variante braucht ein weiteres, anderes Produkt (gültige ASIN oder Amazon-Link mit /dp/…). Nichts gestartet.'; }
+            if (!self::neues_produkt_vorladen($c)) { return 'Amazon liefert zu ' . $c . ' gerade kein Bild oder keine Daten. Nichts gestartet.'; }
+            $wfc = $feld('sab_abw_c_'); if ($wfc['titel'] === '') { $wfc['titel'] = (string) (self::produkte()[$c] ?? ''); }
+        }
+        $id = substr(md5('w|' . $asin . '|' . $neu . ($c !== '' ? '|' . $c : '')), 0, 8);
+        $opt[$id] = ['an' => 1, 'ziel' => self::AB_ZIEL, 'start' => gmdate('Y-m-d'), 'a' => [$asin], 'b' => [$neu], 'w' => 1, 'wf' => $wf];
+        if ($c !== '') { $opt[$id]['c'] = [$c]; $opt[$id]['wfc'] = $wfc; }
+        update_option('sab_ab', $opt, false); delete_transient('sab_alle_asins');
+        return 'A/B' . ($c !== '' ? '/C' : '') . '-Test gestartet: ' . $asin . ' gegen ' . $neu . ($c !== '' ? ' gegen ' . $c : '') . '. Die Zahlen erscheinen im Reiter A/B-Tests.';
+    }
+
+    /** Frontend-Knopf: Test an oder aus. Viererblock starten (Block muss im Artikel stehen) oder einen laufenden Test beenden. */
+    public static function ajax_ab_schalten(): void {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0);
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $id = (string) ($_POST['id'] ?? '');
+        if (!preg_match('/^[a-f0-9]{8}$/', $id)) { wp_send_json_error('Ungültiger Test.'); }
+        $opt = self::ab_optionen(); $o = $opt[$id] ?? [];
+        if (empty($_POST['an'])) {
+            if (!$o) { wp_send_json_error('Test nicht gefunden.'); }
+            $o['an'] = 0; $opt[$id] = $o; update_option('sab_ab', $opt, false); delete_transient('sab_alle_asins');
+            wp_send_json_success(['an' => 0]);
+        }
+        if (!$o) {
+            $post = get_post($pid); $f = null;
+            if ($post) { foreach (self::ab_finde((string) $post->post_content) as $x) { if ($x['id'] === $id) { $f = $x; break; } } }
+            if (!$f) { wp_send_json_error('Der Viererblock steht nicht mehr so im Artikel.'); }
+            $pa = $f['p'][0]['v'] === 'A' ? $f['p'][0] : $f['p'][1]; $pb = $f['p'][0]['v'] === 'A' ? $f['p'][1] : $f['p'][0];
+            $o = ['a' => $pa['asins'], 'b' => $pb['asins'], 'ziel' => self::AB_ZIEL];
+        }
+        if (empty($o['an']) || empty($o['start'])) { $o['start'] = gmdate('Y-m-d'); }
+        $o['an'] = 1; $opt[$id] = $o; update_option('sab_ab', $opt, false); delete_transient('sab_alle_asins');
+        wp_send_json_success(['an' => 1]);
+    }
+
+    /** Frontend-Knopf an einer Karte: dieses Produkt tritt gegen ein anderes an. */
+    public static function ajax_ab_einzel(): void {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0);
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $asin = self::asin((string) wp_unslash($_POST['asin'] ?? '')); $neu = self::asin_aus_text((string) wp_unslash($_POST['neu'] ?? ''));
+        $post = get_post($pid);
+        if (strlen($asin) !== 10 || strlen($neu) !== 10 || $neu === $asin) { wp_send_json_error('Bitte ein anderes Produkt wählen (gültige ASIN oder Amazon-Link mit /dp/…).'); }
+        if (!$post || stripos((string) $post->post_content, $asin) === false) { wp_send_json_error('Das Produkt steht nicht mehr so im Artikel. Bitte die Seite neu laden.'); }
+        if (self::ab_einzel($asin)) { wp_send_json_error('Für dieses Produkt läuft schon ein Test.'); }
+        if (!self::neues_produkt_vorladen($neu)) { wp_send_json_error('Amazon liefert zu ' . $neu . ' gerade kein Bild oder keine Daten. Nicht gestartet.'); }
+        $id = substr(md5('e|' . $asin . '|' . $neu), 0, 8);
+        $opt = self::ab_optionen();
+        $opt[$id] = ['an' => 1, 'ziel' => self::AB_ZIEL, 'start' => gmdate('Y-m-d'), 'a' => [$asin], 'b' => [$neu], 'e' => 1];
+        update_option('sab_ab', $opt, false); delete_transient('sab_alle_asins');
+        wp_send_json_success(['id' => $id]);
+    }
+
+
+    /**
+     * Auswertung mit drei Varianten (A, B, C). Gesamttest auf gleiche Klickraten (Chi-Quadrat, 2 Freiheitsgrade, p = e^(−χ²/2)),
+     * danach die beste Variante gegen jede andere (Zweistichproben-z, Bonferroni: p mal 2) und die Wahrscheinlichkeit, die beste zu sein (Simulation).
+     * @param array<string,array{0:int,1:int}> $g Buchstabe => [Einblendungen, Klicks]
+     * @return array<string,mixed>
+     */
+    public static function ab_bewerten_n(array $g, int $ziel = self::AB_ZIEL, string $saat = 'x'): array {
+        $r = ['multi' => true, 'ziel' => $ziel, 'v' => [], 'gesamt' => 0, 'status' => 'leer', 'sieger' => '', 'chi_p' => null, 'vorn' => '', 'bestwahrsch' => [], 'vgl' => [], 'noch' => null, 'kleinster' => null];
+        $N = $K = 0; $min = PHP_INT_MAX;
+        foreach ($g as $b => [$n, $k]) {
+            $p = $n > 0 ? min(1, $k / $n) : 0.0;
+            $r['v'][$b] = ['n' => $n, 'k' => $k, 'p' => $p, 'sd' => sqrt($p * (1 - $p)), 'se' => $n > 0 ? sqrt($p * (1 - $p) / $n) : 0.0, 'ci' => self::ab_wilson($k, $n)];
+            $N += $n; $K += $k; $min = min($min, $n);
+        }
+        $r['gesamt'] = $N; $r['fortschritt'] = $ziel > 0 ? min(1, $N / $ziel) : 1.0;
+        if ($min < 1) { return $r; }
+        $pg = $K / $N; $chi = 0.0;
+        if ($pg > 0 && $pg < 1) { foreach ($r['v'] as $x) { $chi += pow($x['k'] - $x['n'] * $pg, 2) / ($x['n'] * $pg * (1 - $pg)); } $r['chi'] = $chi; $r['chi_p'] = exp(-$chi / 2); }
+        uasort($r['v'], fn($a, $b) => $b['p'] <=> $a['p']);   // beste zuerst
+        $letters = array_keys($r['v']); $best = $letters[0]; $r['vorn'] = $best; $zweite = $letters[1];
+        foreach (array_slice($letters, 1) as $b) {
+            $x = $r['v'][$b]; $y = $r['v'][$best];
+            $pp = ($x['k'] + $y['k']) / ($x['n'] + $y['n']); $se0 = sqrt($pp * (1 - $pp) * (1 / $x['n'] + 1 / $y['n']));
+            $z = $se0 > 0 ? ($y['p'] - $x['p']) / $se0 : 0.0; $pw = $se0 > 0 ? 2 * (1 - self::ab_phi(abs($z))) : 1.0;
+            $r['vgl'][$b] = ['p' => min(1.0, $pw), 'p_korr' => min(1.0, $pw * (count($letters) - 1)), 'diff' => $y['p'] - $x['p']];
+        }
+        // Wahrscheinlichkeit, die beste zu sein (Normalnäherung der Beta-Verteilungen, feste Saat => stabile Anzeige)
+        mt_srand(crc32($saat)); $zaehl = array_fill_keys($letters, 0); $T = 6000;
+        $par = [];
+        foreach ($r['v'] as $b => $x) { $a1 = 1 + $x['k']; $b1 = 1 + $x['n'] - $x['k']; $par[$b] = [$a1 / ($a1 + $b1), sqrt($a1 * $b1 / ((($a1 + $b1) ** 2) * ($a1 + $b1 + 1)))]; }
+        for ($t = 0; $t < $T; $t++) {
+            $bm = -1.0; $bb = '';
+            foreach ($par as $b => [$m, $sd]) { $u1 = (mt_rand(1, 2147483646)) / 2147483647; $u2 = mt_rand(1, 2147483646) / 2147483647; $v = $m + $sd * sqrt(-2 * log($u1)) * cos(2 * M_PI * $u2); if ($v > $bm) { $bm = $v; $bb = $b; } }
+            $zaehl[$bb]++;
+        }
+        foreach ($zaehl as $b => $c) { $r['bestwahrsch'][$b] = $c / $T; }
+        $r['sicherheit'] = $r['bestwahrsch'][$best];
+        $za = 2.241403; $zb = 0.841621;   // zweiseitig 5 % geteilt durch 2 Vergleiche, Trefferquote 80 %
+        $p1 = $r['v'][$best]['p']; $p2 = $r['v'][$zweite]['p'];
+        $d = abs($p1 - $p2);
+        $r['noch'] = null;
+        if ($d > 1e-9) { $nb = pow($za + $zb, 2) * ($p1 * (1 - $p1) + $p2 * (1 - $p2)) / ($d * $d); if ($nb < 5000000) { $r['bedarf'] = (int) ceil($nb); $r['noch'] = max(0, (int) ceil($nb) - $r['v'][$zweite]['n']); } }
+        $pm = $pg; $nj = max(1, (int) ($ziel / 3));
+        $r['kleinster'] = $pm > 0 && $pm < 1 ? ($za + $zb) * sqrt(2 * $pm * (1 - $pm) / $nj) : null;
+        if ($N < $ziel) { $r['status'] = 'laeuft'; return $r; }
+        if ($K < 10) { $r['status'] = 'wenig'; return $r; }
+        $alle = true; $einer = false; foreach ($r['vgl'] as $q) { if ($q['p_korr'] >= 0.05) { $alle = false; } else { $einer = true; } }
+        if ($r['chi_p'] !== null && $r['chi_p'] < 0.05 && $alle) { $r['status'] = 'klar'; $r['sieger'] = $best; }
+        elseif ($r['chi_p'] !== null && $r['chi_p'] < 0.05 && $einer) { $r['status'] = 'teils'; }
+        elseif ($r['sicherheit'] >= 0.90) { $r['status'] = 'tendenz'; $r['sieger'] = $best; }
+        else { $r['status'] = 'gleich'; }
+        return $r;
+    }
+
+    /** Einblendungen und Klicks aller Tests, je Test ab dessen Startdatum. @return array<string,array> */
+    private static function ab_zahlen(): array {
+        global $wpdb;
+        $opt = self::ab_optionen(); $out = [];
+        if (!isset($wpdb) || !$opt) { return $out; }
+        $min = gmdate('Y-m-d');
+        foreach ($opt as $id => $o) { $min = min($min, (string) ($o['start'] ?? $min)); }
+        $ta = self::ab_tabelle(); $tk = self::klicktabelle();
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT block, var, pfad, tag, SUM(n) n FROM $ta WHERE tag >= %s GROUP BY block, var, pfad, tag", $min), ARRAY_A) as $r) {
+            $id = (string) $r['block']; if (!isset($opt[$id]) || (string) $r['tag'] < (string) ($opt[$id]['start'] ?? '')) { continue; }
+            $v = in_array($r['var'], ['A', 'B', 'C'], true) ? (string) $r['var'] : 'A';
+            $out[$id]['v'][$v]['n'] = ($out[$id]['v'][$v]['n'] ?? 0) + (int) $r['n'];
+            $out[$id]['s'][$r['pfad']][$v]['n'] = ($out[$id]['s'][$r['pfad']][$v]['n'] ?? 0) + (int) $r['n'];
+            $out[$id]['t'][$r['tag']][$v]['n'] = ($out[$id]['t'][$r['tag']][$v]['n'] ?? 0) + (int) $r['n'];
+        }
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT slot, var, pfad, DATE(ts) d, COUNT(*) n, SUM(zurueck_s IS NOT NULL) z FROM $tk WHERE slot LIKE 'ab-%%' AND ts >= %s GROUP BY slot, var, pfad, DATE(ts)", $min . ' 00:00:00'), ARRAY_A) as $r) {
+            $id = substr((string) $r['slot'], 3); if (!isset($opt[$id]) || (string) $r['d'] < (string) ($opt[$id]['start'] ?? '')) { continue; }
+            $v = in_array($r['var'], ['A', 'B', 'C'], true) ? (string) $r['var'] : 'A';
+            $out[$id]['v'][$v]['k'] = ($out[$id]['v'][$v]['k'] ?? 0) + (int) $r['n'];
+            $out[$id]['v'][$v]['z'] = ($out[$id]['v'][$v]['z'] ?? 0) + (int) $r['z'];
+            $out[$id]['s'][$r['pfad']][$v]['k'] = ($out[$id]['s'][$r['pfad']][$v]['k'] ?? 0) + (int) $r['n'];
+            $out[$id]['t'][$r['d']][$v]['k'] = ($out[$id]['t'][$r['d']][$v]['k'] ?? 0) + (int) $r['n'];
+        }
+        foreach ($out as $id => &$d) { if (!empty($opt[$id]['c'])) { $d['r'] = self::ab_bewerten_n(['A' => [(int) ($d['v']['A']['n'] ?? 0), (int) ($d['v']['A']['k'] ?? 0)], 'B' => [(int) ($d['v']['B']['n'] ?? 0), (int) ($d['v']['B']['k'] ?? 0)], 'C' => [(int) ($d['v']['C']['n'] ?? 0), (int) ($d['v']['C']['k'] ?? 0)]], max(1, (int) ($opt[$id]['ziel'] ?? self::AB_ZIEL)), (string) $id); continue; } $d['r'] = self::ab_bewerten((int) ($d['v']['A']['n'] ?? 0), (int) ($d['v']['A']['k'] ?? 0), (int) ($d['v']['B']['n'] ?? 0), (int) ($d['v']['B']['k'] ?? 0), max(1, (int) ($opt[$id]['ziel'] ?? self::AB_ZIEL))); } unset($d);
+        return $out;
+    }
+
+    /** Alle Viererblöcke der Webseite (Cache 15 Min.): id => [asins => [A, B], seiten => [post_id => Titel]] */
+    private static function ab_scan(bool $neu = false): array {
+        $c = get_transient('sab_ab_scan');
+        if (is_array($c) && !$neu) { return $c; }
+        global $wpdb; $out = [];
+        if (isset($wpdb)) {
+            foreach ((array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND post_content LIKE '%[amz\\_karten%'", ARRAY_A) as $r) {
+                foreach (self::ab_finde((string) $r['post_content']) as $f) {
+                    $a = $f['p'][0]['v'] === 'A' ? $f['p'][0] : $f['p'][1]; $b = $f['p'][0]['v'] === 'A' ? $f['p'][1] : $f['p'][0];
+                    $out[$f['id']]['asins'] = ['A' => $a['asins'], 'B' => $b['asins']];
+                    $out[$f['id']]['seiten'][(int) $r['ID']] = (string) $r['post_title'];
+                }
+            }
+        }
+        set_transient('sab_ab_scan', $out, 15 * MINUTE_IN_SECONDS);
+        return $out;
+    }
+
+    private static function ab_pfad_von(int $id): string { $l = get_permalink($id); return $l ? (string) wp_parse_url($l, PHP_URL_PATH) : ''; }
+
+    private static function ab_produkt_html(string $asin): string {
+        $namen = self::produkte(); $land = self::land('');
+        $p = self::produkt($asin, $land, false, false);
+        $nm = (string) ($namen[$asin] ?? ($p['titel'] ?? $asin));
+        $bild = $p ? self::bild_url($p, $asin, $land) : '';
+        return '<span class="sab-ab-prod">' . ($bild !== '' ? '<img src="' . esc_url($bild) . '" alt="" loading="lazy">' : '<span class="sab-ab-leer"></span>') . '<span>' . esc_html(mb_substr($nm, 0, 60)) . '<br><code>' . esc_html($asin) . '</code></span></span>';
+    }
+
+    private static function ab_pct(float $x, int $dez = 1): string { return number_format($x * 100, $dez, ',', '.') . ' %'; }
+
+    private static function ab_status_text(array $r): array {
+        switch ($r['status']) {
+            case 'klar': return ['ok', 'Klarer Sieger: Paar ' . $r['sieger'], 'Der Unterschied ist so groß, dass er sehr wahrscheinlich nicht vom Zufall kommt.'];
+            case 'tendenz': return ['mid', 'Tendenz zu Paar ' . $r['sieger'], 'Paar ' . $r['sieger'] . ' liegt vorn, aber noch nicht sicher genug. Weiter messen.'];
+            case 'teils': return ['mid', 'Teilweise klar: Variante ' . $r['vorn'] . ' liegt vorn', 'Die beste Variante ist von mindestens einer anderen sicher besser, aber nicht von allen. Weiter messen oder die schwächste Variante streichen.'];
+            case 'gleich': return ['mid', 'Kein erkennbarer Unterschied', 'Beide Paare sind gleich gut oder der Unterschied ist kleiner als messbar. Du kannst das Paar nehmen, das dir besser gefällt.'];
+            case 'wenig': return ['mid', 'Zu wenige Klicks', 'Das Besuchsziel ist erreicht, aber es gab weniger als 10 Klicks. Erst mehr Besuche abwarten.'];
+            case 'laeuft':
+                $h = !empty($r['vorn']) && ($r['sicherheit'] ?? 0) >= 0.8 ? ' Bisher liegt Paar ' . $r['vorn'] . ' vorn.' : '';
+                return ['run', 'Läuft', 'Noch ' . max(0, $r['ziel'] - $r['gesamt']) . ' Besuche bis zum Ziel.' . $h];
+            default: return ['run', 'Noch keine Daten', 'Sobald Besucher die Seite aufrufen, erscheinen hier die Zahlen.'];
+        }
+    }
+
+    private static function ab_css(): string {
+        return '<style>.sab-ab-karte{border:1px solid #dcdcde;border-radius:10px;background:#fff;padding:14px 16px;margin:14px 0;max-width:1100px}'
+            . '.sab-ab-kopf{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;margin:0 0 10px}'
+            . '.sab-ab-badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:600;font-size:12px}.sab-ab-badge.ok{background:#d9f2e0;color:#0a5c25}.sab-ab-badge.mid{background:#fff1cc;color:#6b4b00}.sab-ab-badge.run{background:#e1ecf7;color:#17446d}'
+            . '.sab-ab-paare{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:782px){.sab-ab-paare{grid-template-columns:1fr}}'
+            . '.sab-ab-paar{border:1px solid #e0e0e0;border-radius:8px;padding:10px;border-left-width:6px}.sab-ab-paar.a{border-left-color:#2271b1}.sab-ab-paar.b{border-left-color:#e68a00}.sab-ab-paar.c{border-left-color:#2f9e55}.sab-ab-bereich i.c{background:#2f9e55}.sab-ab-balken .c{background:#2f9e55}.sab-ab-paar.sieg{background:#f4fbf6;box-shadow:0 0 0 2px #46b450 inset}'
+            . '.sab-ab-paar h4{margin:0 0 6px;font-size:14px}.sab-ab-prod{display:flex;gap:8px;align-items:center;margin:4px 0;font-size:12px}.sab-ab-prod img{width:44px;height:44px;object-fit:contain;background:#fff;border:1px solid #eee;border-radius:4px}.sab-ab-leer{width:44px;height:44px;background:#f0f0f1;border-radius:4px;display:inline-block}'
+            . '.sab-ab-zahl{font-size:24px;font-weight:700;line-height:1.1;margin:8px 0 0}.sab-ab-klein{color:#50575e;font-size:12px}'
+            . '.sab-ab-balken{height:12px;background:#eef0f2;border-radius:6px;overflow:hidden;margin:6px 0}.sab-ab-balken i{display:block;height:100%}.sab-ab-balken .a{background:#2271b1}.sab-ab-balken .b{background:#e68a00}.sab-ab-balken .z{background:#46b450}'
+            . '.sab-ab-bereich{position:relative;height:14px;background:#f0f0f1;border-radius:7px;margin:6px 0 2px}.sab-ab-bereich i{position:absolute;top:3px;height:8px;border-radius:4px;opacity:.85}.sab-ab-bereich i.a{background:#2271b1}.sab-ab-bereich i.b{background:#e68a00}'
+            . '.sab-ab-erkl{background:#f6f7f7;border-radius:8px;padding:8px 12px;margin:10px 0 0;font-size:13px}.sab-ab-erkl p{margin:.4em 0}</style>';
+    }
+
+    /** Eine Test-Karte: Produkte beider Paare, Score, Fortschritt, Bereiche, Urteil, Seiten und Verlauf. */
+    private static function ab_karte_html(string $id, array $o, array $z, bool $voll): string {
+        if (!empty($o['c'])) { return self::ab_karte_multi_html($id, $o, $z, $voll); }
+        $r = $z['r'] ?? self::ab_bewerten(0, 0, 0, 0, max(1, (int) ($o['ziel'] ?? self::AB_ZIEL)));
+        [$kl, $titel, $erkl] = self::ab_status_text($r);
+        $h = '<div class="sab-ab-karte"><div class="sab-ab-kopf"><strong>Test ' . esc_html($id) . '</strong><span class="sab-ab-badge ' . $kl . '">' . esc_html($titel) . '</span></div>';
+        $h .= '<p class="sab-ab-klein" style="margin:0 0 8px">' . esc_html($erkl) . '</p>';
+        $h .= '<div class="sab-ab-balken" title="Fortschritt zum Ziel"><i class="z" style="width:' . round($r['fortschritt'] * 100) . '%"></i></div>';
+        $h .= '<p class="sab-ab-klein" style="margin:0 0 10px">' . (int) $r['gesamt'] . ' von ' . (int) $r['ziel'] . ' Besuchen (' . round($r['fortschritt'] * 100) . ' %) · Start ' . esc_html(date_i18n('d.m.Y', strtotime((string) ($o['start'] ?? 'now')))) . '</p>';
+        $h .= '<div class="sab-ab-paare">';
+        $maxp = max(0.0001, $r['pA'], $r['pB'], $r['ciA'][1], $r['ciB'][1]);
+        foreach (['A', 'B'] as $v) {
+            $l = strtolower($v); $asins = (array) ($o[$l] ?? []);
+            $n = $r['n' . $v]; $k = $r['k' . $v]; $p = $r['p' . $v]; $ci = $r['ci' . $v];
+            $sieg = $r['status'] === 'klar' && $r['sieger'] === $v;
+            $h .= '<div class="sab-ab-paar ' . $l . ($sieg ? ' sieg' : '') . '"><h4>Paar ' . $v . ($sieg ? ' &#127942;' : '') . '</h4>';
+            foreach ($asins as $a) { $h .= self::ab_produkt_html((string) $a); }
+            $h .= '<div class="sab-ab-zahl">' . self::ab_pct($p) . '</div><div class="sab-ab-klein">Klickrate: ' . (int) $k . ' Klicks bei ' . (int) $n . ' Einblendungen</div>';
+            $h .= '<div class="sab-ab-bereich" title="95 %-Bereich der wahren Klickrate"><i class="' . $l . '" style="left:' . round(100 * $ci[0] / $maxp / 1.05, 1) . '%;width:' . max(1, round(100 * ($ci[1] - $ci[0]) / $maxp / 1.05, 1)) . '%"></i></div>';
+            $h .= '<div class="sab-ab-klein">Wahrscheinlich zwischen ' . self::ab_pct($ci[0]) . ' und ' . self::ab_pct($ci[1]) . ' (±' . self::ab_pct($r['se' . $v], 2) . ' Streuung)</div></div>';
+        }
+        $h .= '</div>';
+        if ($r['p_wert'] !== null) {
+            $h .= '<p style="margin:12px 0 0"><strong>Verlässlichkeit:</strong> ' . ($r['wahrsch_A'] >= 0.5 ? 'Paar A' : 'Paar B') . ' ist mit <strong>' . self::ab_pct($r['sicherheit'], 0) . '</strong> Wahrscheinlichkeit wirklich besser'
+               . ' · Zufallswert (p) ' . number_format((float) $r['p_wert'], 3, ',', '.') . ' · Unterschied A minus B: ' . ($r['diff'] >= 0 ? '+' : '−') . number_format(abs($r['diff']) * 100, 2, ',', '.') . ' Prozentpunkte (95 %-Bereich ' . number_format($r['diff_ci'][0] * 100, 2, ',', '.') . ' bis ' . number_format($r['diff_ci'][1] * 100, 2, ',', '.') . ')</p>';
+            if ($r['noch'] !== null && $r['status'] !== 'klar') { $h .= '<p class="sab-ab-klein" style="margin:4px 0 0">Wenn der heutige Abstand bleibt, braucht der Test noch etwa ' . (int) $r['noch'] . ' Besuche je Paar, um ihn sicher zu erkennen.</p>'; }
+            if ($r['kleinster'] !== null) { $h .= '<p class="sab-ab-klein" style="margin:4px 0 0">Mit ' . (int) $r['ziel'] . ' Besuchen erkennt der Test nur Unterschiede ab etwa ' . number_format($r['kleinster'] * 100, 1, ',', '.') . ' Prozentpunkten (bei dieser Klickrate).</p>'; }
+        }
+        if ($voll) {
+            if (!empty($z['s'])) {
+                $h .= '<details style="margin:10px 0 0"><summary><strong>Seiten, auf denen der Test läuft (' . count($z['s']) . ')</strong></summary><table class="widefat striped" style="margin-top:6px"><thead><tr><th>Seite</th><th>A: Einbl.</th><th>A: Klicks</th><th>B: Einbl.</th><th>B: Klicks</th></tr></thead><tbody>';
+                foreach ($z['s'] as $pf => $d) { $h .= '<tr><td>' . esc_html((string) $pf) . '</td><td>' . (int) ($d['A']['n'] ?? 0) . '</td><td>' . (int) ($d['A']['k'] ?? 0) . '</td><td>' . (int) ($d['B']['n'] ?? 0) . '</td><td>' . (int) ($d['B']['k'] ?? 0) . '</td></tr>'; }
+                $h .= '</tbody></table></details>';
+            }
+            if (!empty($z['t']) && count($z['t']) > 1) { $h .= self::ab_verlauf_svg($z['t']); }
+        }
+        return $h . '</div>';
+    }
+
+    /** Test-Karte mit drei Varianten. */
+    private static function ab_karte_multi_html(string $id, array $o, array $z, bool $voll): string {
+        $ziel = max(1, (int) ($o['ziel'] ?? self::AB_ZIEL));
+        $r = $z['r'] ?? self::ab_bewerten_n(['A' => [0, 0], 'B' => [0, 0], 'C' => [0, 0]], $ziel, $id);
+        [$kl, $titel, $erkl] = self::ab_status_text($r);
+        $h = '<div class="sab-ab-karte"><div class="sab-ab-kopf"><strong>Test ' . esc_html($id) . ' (drei Varianten)</strong><span class="sab-ab-badge ' . $kl . '">' . esc_html($titel) . '</span></div>';
+        $h .= '<p class="sab-ab-klein" style="margin:0 0 8px">' . esc_html($erkl) . '</p>';
+        $h .= '<div class="sab-ab-balken" title="Fortschritt zum Ziel"><i class="z" style="width:' . round(($r['fortschritt'] ?? 0) * 100) . '%"></i></div>';
+        $h .= '<p class="sab-ab-klein" style="margin:0 0 10px">' . (int) $r['gesamt'] . ' von ' . $ziel . ' Besuchen (' . round(($r['fortschritt'] ?? 0) * 100) . ' %) · Start ' . esc_html(date_i18n('d.m.Y', strtotime((string) ($o['start'] ?? 'now')))) . '</p>';
+        $h .= '<div class="sab-ab-paare" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">';
+        $max = 0.0001; foreach ($r['v'] as $x) { $max = max($max, $x['p'], $x['ci'][1]); }
+        foreach (['A', 'B', 'C'] as $b) {
+            $l = strtolower($b); $x = $r['v'][$b] ?? ['n' => 0, 'k' => 0, 'p' => 0.0, 'se' => 0.0, 'ci' => [0.0, 0.0]];
+            $sieg = $r['status'] === 'klar' && $r['sieger'] === $b;
+            $h .= '<div class="sab-ab-paar ' . $l . ($sieg ? ' sieg' : '') . '"><h4>Variante ' . $b . ($sieg ? ' &#127942;' : '') . '</h4>';
+            foreach ((array) ($o[$l] ?? []) as $a) { $h .= self::ab_produkt_html((string) $a); }
+            $h .= '<div class="sab-ab-zahl">' . self::ab_pct($x['p']) . '</div><div class="sab-ab-klein">Klickrate: ' . (int) $x['k'] . ' Klicks bei ' . (int) $x['n'] . ' Einblendungen</div>'
+               . '<div class="sab-ab-bereich" title="95 %-Bereich der wahren Klickrate"><i class="' . $l . '" style="left:' . round(100 * $x['ci'][0] / $max / 1.05, 1) . '%;width:' . max(1, round(100 * ($x['ci'][1] - $x['ci'][0]) / $max / 1.05, 1)) . '%"></i></div>'
+               . '<div class="sab-ab-klein">Wahrscheinlich zwischen ' . self::ab_pct($x['ci'][0]) . ' und ' . self::ab_pct($x['ci'][1]) . ' (±' . self::ab_pct($x['se'], 2) . ' Streuung)</div>'
+               . (isset($r['bestwahrsch'][$b]) ? '<div class="sab-ab-klein"><strong>' . self::ab_pct($r['bestwahrsch'][$b], 0) . '</strong> Wahrscheinlichkeit, die beste zu sein</div>' : '') . '</div>';
+        }
+        $h .= '</div>';
+        if ($r['chi_p'] !== null) {
+            $h .= '<p style="margin:12px 0 0"><strong>Verlässlichkeit:</strong> Gesamttest „sind die drei Varianten überhaupt verschieden?“: Zufallswert p = ' . number_format((float) $r['chi_p'], 3, ',', '.') . ($r['chi_p'] < 0.05 ? ' (ja, Unterschiede sind wahrscheinlich echt)' : ' (nein, das kann Zufall sein)') . '.</p>';
+            foreach ($r['vgl'] as $b => $q) { $h .= '<p class="sab-ab-klein" style="margin:3px 0 0">Beste (' . esc_html($r['vorn']) . ') gegen ' . esc_html($b) . ': Vorsprung ' . number_format($q['diff'] * 100, 2, ',', '.') . ' Prozentpunkte, p = ' . number_format($q['p'], 3, ',', '.') . ', nach Korrektur für zwei Vergleiche ' . number_format($q['p_korr'], 3, ',', '.') . ($q['p_korr'] < 0.05 ? ' (sicher besser)' : ' (noch nicht sicher)') . '</p>'; }
+            if ($r['noch'] !== null && $r['status'] !== 'klar') { $h .= '<p class="sab-ab-klein" style="margin:4px 0 0">Wenn der heutige Abstand bleibt, braucht der Test noch etwa ' . (int) $r['noch'] . ' Besuche je Variante, um die beste von der zweitbesten sicher zu trennen.</p>'; }
+            if ($r['kleinster'] !== null) { $h .= '<p class="sab-ab-klein" style="margin:4px 0 0">Mit ' . $ziel . ' Besuchen (etwa ' . (int) ($ziel / 3) . ' je Variante) erkennt der Test nur Unterschiede ab etwa ' . number_format($r['kleinster'] * 100, 1, ',', '.') . ' Prozentpunkten.</p>'; }
+        }
+        if ($voll) {
+            if (!empty($z['s'])) {
+                $h .= '<details style="margin:10px 0 0"><summary><strong>Seiten, auf denen der Test läuft (' . count($z['s']) . ')</strong></summary><table class="widefat striped" style="margin-top:6px"><thead><tr><th>Seite</th><th>A: Einbl./Klicks</th><th>B: Einbl./Klicks</th><th>C: Einbl./Klicks</th></tr></thead><tbody>';
+                foreach ($z['s'] as $pf => $d) { $h .= '<tr><td>' . esc_html((string) $pf) . '</td>'; foreach (['A', 'B', 'C'] as $b) { $h .= '<td>' . (int) ($d[$b]['n'] ?? 0) . ' / ' . (int) ($d[$b]['k'] ?? 0) . '</td>'; } $h .= '</tr>'; }
+                $h .= '</tbody></table></details>';
+            }
+            if (!empty($z['t']) && count($z['t']) > 1) { $h .= self::ab_verlauf_svg($z['t']); }
+        }
+        return $h . '</div>';
+    }
+
+    /** Verlauf: Klickrate A und B über die Tage (aufsummiert). */
+    private static function ab_verlauf_svg(array $t): string {
+        ksort($t); $nA = $kA = $nB = $kB = $nC = $kC = 0; $pts = [];
+        foreach ($t as $d => $x) {
+            $nA += (int) ($x['A']['n'] ?? 0); $kA += (int) ($x['A']['k'] ?? 0); $nB += (int) ($x['B']['n'] ?? 0); $kB += (int) ($x['B']['k'] ?? 0); $nC += (int) ($x['C']['n'] ?? 0); $kC += (int) ($x['C']['k'] ?? 0);
+            $pts[] = [$nA > 0 ? $kA / $nA : 0, $nB > 0 ? $kB / $nB : 0, $nC > 0 ? $kC / $nC : 0];
+        }
+        $max = max(0.001, max(array_map('max', $pts))); $n = count($pts); $w = 560; $hh = 110;
+        $lin = ['', '', '']; $hatC = $nC > 0;
+        foreach ($pts as $i => $p) { $x = 8 + ($w - 16) * ($n > 1 ? $i / ($n - 1) : 0); foreach ([0, 1, 2] as $j) { $lin[$j] .= round($x, 1) . ',' . round($hh - 8 - ($hh - 24) * $p[$j] / $max, 1) . ' '; } }
+        return '<details open style="margin:10px 0 0"><summary><strong>Verlauf der Klickrate</strong> <span class="sab-ab-klein">(aufsummiert, höchster Wert ' . self::ab_pct($max) . ')</span></summary><svg viewBox="0 0 ' . $w . ' ' . $hh . '" style="width:100%;max-width:700px;height:auto;background:#fff;border:1px solid #e0e0e0;border-radius:6px" role="img" aria-label="Verlauf der Klickrate"><polyline fill="none" stroke="#2271b1" stroke-width="2.5" points="' . $lin[0] . '"/><polyline fill="none" stroke="#e68a00" stroke-width="2.5" points="' . $lin[1] . '"/>' . ($hatC ? '<polyline fill="none" stroke="#2f9e55" stroke-width="2.5" points="' . $lin[2] . '"/>' : '') . '</svg><p class="sab-ab-klein" style="margin:2px 0 0"><span style="color:#2271b1">&#9632;</span> Paar A &nbsp; <span style="color:#e68a00">&#9632;</span> Paar B' . ($hatC ? ' &nbsp; <span style="color:#2f9e55">&#9632;</span> Variante C' : '') . '</p></details>';
+    }
+
+    private static function ab_erklaerung_html(): string {
+        return '<details class="sab-ab-erkl"><summary><strong>So lese ich die Zahlen</strong></summary>'
+            . '<p><strong>Drei Varianten (A/B/C):</strong> Zuerst prüft ein Gesamttest, ob die drei Klickraten überhaupt verschieden sind (Zufallswert unter 0,05). Dann wird die beste Variante gegen jede andere verglichen; weil dabei zwei Vergleiche laufen, wird der Zufallswert verdoppelt, damit der Test nicht zu leicht „Sieger“ ruft. „Klarer Sieger“ gibt es nur, wenn die beste von beiden anderen sicher besser ist. Außerdem steht dort, mit welcher Wahrscheinlichkeit jede Variante die beste ist. Drei Varianten brauchen mehr Besuche als zwei; bei 1000 Besuchen (etwa 333 je Variante) sieht man nur große Unterschiede.</p>'
+            . '<p><strong>Klickrate</strong> = Klicks geteilt durch Einblendungen. Eine Einblendung zählt, wenn ein Besucher die Seite mit dem Block öffnet und ihm ein Paar gezeigt wird (ohne Cookie, ohne IP).</p>'
+            . '<p><strong>Streuung (±)</strong> ist der Standardfehler: So weit kann die gemessene Rate vom wahren Wert abweichen. Er sinkt mit der Wurzel der Besuche: Mit viermal so vielen Besuchen halbiert sich die Streuung. Die Standardabweichung eines einzelnen Besuchs (Klick ja oder nein) ist √(Rate × (1 − Rate)); bei 4 % Klickrate sind das rund 20 Prozentpunkte, deshalb braucht man viele Besuche.</p>'
+            . '<p><strong>Bereich (95 %)</strong>: Der wahre Wert liegt mit 95 % Sicherheit in diesem Bereich. Überlappen sich die Bereiche stark, ist noch nichts entschieden.</p>'
+            . '<p><strong>Verlässlichkeit</strong>: Die Prozentzahl sagt, wie wahrscheinlich das vorne liegende Paar wirklich besser ist. Ab 95 % und erreichtem Besuchsziel zeigt der Test „klarer Sieger“, ab 90 % „Tendenz“. Der Zufallswert p ist die Gegenprobe: Ist p unter 0,05, ist ein Zufall unwahrscheinlich.</p>'
+            . '<p><strong>Wichtig:</strong> Nicht zwischendurch aufhören, weil gerade ein Paar vorne liegt. Wer oft nachschaut und bei Glück stoppt, bekommt zu oft falsche Sieger. Deshalb wird erst nach dem Besuchsziel ein Sieger erklärt (Start: 1000 Besuche insgesamt, also etwa 500 je Paar). Bei Klickraten um 3 bis 5 % erkennen 1000 Besuche nur große Unterschiede (ungefähr doppelt so viele Klicks); kleinere brauchen mehrere tausend Besuche. Die Zeile „Mit … Besuchen erkennt der Test nur Unterschiede ab …“ zeigt das für jeden Test.</p>'
+            . '<p>Ein Besucher kann mehrere Karten anklicken; gezählt werden Klicks. Beide Paare haben gleich viele Karten, daher bleibt der Vergleich fair.</p></details>';
+    }
+
+    /** Reiter „A/B-Tests“: laufende Tests, alle gefundenen Viererblöcke zum Einschalten, Ziele. */
+    private static function ab_tab_html(): string {
+        $opt = self::ab_optionen(); $zahlen = self::ab_zahlen(); $scan = self::ab_scan(!empty($_POST['sab_ab_neu']));
+        $h = self::ab_css() . '<h2>A/B-Test der Viererblöcke</h2>'
+           . '<p>Ein Viererblock (zwei Zweierblöcke nebeneinander) wird geteilt: Jeder Besucher sieht nur eins der beiden Paare, per Zufall (etwa 50:50), ohne Cookie und ohne IP. Gezählt werden Einblendungen und Klicks je Paar. Im HTML stehen beide Paare, der Artikel in der Datenbank bleibt unverändert. Zum Ansehen: <code>?sab_ab=A</code> oder <code>?sab_ab=B</code> an die Adresse hängen (zählt nicht mit).</p>';
+        $lauf = []; $andere = [];
+        foreach ($opt as $id => $o) { if (!empty($o['an'])) { $lauf[$id] = $o; } else { $andere[$id] = $o; } }
+        $h .= '<h3>Laufende Tests (' . count($lauf) . ')</h3>';
+        if (!$lauf) { $h .= '<p>Noch kein Test läuft. Unten die Blöcke auswählen und speichern.</p>'; }
+        uasort($lauf, fn($a, $b) => strcmp((string) ($b['start'] ?? ''), (string) ($a['start'] ?? '')));
+        foreach ($lauf as $id => $o) {
+            $h .= self::ab_karte_html((string) $id, $o, $zahlen[$id] ?? [], true);
+            $s = $scan[$id]['seiten'] ?? [];
+            if ($s) { $h .= '<p class="sab-ab-klein" style="margin:-8px 0 0 4px">Gefunden in: ' . self::bloecke_artikel_links($s, 8) . '</p>'; }
+        }
+        $h .= self::ab_erklaerung_html();
+        $h .= self::ab_seiten_html();
+        $h .= '<h3 style="margin-top:2em">Alle Viererblöcke (' . count($scan) . ')</h3><p class="description">Gefunden in veröffentlichten Artikeln: zwei benachbarte Kartenblöcke mit je zwei Produkten oder ein Kartenblock mit vier. Neu eingefügte Blöcke erscheinen nach „Neu suchen“. Ziel = Besuche insgesamt.</p>'
+           . '<form method="post" style="margin:0 0 8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="tests"><button class="button" name="sab_ab_neu" value="1">Neu suchen</button></form>'
+           . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="tests"><input type="hidden" name="sab_form" value="ab">';
+        if (!$scan && !$opt) { $h .= '<p>Keine Viererblöcke gefunden. Sie entstehen im Reiter Umbau, wenn Tabellen zu Karten werden.</p>'; }
+        $ids = array_unique(array_merge(array_keys($scan), array_keys($opt)));
+        $h .= '<table class="widefat striped" style="max-width:1100px"><thead><tr><th style="width:60px">Test</th><th>Paar A</th><th>Paar B</th><th>Seiten</th><th style="width:90px">Ziel</th></tr></thead><tbody>';
+        foreach ($ids as $id) {
+            $o = $opt[$id] ?? []; $asins = $scan[$id]['asins'] ?? ['A' => (array) ($o['a'] ?? []), 'B' => (array) ($o['b'] ?? [])];
+            $h .= '<tr><td data-l="Test"><label><input type="checkbox" name="sab_ab_an[' . esc_attr($id) . ']" value="1"' . (!empty($o['an']) ? ' checked' : '') . '> <strong>an</strong></label><br><small><code>' . esc_html($id) . '</code></small>' . (!empty($o['e']) ? '<br><small>Einzelprodukt</small>' : '') . (!empty($o['w']) ? '<br><small>Widget</small>' : '') . '</td>';
+            foreach (['A', 'B'] as $v) { $h .= '<td data-l="Paar ' . $v . '">'; foreach ($asins[$v] as $a) { $h .= self::ab_produkt_html((string) $a); } if ($v === 'B' && !empty($o['c'])) { $h .= '<p class="sab-ab-klein" style="margin:6px 0 2px"><strong>Variante C:</strong></p>'; foreach ((array) $o['c'] as $a) { $h .= self::ab_produkt_html((string) $a); } } $h .= '</td>'; }
+            $s = $scan[$id]['seiten'] ?? [];
+            $h .= '<td data-l="Seiten">' . ($s ? self::bloecke_artikel_links($s, 6) : '<em>nicht mehr gefunden</em>') . '</td>'
+               . '<td data-l="Ziel"><input type="number" min="100" step="100" name="sab_ab_ziel[' . esc_attr($id) . ']" value="' . (int) ($o['ziel'] ?? self::AB_ZIEL) . '" style="width:80px"></td></tr>';
+        }
+        $h .= '</tbody></table><p><button class="button button-primary">Speichern</button> <button class="button" name="sab_ab_null" value="1" onclick="return confirm(\'Zähler der angehakten Tests auf null setzen und neu starten?\')">Zähler der angehakten Tests neu starten</button></p></form>';
+        return $h;
+    }
+
+    /** Seiten mit Aufrufen, Klicks und Klickrate (eigene Zählung, ohne Cookie/IP); schwache Seiten mit vielen Besuchen zuerst im Blick. */
+    private static function ab_seiten_html(): string {
+        global $wpdb;
+        if (!isset($wpdb)) { return ''; }
+        $tage = in_array((int) ($_GET['tage'] ?? 30), [7, 30, 90, 365], true) ? (int) ($_GET['tage'] ?? 30) : 30;
+        $ab = gmdate('Y-m-d', time() - ($tage - 1) * DAY_IN_SECONDS);
+        $tp = self::seiten_tabelle(); $tk = self::klicktabelle(); $z = [];
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT pfad, SUM(n) n FROM $tp WHERE tag >= %s GROUP BY pfad", $ab), ARRAY_A) as $r) { $z[(string) $r['pfad']]['v'] = (int) $r['n']; }
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT pfad, COUNT(*) n FROM $tk WHERE ts >= %s GROUP BY pfad", $ab . ' 00:00:00'), ARRAY_A) as $r) { $z[(string) $r['pfad']]['k'] = (int) $r['n']; }
+        $fr = (string) get_option('sab_seiten_start', '');
+        if ($fr === '') { $fr = gmdate('Y-m-d'); update_option('sab_seiten_start', $fr, false); }
+        $lauf = [];
+        foreach (self::ab_scan() as $id => $d) { if (!empty(self::ab_aktiv()[$id])) { foreach ($d['seiten'] as $pid => $t) { $pf = self::ab_pfad_von((int) $pid); if ($pf !== '') { $lauf[$pf] = ($lauf[$pf] ?? 0) + 1; } } } }
+        $v = $k = 0; foreach ($z as $d) { $v += (int) ($d['v'] ?? 0); $k += (int) ($d['k'] ?? 0); }
+        $mittel = $v > 0 ? $k / $v : 0;
+        $h = '<h3 style="margin-top:2em">Seiten: Aufrufe und Klickrate</h3><p class="description">Das Plugin zählt selbst, wie oft eine Seite mit Produkten aufgerufen wird (nur Summe je Seite und Tag, ohne Cookie und IP) und wie viele Klicks auf Produkte kommen. Die Zählung der Aufrufe läuft seit ' . esc_html(date_i18n('d.m.Y', strtotime($fr))) . '; davor gibt es nur Klicks. Aufrufe von Redakteuren und Robotern zählen nicht.</p><p>Zeitraum: ';
+        foreach ([7 => '7 Tage', 30 => '30 Tage', 90 => '90 Tage', 365 => 'Jahr'] as $t => $l) { $h .= ($t === $tage ? '<strong>' . esc_html($l) . '</strong>' : '<a href="' . esc_url(add_query_arg(['page' => 'sab-tests', 'tage' => $t], admin_url('admin.php'))) . '">' . esc_html($l) . '</a>') . ' &nbsp; '; }
+        if (!$z) { return $h . '</p><p>Noch keine Daten.</p>'; }
+        $h .= '</p><p><strong>' . (int) $v . '</strong> Aufrufe, <strong>' . (int) $k . '</strong> Klicks, Klickrate im Schnitt <strong>' . self::ab_pct($mittel) . '</strong>. Rot: mindestens 100 Aufrufe und weniger als die Hälfte der durchschnittlichen Klickrate. Dort lohnt sich ein A/B-Test am meisten (Seite öffnen, als Redakteur die Knöpfe nutzen).</p>';
+        $h .= '<table class="widefat striped sab-sort2" style="max-width:1000px"><thead><tr><th>Seite</th><th>Aufrufe</th><th>Klicks</th><th>Klickrate</th><th>Läufe Tests</th><th>Hinweis</th></tr></thead><tbody>';
+        uasort($z, fn($a, $b) => ((int) ($b['v'] ?? 0)) <=> ((int) ($a['v'] ?? 0)));
+        foreach (array_slice($z, 0, 300, true) as $pf => $d) {
+            $vv = (int) ($d['v'] ?? 0); $kk = (int) ($d['k'] ?? 0); $r = $vv > 0 ? $kk / $vv : null;
+            $schwach = $vv >= 100 && $r !== null && $r < $mittel * 0.5;
+            $h .= '<tr><td data-l="Seite"><a href="' . esc_url(home_url((string) $pf)) . '" target="_blank" rel="noopener">' . esc_html((string) $pf ?: '/') . '</a></td><td data-l="Aufrufe" data-v="' . $vv . '">' . $vv . '</td><td data-l="Klicks" data-v="' . $kk . '">' . $kk . '</td>'
+               . '<td data-l="Klickrate" data-v="' . ($r === null ? '' : round($r * 100, 3)) . '"' . ($schwach ? ' style="color:#a00;font-weight:700"' : '') . '>' . ($r === null ? '–' : self::ab_pct($r)) . '</td><td data-l="Tests" data-v="' . (int) ($lauf[$pf] ?? 0) . '">' . (int) ($lauf[$pf] ?? 0) . '</td>'
+               . '<td data-l="Hinweis">' . ($schwach ? '<span style="color:#a00">schwach bei vielen Besuchen: A/B-Test starten</span>' : ($vv < 100 ? '<span class="sab-ab-klein">noch wenig Aufrufe</span>' : '')) . '</td></tr>';
+        }
+        return $h . '</tbody></table>' . self::tabellenhilfe();
+    }
+
+    /** Statistik-Reiter: Zwischenstand aller Tests mit Zahlen, gut sichtbar über den Klickzahlen. */
+    private static function ab_statistik_html(): string {
+        $opt = self::ab_optionen(); if (!$opt) { return ''; }
+        $zahlen = self::ab_zahlen(); $zeilen = [];
+        foreach ($opt as $id => $o) { if (empty($o['an']) && empty($zahlen[$id])) { continue; } $zeilen[$id] = $o; }
+        if (!$zeilen) { return ''; }
+        $h = self::ab_css() . '<h2>A/B-Tests: Zwischenstand</h2><p class="description">Viererblöcke als Test. Mehr Einstellungen im Reiter A/B-Tests.</p>';
+        foreach ($zeilen as $id => $o) { $h .= self::ab_karte_html((string) $id, $o, $zahlen[$id] ?? [], false); }
+        return $h . self::ab_erklaerung_html() . '<hr style="margin:20px 0">';
+    }
+
+    /** Speichern im Reiter: Haken, Ziele, Neustart. Merkt die ASINs der Paare, damit die Karte auch bleibt, wenn der Block aus dem Artikel verschwindet. */
+    private static function ab_speichern(): string {
+        $opt = self::ab_optionen(); $scan = self::ab_scan();
+        $an = (array) ($_POST['sab_ab_an'] ?? []); $zl = (array) ($_POST['sab_ab_ziel'] ?? []);
+        $null = !empty($_POST['sab_ab_null']);
+        foreach (array_unique(array_merge(array_keys($scan), array_keys($opt))) as $id) {
+            if (!preg_match('/^[a-f0-9]{8}$/', (string) $id)) { continue; }
+            $o = $opt[$id] ?? [];
+            $neu = isset($an[$id]);
+            $o['ziel'] = max(100, (int) ($zl[$id] ?? ($o['ziel'] ?? self::AB_ZIEL)));
+            if ($neu && (empty($o['an']) || empty($o['start']))) { $o['start'] = gmdate('Y-m-d'); }
+            elseif ($neu && $null) { $o['start'] = gmdate('Y-m-d'); }
+            if (isset($scan[$id]['asins'])) { $o['a'] = $scan[$id]['asins']['A']; $o['b'] = $scan[$id]['asins']['B']; }
+            $o['an'] = $neu ? 1 : 0;
+            if (!$neu && empty($o['start'])) { continue; }   // nie gestartet: nicht speichern
+            $opt[$id] = $o;
+        }
+        update_option('sab_ab', $opt, false);
+        return $null ? 'Gespeichert, Zähler der angehakten Tests neu gestartet (gezählt wird ab heute).' : 'Gespeichert.';
+    }
+
+    /** REST: Einblendungen (Browser hat per Zufall ein Paar gewählt). Nur Summen je Test, Paar, Tag und Seite. */
+    private static function ab_ansichten_zaehlen(array $liste, string $pfad): void {
+        global $wpdb;
+        $akt = self::ab_aktiv(); if (!$akt) { return; }
+        $t = self::ab_tabelle(); $pf = substr((string) wp_parse_url($pfad, PHP_URL_PATH), 0, 190); $tag = gmdate('Y-m-d'); $gesehen = [];
+        foreach (array_slice($liste, 0, 8) as $e) {
+            $b = (string) ($e['b'] ?? ''); $v = (string) ($e['v'] ?? '');
+            if (!preg_match('/^[a-f0-9]{8}$/', $b) || !in_array($v, ['A', 'B', 'C'], true) || empty($akt[$b])) { continue; }
+            $wpdb->query($wpdb->prepare("INSERT INTO $t (block, var, tag, pfad, n) VALUES (%s, %s, %s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1", $b, $v, $tag, $pf));
+        }
+    }
+
     // ---------- Eigene Klickmessung (ohne Cookies, ohne IP, ohne Besucher-Kennung) ----------
 
     private static function klicktabelle(): string { global $wpdb; return $wpdb->prefix . 'sab_klicks'; }
 
     public static function tabelle(): void {
         global $wpdb;
-        if (!isset($wpdb) || get_option('sab_db_version') === '5') { return; }
+        if (!isset($wpdb) || get_option('sab_db_version') === '7') { return; }
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $t = self::klicktabelle();
         dbDelta("CREATE TABLE $t (
@@ -3099,7 +3804,27 @@ JS;
             KEY asin (asin),
             KEY kid (kid)
         ) {$wpdb->get_charset_collate()};");
-        update_option('sab_db_version', '5', false);
+        $ta = self::ab_tabelle();
+        dbDelta("CREATE TABLE $ta (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            block CHAR(8) NOT NULL,
+            var CHAR(1) NOT NULL,
+            tag DATE NOT NULL,
+            pfad VARCHAR(190) NOT NULL DEFAULT '',
+            n INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            UNIQUE KEY zaehler (block, var, tag, pfad)
+        ) {$wpdb->get_charset_collate()};");
+        $tp = self::seiten_tabelle();
+        dbDelta("CREATE TABLE $tp (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            tag DATE NOT NULL,
+            pfad VARCHAR(190) NOT NULL DEFAULT '',
+            n INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            UNIQUE KEY zaehler (tag, pfad)
+        ) {$wpdb->get_charset_collate()};");
+        update_option('sab_db_version', '7', false);
     }
 
     public static function rest(): void {
@@ -3127,7 +3852,11 @@ JS;
         $d = json_decode((string) $req->get_body(), true);
         if (!is_array($d) || !preg_match('/^[a-z0-9]{6,8}$/', (string) ($d['id'] ?? ''))) { return new WP_REST_Response(null, 204); }
         $t = self::klicktabelle();
-        if (isset($d['s'])) {
+        if (isset($d['ab']) && is_array($d['ab'])) {
+            self::ab_ansichten_zaehlen($d['ab'], (string) ($d['pfad'] ?? ''));
+        } elseif (isset($d['pv'])) {   // Seitenaufruf mit Produkten: nur Summe je Seite und Tag, ohne Besucherkennung
+            $wpdb->query($wpdb->prepare("INSERT INTO " . self::seiten_tabelle() . " (tag, pfad, n) VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1", gmdate('Y-m-d'), substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190)));
+        } elseif (isset($d['s'])) {
             $sek = (int) $d['s'];
             if ($sek > 0 && $sek <= 3 * HOUR_IN_SECONDS) {
                 $wpdb->query($wpdb->prepare("UPDATE $t SET zurueck_s=%d WHERE kid=%s AND zurueck_s IS NULL", $sek, $d['id']));
@@ -3162,6 +3891,8 @@ JS;
            . 'var m={"Europe/Berlin":"DE","Europe/Vienna":"AT","Europe/Zurich":"CH","Europe/Madrid":"ES","Atlantic/Canary":"ES","Europe/Paris":"FR","Europe/Rome":"IT","Europe/London":"GB","Europe/Dublin":"IE","Europe/Amsterdam":"NL","Europe/Brussels":"BE","Europe/Luxembourg":"LU","Europe/Lisbon":"PT","Europe/Warsaw":"PL","Europe/Prague":"CZ","Europe/Stockholm":"SE","Europe/Copenhagen":"DK","Europe/Oslo":"NO","Europe/Helsinki":"FI","Europe/Budapest":"HU","Europe/Athens":"GR","America/New_York":"US","America/Chicago":"US","America/Denver":"US","America/Los_Angeles":"US","America/Toronto":"CA","America/Vancouver":"CA","America/Mexico_City":"MX","America/Sao_Paulo":"BR","America/Argentina/Buenos_Aires":"AR","America/Bogota":"CO","America/Santiago":"CL","America/Lima":"PE","Australia/Sydney":"AU","Australia/Melbourne":"AU","Australia/Brisbane":"AU","Australia/Perth":"AU","Pacific/Auckland":"NZ"};'
            . 'return m[t]||(/^[A-Za-z]{2}$/.test(x)?x.toUpperCase():"")}'
            . 'function H(a){var r="",h=document.querySelectorAll("h2[id],h3[id],h4[id]"),i;for(i=0;i<h.length;i++){if(h[i].compareDocumentPosition(a)&4)r=h[i].id}return r}'
+           . 'S({id:Math.random().toString(36).slice(2,10),pv:1,pfad:location.pathname});'
+           . 'if(window.sabAB&&window.sabAB.length){S({id:Math.random().toString(36).slice(2,10),ab:window.sabAB,pfad:location.pathname})}'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
            . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
@@ -3219,6 +3950,7 @@ JS;
         $c = get_transient('sab_alle_asins');
         if (is_array($c)) { return $c; }
         $alle = array_keys(self::produkte());
+        foreach (self::ab_optionen() as $o_) { foreach (['a', 'b', 'c'] as $l_) { foreach ((array) ($o_[$l_] ?? []) as $x_) { $alle[] = (string) $x_; } } }   // A/B-Test: beide Seiten, damit Klicks gezählt werden
         foreach (self::slots() as $liste) { $alle = array_merge($alle, $liste); }
         foreach (self::tests() as $liste) { $alle = array_merge($alle, $liste); }
         $alle = array_merge($alle, array_values(self::tausch_regeln()));
@@ -7175,6 +7907,7 @@ JS;
                 $h .= '</div><p><button class="button" name="sab_wakt" value="vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="speichern" onclick="return confirm(\'Dieses Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Umbauen</button></p></form>';
                 if (isset(self::$wi_vorschau[$id]) && strlen(self::asin((string) ($f['asin'] ?? ''))) === 10) { $h .= '<div style="background:#f1f3ee;padding:14px;border-radius:8px"><div style="width:300px">' . do_shortcode(self::widget_code($f)) . '</div></div>'; }
             }
+            if ($w['fertig']) { $h .= self::ab_widget_form_html((string) $id, $w); }
             if (isset($bk[$id])) { $h .= '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="zurueck">Rückgängig (alter Inhalt von ' . esc_html(wp_date('d.m.Y H:i', (int) $bk[$id]['ts'])) . ')</button></form>'; }
             $h .= '</div>';
         }
@@ -7212,6 +7945,7 @@ JS;
         }
         $land = self::land($a['land']); $asin = self::getauscht(self::asin($a['asin']));
         if (strlen($asin) !== 10) { return ''; }
+        if (!self::$ab_in && !self::$ab_ctx && ($wz = self::ab_widget(self::asin($a['asin'])))) { $wh = self::ab_widget_html($a, $wz); if ($wh !== '') { return $wh; } }
         $bild = self::sc_bild(['asin' => $asin, 'land' => $land, 'tag' => $a['tag'], 'breite' => '240'], '');
         $img = preg_match('#<img\b[^>]*>#i', $bild, $mi) ? $mi[0] : $bild;   // das Bild ist kein eigener Link: nur der Knopf ist der Affiliate-Link
         $knopf = $a['knopf'] !== '' ? (string) $a['knopf'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']);
@@ -7630,6 +8364,8 @@ JS;
                 update_option('sab_tausch', sanitize_textarea_field(wp_unslash($_POST['sab_tausch'] ?? '')), false);
                 delete_transient('sab_alle_asins');
                 $meldung = 'Gespeichert.';
+            } elseif ($form === 'ab') {
+                $meldung = self::ab_speichern();
             } elseif ($form === 'tests') {
                 update_option('sab_tests', sanitize_textarea_field(wp_unslash($_POST['sab_tests'] ?? '')), false);
                 update_option('sab_bildtests', sanitize_textarea_field(wp_unslash($_POST['sab_bildtests'] ?? '')), false);
@@ -7692,6 +8428,8 @@ JS;
             } elseif ($form === 'asin_diag') {
                 $da = trim((string) wp_unslash($_POST['sab_diag_asin'] ?? ''));
                 $meldung = $da !== '' ? self::asin_rohantwort($da) : 'Bitte eine ASIN eintragen (mehrere mit Komma, höchstens 10).';
+            } elseif ($form === 'ab_widget') {
+                $meldung = self::ab_widget_speichern();
             } elseif ($form === 'widget_umbau') {
                 $meldung = self::widget_umbau_lauf();
             } elseif ($form === 'umbau_scan') {
@@ -7981,6 +8719,7 @@ JS;
                . '<textarea name="sab_tausch" rows="4" class="large-text code" placeholder="B08BCFRPH5 =&gt; B0CNPW8Y97">' . esc_textarea((string) get_option('sab_tausch', '')) . '</textarea>'
                . '<p><button class="button button-primary">Speichern</button></p></form>';
         } elseif ($tab === 'statistik') {
+            echo self::ab_statistik_html();
             echo self::statistik_html();
         } elseif ($tab === 'gruppen') {
             echo self::gruppen_html();
@@ -8076,6 +8815,8 @@ JS;
         } elseif ($tab === 'vorschau') {
             echo self::vorschau_html();
         } elseif ($tab === 'tests') {
+            echo self::ab_tab_html();
+            echo '<details style="margin-top:2em"><summary><strong>Weitere Tests: Ersatzlisten und Bilder</strong></summary>';
             echo '<form method="post">'; wp_nonce_field('sab_speichern');
             echo '<input type="hidden" name="sab_tab" value="tests"><input type="hidden" name="sab_form" value="tests">'
                . '<h2>A/B-Tests</h2><p>Pro Zeile: <code>slot: ASIN-A | ASIN-B</code> (bis zu 4 Varianten). Für diese Ersatzliste (<code>[amz_produkt slot="slot"]</code>) bekommt jeder Artikel fest eine Variante, ohne Cookie und ohne IP. Fällt die Variante aus, springt die Ersatzliste ein. Zeile löschen = Test beendet.</p>'
@@ -8091,6 +8832,7 @@ JS;
                 foreach ($z as $r) { echo '<tr><td>' . esc_html($r['slot']) . '</td><td>' . esc_html($r['var']) . '</td><td>' . (int) $r['n'] . '</td><td>' . (int) $r['z'] . '</td></tr>'; }
                 echo '</tbody></table><p class="description">Gezählt werden Klicks, nicht Seitenaufrufe. Die Artikel verteilen sich gleichmäßig auf die Varianten, vergleiche daher erst bei genügend Klicks.</p>';
             }
+            echo '</details>';
         } elseif ($tab === 'einstellungen') {
             $us = (array) get_option('sab_update_status', []); $ab = self::update_intervall();
             echo '<p class="description"><strong>Update-Prüfung:</strong> letzte Abfrage bei GitHub ' . (!empty($us['ts']) ? 'vor ' . max(0, (int) round((time() - (int) $us['ts']) / 60)) . ' Min.' : 'noch nie') . ', dort liegt Version ' . esc_html((string) ($us['version'] ?? '?')) . ', installiert ist ' . esc_html(self::VERSION) . '. Abstand jetzt: ' . ($ab >= DAY_IN_SECONDS ? 'einmal am Tag' : ($ab >= 3600 ? (int) round($ab / 3600) . ' Std.' : (int) round($ab / 60) . ' Min.')) . ' (kürzer, solange oft Updates kommen). <a class="button button-small" href="' . esc_url(wp_nonce_url(admin_url('admin.php?page=sab-einstellungen&sab_update_jetzt=1'), 'sab_update_jetzt')) . '">Jetzt nach Update suchen</a></p>';

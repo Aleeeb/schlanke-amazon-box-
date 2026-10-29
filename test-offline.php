@@ -1750,7 +1750,7 @@ $k4 = '<a href="https://www.amazon.de/dp/B0A1234567?tag=x"><img src="a.jpg"></a>
 $f4 = SAB::partner_bereich($k4, 0, strpos($k4, '</a>') + 4, 'B0A1234567'); ok($f4 === [0, strlen($k4)], 'Partner: feste Links Bild + Text');
 // 0.89.55: Neu scannen
 $GLOBALS['opt']['sab_name_offen'] = ['B0GEISTER01' => 'Weg'];
-$sc = new ReflectionMethod('SAB', 'umbau_scan'); $sc->setAccessible(true); $sm_ = (string) $sc->invoke(null);
+$scm_ = new ReflectionMethod('SAB', 'umbau_scan'); $scm_->setAccessible(true); $sm_ = (string) $scm_->invoke(null);
 ok(strpos($sm_, 'Neu eingelesen') !== false && !isset($GLOBALS['opt']['sab_name_offen']['B0GEISTER01']), 'Neu scannen: Namenshinweis zu Produkt ohne Artikel entfernt (' . $sm_ . ')');
 $sk = new ReflectionMethod('SAB', 'scan_knopf_html'); $sk->setAccessible(true);
 ok(strpos((string) $sk->invoke(null, 'umbau'), 'umbau_scan') !== false, 'Neu scannen: Knopf vorhanden');
@@ -1806,4 +1806,163 @@ $GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land
 $ss = SAB::sc_startseite(['land' => 'es'], 'Bei Amazon stöbern');
 ok(strpos($ss, 'href="https://www.amazon.es/?tag=ayuba09-21"') !== false && strpos($ss, 'data-sab-asin="STARTSEITE"') !== false && strpos($ss, 'data-sab-home="1"') !== false && strpos($ss, 'sponsored') !== false && strpos($ss, '>Bei Amazon stöbern</a>') !== false, 'Startseiten-Link: mit Partner-ID, Kennung und sponsored (' . $ss . ')');
 unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
+
+// ---- 0.90.0: A/B-Test der Viererblöcke ----
+$rB = SAB::ab_bewerten(500, 25, 500, 10, 1000);
+ok($rB['status'] === 'klar' && $rB['sieger'] === 'A' && $rB['p_wert'] < 0.02 && $rB['p_wert'] > 0.005 && abs($rB['pA'] - 0.05) < 1e-9, 'A/B-Mathe: 25/500 gegen 10/500 ist ein klarer Sieger A (p ' . round($rB['p_wert'], 4) . ')');
+ok($rB['wahrsch_A'] > 0.99 && $rB['ciA'][0] < 0.05 && $rB['ciA'][1] > 0.05 && $rB['diff_ci'][0] > 0, 'A/B-Mathe: Wahrscheinlichkeit, Wilson-Bereich und Differenz-Bereich plausibel');
+$rG = SAB::ab_bewerten(500, 25, 500, 24, 1000);
+ok($rG['status'] === 'gleich' && $rG['sieger'] === '', 'A/B-Mathe: 25 gegen 24 Klicks ist kein Unterschied');
+$rL = SAB::ab_bewerten(100, 8, 90, 2, 1000);
+ok($rL['status'] === 'laeuft' && abs($rL['fortschritt'] - 0.19) < 1e-9, 'A/B-Mathe: vor dem Ziel nur „läuft“, nie ein Sieger');
+$rW = SAB::ab_bewerten(600, 3, 600, 2, 1000);
+ok($rW['status'] === 'wenig', 'A/B-Mathe: Ziel erreicht, aber unter 10 Klicks => zu wenige Klicks');
+$rN = SAB::ab_bewerten(0, 0, 0, 0, 1000);
+ok($rN['status'] === 'leer' && $rN['p_wert'] === null, 'A/B-Mathe: ohne Daten kein Rechenfehler');
+$mPhi = new ReflectionMethod('SAB', 'ab_phi'); $mPhi->setAccessible(true);
+ok(abs($mPhi->invoke(null, 1.959964) - 0.975) < 1e-4 && abs($mPhi->invoke(null, 0) - 0.5) < 1e-6 && abs($mPhi->invoke(null, -1.0) - 0.158655) < 1e-4, 'A/B-Mathe: Normalverteilung stimmt');
+$mBed = new ReflectionMethod('SAB', 'ab_bedarf'); $mBed->setAccessible(true);
+$bd = $mBed->invoke(null, 0.05, 0.03);
+ok($bd >= 1450 && $bd <= 1550, 'A/B-Mathe: 5 % gegen 3 % braucht rund 1500 Besuche je Paar (' . $bd . ')');
+
+$kk2 = fn($a) => '[amz_karte asin="' . $a . '" land="es"]';
+$zwei = '[amz_karten]' . $kk2('B0AB000001') . $kk2('B0AB000002') . '[/amz_karten]';
+$zwei2 = '[amz_karten]' . $kk2('B0AB000003') . $kk2('B0AB000004') . '[/amz_karten]';
+$vier = '[amz_karten]' . $kk2('B0AB000001') . $kk2('B0AB000002') . $kk2('B0AB000003') . $kk2('B0AB000004') . '[/amz_karten]';
+$f2 = SAB::ab_finde('<p>Text</p>' . $zwei . "\n<p></p>\n" . $zwei2 . '<p>Ende</p>');
+ok(count($f2) === 1 && count($f2[0]['p']) === 2 && $f2[0]['p'][0]['asins'] === ['B0AB000001', 'B0AB000002'], 'A/B: zwei benachbarte Zweierblöcke werden als ein Viererblock erkannt');
+$f4 = SAB::ab_finde('Text ' . $vier . ' Ende');
+ok(count($f4) === 1 && $f4[0]['id'] === $f2[0]['id'], 'A/B: Kartenblock mit vier Produkten ist derselbe Test wie zwei Zweierblöcke');
+$fs = SAB::ab_finde($zwei2 . $zwei);
+ok(count($fs) === 1 && $fs[0]['id'] === $f2[0]['id'] && $fs[0]['p'][0]['v'] === 'B', 'A/B: Reihenfolge im Artikel ändert Kennung nicht, A bleibt A');
+ok(!SAB::ab_finde($zwei . '<p>langer Text dazwischen</p>' . $zwei2) && !SAB::ab_finde('[amz_karten]' . $kk2('B0AB000001') . $kk2('B0AB000002') . '[/amz_karten][amz_karten]' . $kk2('B0AB000002') . $kk2('B0AB000003') . '[/amz_karten]'), 'A/B: Text dazwischen oder doppeltes Produkt => kein Test');
+ok(SAB::ab_inhalt($vier) === $vier, 'A/B: ohne eingeschalteten Test bleibt der Inhalt unverändert');
+$GLOBALS['opt']['sab_ab'] = [$f2[0]['id'] => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d')]];
+$tc = SAB::ab_inhalt('Vor ' . $zwei . $zwei2 . ' Nach');
+ok(substr_count($tc, '[amz_karten ab="' . $f2[0]['id'] . '"') === 2 && strpos($tc, 'abi="2"') !== false && strpos($tc, 'Vor ') === 0 && substr($tc, -5) === ' Nach', 'A/B: laufender Test markiert beide Zweierblöcke');
+$o1 = SAB::sc_karten(['ab' => $f2[0]['id'], 'abv' => 'A', 'abo' => '1', 'abi' => '1'], $kk2('B0AB000001') . $kk2('B0AB000002'));
+$o2 = SAB::sc_karten(['ab' => $f2[0]['id'], 'abv' => 'B', 'abo' => '1', 'abi' => '2'], $kk2('B0AB000003') . $kk2('B0AB000004'));
+ok(strpos($o1, 'data-sab-abv="A"') !== false && strpos($o1, '<script') === false && strpos($o2, 'data-sab-abi="2"') !== false && strpos($o2, 'Math.random') !== false && strpos($o2, 'display:none}') !== false, 'A/B: Blöcke tragen Kennung, Skript steht erst nach dem zweiten');
+ok(strpos($o1, 'data-sab-slot="ab-' . $f2[0]['id'] . '"') !== false && strpos($o1, 'data-sab-var="A"') !== false && strpos($o2, 'data-sab-var="B"') !== false, 'A/B: Klick-Links tragen Test und Paar (slot ab-…, var A/B)');
+$onb = SAB::sc_karten([], $kk2('B0AB000001'));
+ok(strpos($onb, 'data-sab-slot') === false && strpos($onb, 'data-sab-ab') === false, 'A/B: Karten außerhalb eines Tests bleiben ohne Test-Daten');
+$GLOBALS['wpdb'] = new class { public $prefix = 'wp_'; public $q = []; function prepare($q, ...$a) { return vsprintf(str_replace('%s', "'%s'", $q), $a); } function query($q) { $this->q[] = $q; return 1; } };
+$mAz = new ReflectionMethod('SAB', 'ab_ansichten_zaehlen'); $mAz->setAccessible(true);
+$mAz->invoke(null, [['b' => $f2[0]['id'], 'v' => 'B'], ['b' => 'abcdef12', 'v' => 'A'], ['b' => $f2[0]['id'], 'v' => 'X']], '/ratgeber/?x=1');
+ok(count($GLOBALS['wpdb']->q) === 1 && strpos($GLOBALS['wpdb']->q[0], "'B'") !== false && strpos($GLOBALS['wpdb']->q[0], "'/ratgeber/'") !== false && strpos($GLOBALS['wpdb']->q[0], 'sab_ab_ansicht') !== false, 'A/B: Einblendung wird nur für laufende Tests und gültige Paare gezählt');
+unset($GLOBALS['wpdb']);
+$mKh = new ReflectionMethod('SAB', 'ab_karte_html'); $mKh->setAccessible(true);
+$zz = ['v' => ['A' => ['n' => 500, 'k' => 25], 'B' => ['n' => 500, 'k' => 10]], 's' => ['/a/' => ['A' => ['n' => 500, 'k' => 25], 'B' => ['n' => 500, 'k' => 10]]], 't' => ['2026-10-29' => ['A' => ['n' => 200, 'k' => 10], 'B' => ['n' => 200, 'k' => 4]], '2026-10-30' => ['A' => ['n' => 300, 'k' => 15], 'B' => ['n' => 300, 'k' => 6]]], 'r' => $rB];
+$kh = $mKh->invoke(null, $f2[0]['id'], ['an' => 1, 'ziel' => 1000, 'start' => '2026-10-29', 'a' => ['B0AB000001', 'B0AB000002'], 'b' => ['B0AB000003', 'B0AB000004']], $zz, true);
+ok(strpos($kh, 'Klarer Sieger: Paar A') !== false && strpos($kh, '5,0 %') !== false && strpos($kh, 'polyline') !== false && strpos($kh, '/a/') !== false, 'A/B: Karte zeigt Sieger, Klickrate, Seiten und Verlauf');
+// Reiter und Statistik-Block mit Beispieldaten (Datenbank-Attrappe)
+if (!function_exists('wp_nonce_field')) { function wp_nonce_field(...$a) { return '<input type="hidden" name="_wpnonce" value="x">'; } }
+if (!function_exists('esc_textarea')) { function esc_textarea($t) { return htmlspecialchars($t); } }
+$ABID = $f2[0]['id'];
+$GLOBALS['opt']['sab_ab'] = [$ABID => ['an' => 1, 'ziel' => 1000, 'start' => '2026-10-01', 'a' => ['B0AB000001', 'B0AB000002'], 'b' => ['B0AB000003', 'B0AB000004']]];
+$GLOBALS['wpdb'] = new class($ABID) {
+    public $prefix = 'wp_'; public $posts = 'wp_posts'; function __construct(public $id) {}
+    function prepare($q, ...$a) { return vsprintf(str_replace('%s', "'%s'", $q), $a); }
+    function query($q) { return 1; }
+    function get_results($q, $o = null) {
+        if (strpos($q, 'sab_ab_ansicht') !== false) { return [['block' => $this->id, 'var' => 'A', 'pfad' => '/a/', 'tag' => '2026-10-05', 'n' => 520], ['block' => $this->id, 'var' => 'B', 'pfad' => '/a/', 'tag' => '2026-10-05', 'n' => 480]]; }
+        if (strpos($q, "slot LIKE 'ab-%'") !== false) { return [['slot' => 'ab-' . $this->id, 'var' => 'A', 'pfad' => '/a/', 'd' => '2026-10-05', 'n' => 26, 'z' => 5], ['slot' => 'ab-' . $this->id, 'var' => 'B', 'pfad' => '/a/', 'd' => '2026-10-05', 'n' => 12, 'z' => 1]]; }
+        if (strpos($q, 'post_content LIKE') !== false) { return [['ID' => 7, 'post_title' => 'Kupferband', 'post_content' => '<p>x</p>[amz_karten]' . '[amz_karte asin="B0AB000001"][amz_karte asin="B0AB000002"]' . '[/amz_karten][amz_karten][amz_karte asin="B0AB000003"][amz_karte asin="B0AB000004"][/amz_karten]']]; }
+        return [];
+    }
+};
+$zt = (new ReflectionMethod('SAB', 'ab_zahlen')); $zt->setAccessible(true); $zr = $zt->invoke(null);
+ok(($zr[$ABID]['r']['nA'] ?? 0) === 520 && ($zr[$ABID]['r']['kB'] ?? 0) === 12 && $zr[$ABID]['r']['status'] === 'klar', 'A/B: Zahlen aus Einblendungen und Klicks zusammengeführt (Ziel 1000 erreicht, klarer Sieger)');
+$tt = (new ReflectionMethod('SAB', 'ab_tab_html')); $tt->setAccessible(true); $th = $tt->invoke(null);
+ok(strpos($th, 'Laufende Tests (1)') !== false && strpos($th, 'sab_ab_an[' . $ABID . ']') !== false && strpos($th, 'checked') !== false && strpos($th, 'So lese ich die Zahlen') !== false && strpos($th, 'Kupferband') !== false, 'A/B: Reiter zeigt laufenden Test, Haken, Erklärung und Fundstelle');
+$st = (new ReflectionMethod('SAB', 'ab_statistik_html')); $st->setAccessible(true);
+ok(strpos($st->invoke(null), 'A/B-Tests: Zwischenstand') !== false, 'A/B: Statistik-Reiter zeigt den Zwischenstand');
+$_POST = ['sab_ab_an' => [$ABID => '1'], 'sab_ab_ziel' => [$ABID => '2500']];
+$sp = (new ReflectionMethod('SAB', 'ab_speichern')); $sp->setAccessible(true); $sp->invoke(null);
+ok($GLOBALS['opt']['sab_ab'][$ABID]['ziel'] === 2500 && $GLOBALS['opt']['sab_ab'][$ABID]['start'] === '2026-10-01' && $GLOBALS['opt']['sab_ab'][$ABID]['an'] === 1, 'A/B: Speichern übernimmt das Ziel und behält das Startdatum');
+$_POST = ['sab_ab_ziel' => [$ABID => '2500']];
+$sp->invoke(null);
+ok($GLOBALS['opt']['sab_ab'][$ABID]['an'] === 0, 'A/B: ohne Haken wird der Test beendet, Daten bleiben');
+$_POST = [];
+unset($GLOBALS['wpdb']);
+unset($GLOBALS['opt']['sab_ab']);
+
+// ---- 0.90.1: Einzelprodukt-Test und Frontend-Knöpfe ----
+foreach (['B0EZ000001', 'B0EZ000002'] as $a_) { $GLOBALS['http'][$a_] = item($a_, [$money('1 €')]); }
+$GLOBALS['opt']['sab_ab'] = ['11223344' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0EZ000001'], 'b' => ['B0EZ000002'], 'e' => 1]];
+$ez = SAB::sc_karte(['asin' => 'B0EZ000001', 'land' => 'es']);
+ok(strpos($ez, 'data-sab-abe="11223344"') !== false && strpos($ez, 'data-v="A"') !== false && strpos($ez, 'data-v="B"') !== false && strpos($ez, 'display:contents') !== false && substr_count($ez, '<script>') === 1, 'Einzeltest: Karte erscheint als zwei Panes mit Skript');
+ok(strpos($ez, 'data-sab-slot="ab-11223344"') !== false && strpos($ez, 'data-sab-var="A"') !== false && strpos($ez, 'data-sab-var="B"') !== false && strpos($ez, 'B0EZ000002') !== false, 'Einzeltest: Klicks beider Produkte zählen für Test und Paar');
+$ez0 = SAB::sc_karte(['asin' => 'B0EZ000002', 'land' => 'es']);
+ok(strpos($ez0, 'data-sab-abe') === false, 'Einzeltest: nur das Testprodukt A wird verdoppelt, B allein bleibt normal');
+$GLOBALS['opt']['sab_ab']['11223344']['an'] = 0;
+ok(strpos(SAB::sc_karte(['asin' => 'B0EZ000001', 'land' => 'es']), 'data-sab-abe') === false, 'Einzeltest: beendet => wieder eine einfache Karte');
+$GLOBALS['opt']['sab_ab'] = [];
+$GLOBALS['admin'] = true; $GLOBALS['loggedin'] = true;
+$ed = SAB::ab_inhalt('A ' . $zwei . $zwei2 . ' B');
+ok(substr_count($ed, '[amz_karten abx="' . $f2[0]['id'] . '"]') === 2 && strpos($ed, ' ab="') === false, 'Redakteur: Viererblock ohne Test bekommt nur die Markierung für den Start-Knopf');
+$GLOBALS['opt']['sab_ab'] = [$f2[0]['id'] => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d')]];
+$ed2 = SAB::ab_inhalt($zwei . $zwei2);
+ok(substr_count($ed2, 'abx="' . $f2[0]['id'] . '"') === 2 && substr_count($ed2, 'ab="' . $f2[0]['id'] . '"') === 2, 'Redakteur: laufender Test trägt zusätzlich die Knopf-Markierung');
+$eo = SAB::sc_karten(['ab' => $f2[0]['id'], 'abv' => 'B', 'abo' => '9', 'abi' => '2', 'abx' => $f2[0]['id']], $kk2('B0AB000003') . $kk2('B0AB000004'));
+ok(strpos($eo, 'data-sab-abx="' . $f2[0]['id'] . '"') !== false && strpos($eo, '},true);') !== false || strpos($eo, ',true);</script>') !== false, 'Redakteur: Skript wählt immer das erste Paar und zählt nicht');
+$GLOBALS['admin'] = false; $GLOBALS['loggedin'] = false;
+$GLOBALS['opt']['sab_ab'] = [];
+$mA = new ReflectionMethod('SAB', 'alle_asins'); $mA->setAccessible(true); unset($GLOBALS['tr']['sab_alle_asins']);
+$GLOBALS['opt']['sab_ab'] = ['11223344' => ['an' => 1, 'a' => ['B0EZ000001'], 'b' => ['B0EZ000002'], 'e' => 1]];
+ok(in_array('B0EZ000002', $mA->invoke(null), true), 'Einzeltest: das Gegenprodukt zählt als bekannte ASIN (Klicks werden gespeichert)');
+$GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['tr']['sab_alle_asins']);
+
+// ---- 0.90.2: Seiten mit Aufrufen und Klickrate ----
+if (!function_exists('add_query_arg')) { function add_query_arg($a, $u) { return $u . '?' . http_build_query($a); } }
+$GLOBALS['wpdb'] = new class {
+    public $prefix = 'wp_'; public $q = [];
+    function prepare($q, ...$a) { return vsprintf(str_replace('%s', "'%s'", $q), $a); }
+    function query($q) { $this->q[] = $q; return 1; }
+    function get_results($q, $o = null) {
+        if (strpos($q, 'sab_seiten') !== false) { return [['pfad' => '/gut/', 'n' => 1000], ['pfad' => '/schlecht/', 'n' => 2000], ['pfad' => '/neu/', 'n' => 20]]; }
+        if (strpos($q, 'sab_klicks') !== false) { return [['pfad' => '/gut/', 'n' => 100], ['pfad' => '/schlecht/', 'n' => 20], ['pfad' => '/neu/', 'n' => 0]]; }
+        return [];
+    }
+};
+$mSh = new ReflectionMethod('SAB', 'ab_seiten_html'); $mSh->setAccessible(true); $sh = $mSh->invoke(null);
+ok(strpos($sh, '/schlecht/') !== false && strpos($sh, 'schwach bei vielen Besuchen') !== false && substr_count($sh, 'schwach bei vielen Besuchen') === 1 && strpos($sh, '1,0 %') !== false && strpos($sh, '10,0 %') !== false, 'Seiten: Klickrate je Seite, nur die schwache Seite mit vielen Aufrufen wird markiert');
+unset($GLOBALS['wpdb']);
+
+// ---- 0.90.3: Widget-Test ----
+$GLOBALS['opt']['sab_ab'] = [];
+$wA = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A', 'text' => 'Text A', 'alt_text' => 'Zweiter', 'alt_url' => 'https://x.test/']);
+ok(strpos($wA, 'sab-ab-e') === false, 'Widget-Test: ohne Test bleibt das Widget einfach');
+$mWsp = new ReflectionMethod('SAB', 'ab_widget_speichern'); $mWsp->setAccessible(true);
+$_POST = ['sab_abw' => 'start', 'sab_abw_asin' => 'B0EZ000001', 'sab_abw_neu' => 'B0EZ000001']; $msg0 = $mWsp->invoke(null); $_POST = [];
+ok(strpos($msg0, 'Nichts gestartet') !== false && !$GLOBALS['opt']['sab_ab'], 'Widget-Test: gleiches Produkt wird abgelehnt');
+$wid = 'cafe0001';
+$GLOBALS['opt']['sab_ab'] = [$wid => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0EZ000001'], 'b' => ['B0EZ000002'], 'w' => 1, 'wf' => ['titel' => 'Buch B', 'text' => 'Text B', 'marke' => '', 'knopf' => '']]];
+$wT = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A', 'text' => 'Text A', 'alt_text' => 'Zweiter', 'alt_url' => 'https://x.test/']);
+ok(strpos($wT, 'data-sab-abe="' . $wid . '"') !== false && strpos($wT, 'Buch A') !== false && strpos($wT, 'Text B') !== false && strpos($wT, 'data-sab-var="B"') !== false && strpos($wT, 'data-sab-slot="ab-' . $wid . '"') !== false && substr_count($wT, 'sab-walt') === 1, 'Widget-Test: beide Karten, Klicks zählen für Test, Alternativlink nur bei A');
+$_POST = ['sab_abw' => 'stop:' . $wid]; $msg2 = $mWsp->invoke(null); $_POST = [];
+ok(empty($GLOBALS['opt']['sab_ab'][$wid]['an']) && strpos($GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A']), 'sab-ab-e') === false, 'Widget-Test: beenden stellt das einfache Widget wieder her');
+$mWf2 = new ReflectionMethod('SAB', 'ab_widget_form_html'); $mWf2->setAccessible(true);
+$fh = $mWf2->invoke(null, 'block-16', ['inhalt' => '<p>[amz_widget typ="buch" asin="B0EZ000001" titel="x"]</p>']);
+ok(strpos($fh, 'Test starten') !== false && strpos($fh, 'sab_abw_neu') !== false && $mWf2->invoke(null, 'block-9', ['inhalt' => '<p>kein Shortcode</p>']) === '', 'Widget-Test: Formular nur bei umgebauten Buch-Widgets');
+$GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['tr']['sab_alle_asins']);
+
+// ---- 0.91.0: A/B/C-Test mit drei Varianten ----
+$n3 = SAB::ab_bewerten_n(['A' => [334, 30], 'B' => [333, 15], 'C' => [333, 14]], 1000, 't1');
+ok($n3['status'] === 'klar' && $n3['sieger'] === 'A' && $n3['chi_p'] < 0.05 && $n3['vgl']['B']['p_korr'] < 0.05 && $n3['vgl']['C']['p_korr'] < 0.05 && $n3['bestwahrsch']['A'] > 0.95, 'A/B/C: eine Variante klar vorn => klarer Sieger (chi p ' . round($n3['chi_p'], 4) . ')');
+$n4 = SAB::ab_bewerten_n(['A' => [334, 20], 'B' => [333, 18], 'C' => [333, 19]], 1000, 't2');
+ok($n4['status'] === 'gleich' && $n4['sieger'] === '' && $n4['chi_p'] > 0.5, 'A/B/C: fast gleiche Raten => kein Unterschied');
+$n5 = SAB::ab_bewerten_n(['A' => [334, 30], 'B' => [333, 14], 'C' => [333, 25]], 1000, 't3');
+ok($n5['status'] === 'teils' || $n5['status'] === 'klar' || $n5['status'] === 'tendenz', 'A/B/C: gemischter Fall liefert ein Urteil (' . $n5['status'] . ', A vs C p_korr ' . round($n5['vgl']['C']['p_korr'], 3) . ')');
+$n6 = SAB::ab_bewerten_n(['A' => [100, 5], 'B' => [100, 2], 'C' => [100, 1]], 1000, 't4');
+ok($n6['status'] === 'laeuft' && abs(array_sum($n6['bestwahrsch']) - 1.0) < 1e-9, 'A/B/C: vor dem Ziel nur „läuft“, Wahrscheinlichkeiten ergeben 100 %');
+ok(SAB::ab_bewerten_n(['A' => [0, 0], 'B' => [0, 0], 'C' => [0, 0]], 1000)['status'] === 'leer', 'A/B/C: ohne Daten kein Rechenfehler');
+$GLOBALS['opt']['sab_ab'] = ['cafe0003' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0EZ000001'], 'b' => ['B0EZ000002'], 'c' => ['B0EZ000003'], 'w' => 1, 'wf' => ['titel' => 'Buch B', 'text' => 'Text B'], 'wfc' => ['titel' => 'Buch C', 'text' => 'Text C']]];
+$GLOBALS['http']['B0EZ000003'] = item('B0EZ000003', [$money('1 €')]);
+$w3 = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A', 'text' => 'Text A']);
+ok(substr_count($w3, 'class="sab-ab-ep"') === 3 && strpos($w3, 'data-v="C"') !== false && strpos($w3, 'data-sab-var="C"') !== false && strpos($w3, 'Buch C') !== false && strpos($w3, 'Math.floor(Math.random()*n)') !== false, 'A/B/C: Widget zeigt drei Panes, Klicks von C zählen für den Test');
+$mKh3 = new ReflectionMethod('SAB', 'ab_karte_html'); $mKh3->setAccessible(true);
+$k3 = $mKh3->invoke(null, 'cafe0003', $GLOBALS['opt']['sab_ab']['cafe0003'], ['r' => $n3, 'v' => [], 's' => ['/x/' => ['A' => ['n' => 5, 'k' => 1]]], 't' => ['2026-10-29' => ['C' => ['n' => 5, 'k' => 1]], '2026-10-30' => ['C' => ['n' => 9, 'k' => 2]]]], true);
+ok(strpos($k3, 'Klarer Sieger: Paar A') !== false && strpos($k3, 'Variante C') !== false && strpos($k3, 'Wahrscheinlichkeit, die beste zu sein') !== false && strpos($k3, 'sicher besser') !== false, 'A/B/C: Karte zeigt drei Varianten, Gesamttest und Vergleiche');
+$GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['tr']['sab_alle_asins']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
