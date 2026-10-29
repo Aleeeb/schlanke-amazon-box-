@@ -3888,11 +3888,13 @@ JS;
         global $wpdb;
         $akt = self::ab_aktiv(); if (!$akt) { return; }
         $t = self::ab_tabelle(); $pf = substr((string) wp_parse_url($pfad, PHP_URL_PATH), 0, 190); $tag = gmdate('Y-m-d'); $gesehen = [];
+        $zeilen = [];
         foreach (array_slice($liste, 0, 8) as $e) {
             $b = (string) ($e['b'] ?? ''); $v = (string) ($e['v'] ?? '');
             if (!preg_match('/^[a-f0-9]{8}$/', $b) || !in_array($v, ['A', 'B', 'C'], true) || empty($akt[$b])) { continue; }
-            $wpdb->query($wpdb->prepare("INSERT INTO $t (block, var, tag, pfad, n) VALUES (%s, %s, %s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1", $b, $v, $tag, $pf));
+            $zeilen[] = $wpdb->prepare("(%s, %s, %s, %s, 1)", $b, $v, $tag, $pf);
         }
+        if ($zeilen) { $wpdb->query("INSERT INTO $t (block, var, tag, pfad, n) VALUES " . implode(', ', $zeilen) . " ON DUPLICATE KEY UPDATE n = n + 1"); }   // eine Abfrage für alle Tests der Seite
     }
 
     // ---------- Eigene Klickmessung (ohne Cookies, ohne IP, ohne Besucher-Kennung) ----------
@@ -3973,7 +3975,8 @@ JS;
         $t = self::klicktabelle();
         if (isset($d['ab']) && is_array($d['ab'])) {
             self::ab_ansichten_zaehlen($d['ab'], (string) ($d['pfad'] ?? ''));
-        } elseif (isset($d['pv'])) {   // Seitenaufruf mit Produkten: nur Summe je Seite und Tag, ohne Besucherkennung
+        }
+        if (isset($d['pv'])) {   // Seitenaufruf mit Produkten: nur Summe je Seite und Tag, ohne Besucherkennung
             $wpdb->query($wpdb->prepare("INSERT INTO " . self::seiten_tabelle() . " (tag, pfad, n) VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1", gmdate('Y-m-d'), substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190)));
         } elseif (isset($d['s'])) {
             $sek = (int) $d['s'];
@@ -4010,8 +4013,9 @@ JS;
            . 'var m={"Europe/Berlin":"DE","Europe/Vienna":"AT","Europe/Zurich":"CH","Europe/Madrid":"ES","Atlantic/Canary":"ES","Europe/Paris":"FR","Europe/Rome":"IT","Europe/London":"GB","Europe/Dublin":"IE","Europe/Amsterdam":"NL","Europe/Brussels":"BE","Europe/Luxembourg":"LU","Europe/Lisbon":"PT","Europe/Warsaw":"PL","Europe/Prague":"CZ","Europe/Stockholm":"SE","Europe/Copenhagen":"DK","Europe/Oslo":"NO","Europe/Helsinki":"FI","Europe/Budapest":"HU","Europe/Athens":"GR","America/New_York":"US","America/Chicago":"US","America/Denver":"US","America/Los_Angeles":"US","America/Toronto":"CA","America/Vancouver":"CA","America/Mexico_City":"MX","America/Sao_Paulo":"BR","America/Argentina/Buenos_Aires":"AR","America/Bogota":"CO","America/Santiago":"CL","America/Lima":"PE","Australia/Sydney":"AU","Australia/Melbourne":"AU","Australia/Brisbane":"AU","Australia/Perth":"AU","Pacific/Auckland":"NZ"};'
            . 'return m[t]||(/^[A-Za-z]{2}$/.test(x)?x.toUpperCase():"")}'
            . 'function H(a){var r="",h=document.querySelectorAll("h2[id],h3[id],h4[id]"),i;for(i=0;i<h.length;i++){if(h[i].compareDocumentPosition(a)&4)r=h[i].id}return r}'
-           . 'S({id:Math.random().toString(36).slice(2,10),pv:1,pfad:location.pathname});'
-           . 'if(window.sabAB&&window.sabAB.length){S({id:Math.random().toString(36).slice(2,10),ab:window.sabAB,pfad:location.pathname})}'
+           . 'function Z(){var o={id:Math.random().toString(36).slice(2,10),pv:1,pfad:location.pathname};if(window.sabAB&&window.sabAB.length){o.ab=window.sabAB}S(o)}'
+           . 'function W(){(window.requestIdleCallback||function(f){setTimeout(f,1500)})(Z)}'
+           . 'if(document.readyState==="complete"){W()}else{addEventListener("load",W)}'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
            . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
