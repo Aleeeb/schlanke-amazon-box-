@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.93.4
+ * Version: 0.93.5
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.93.4';
+    const VERSION = '0.93.5';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2872,7 +2872,7 @@ JS;
     public static function stellen_skript(): void {
         if (!function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts') || !is_singular()) { return; }
         $pid_ = (int) get_queried_object_id();
-        $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $pid_, 'e' => $pid_ && current_user_can('edit_post', $pid_) ? admin_url('post.php?post=' . $pid_ . '&action=edit&sab_zeige=') : '', 'ko' => array_values(array_slice((array) get_option('sab_kurz_ok', []), -200))]);
+        $cfg = wp_json_encode(['az' => 'https://www.amazon.' . self::land('') . '/s?k=', 'u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $pid_, 'e' => $pid_ && current_user_can('edit_post', $pid_) ? admin_url('post.php?post=' . $pid_ . '&action=edit&sab_zeige=') : '', 'ko' => array_values(array_slice((array) get_option('sab_kurz_ok', []), -200))]);
         echo '<script>(function(){var C=' . $cfg . ';var seen={};var cur={nth:0,txt:""};'
            . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);fd.append("kurz",cur.kurz||"");for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
            . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
@@ -2921,6 +2921,7 @@ JS;
            . 'function zeile(c,sub){var row=el("div","display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eee");if(c.img){var im=el("img","width:56px;height:56px;object-fit:contain;flex:none");im.src=c.img;row.appendChild(im)}var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555",sub));row.appendChild(tx);var bt=el("button",BS,"Dagegen testen");bt.type="button";bt.onclick=function(){los(c.asin)};row.appendChild(bt);return row}'
            . 'post("sab_ab_kand",{ord:o,asin:asin},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}inf.textContent="Jetzt: "+r.data.alt+". Vorgeschlagen werden nur Produkte, die noch nicht in diesem Artikel stehen, ohne tötende oder verletzende Produkte. Der Artikel bleibt unverändert; beide Produkte zählen Klicks, danach siehst du den Sieger.";'
            . 'var fr=el("div","display:flex;gap:8px;padding:0 0 10px");var ip=el("input","flex:1;padding:6px;border:1px solid #bbb;border-radius:6px");ip.placeholder="Eigene ASIN oder Amazon-Produktlink einfügen";var b2=el("button",BS,"Starten");b2.type="button";b2.onclick=function(){los(ip.value)};fr.appendChild(ip);fr.appendChild(b2);lst.appendChild(fr);'
+           . 'var fs=el("div","padding:0 0 10px;font-size:13px");var sa=el("a","color:#2271b1;cursor:pointer;text-decoration:underline","🔍 Bei Amazon nach Titel suchen (neues Fenster), um ein Ersatzprodukt oder einen Gegner zu finden");sa.onclick=function(){var q=(ip.value&&!/^https?:|^[A-Z0-9]{10}$/i.test(ip.value.trim()))?ip.value:r.data.alt;window.open(C.az+encodeURIComponent(q),"_blank","noopener")};fs.appendChild(sa);fs.appendChild(el("div","color:#666","Tipp: Suchbegriff oben eintragen und hier klicken, sonst wird der Titel des jetzigen Produkts gesucht. Die Produktseite öffnen, Adresse kopieren, oben einfügen."));lst.appendChild(fs);'
            . 'r.data.liste.forEach(function(c){lst.appendChild(zeile(c,"Warum: "+c.warum+(c.preis?" · "+c.preis:"")))});'
            . 'var si=el("input","display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:6px;border:1px solid #bbb;border-radius:6px");si.type="search";si.placeholder="Im Bestand suchen: Name, Stichwort oder ASIN";var so=el("div","");bx.appendChild(si);bx.appendChild(so);'
            . 'si.oninput=function(){var q=si.value.toLowerCase().trim().split(/\s+/).filter(Boolean);so.textContent="";if(!q.length||si.value.trim().length<2){return}var rs=[];(r.data.ps||[]).forEach(function(p){var h=(p[0]+" "+p[1]+" "+p[2]).toLowerCase(),c=0;q.forEach(function(w){if(h.indexOf(w)>=0){c++}});if(c&&p[0]!==asin){rs.push([c,p])}});rs.sort(function(a,b){return b[0]-a[0]||b[1][3]-a[1][3]});rs.slice(0,8).forEach(function(x){var p=x[1];so.appendChild(zeile({asin:p[0],name:p[1]||p[2]||p[0]},(p[3]>=0?"Score "+p[3]+" · ":"")+p[0]))});if(!rs.length){so.appendChild(el("p","margin:6px 0;color:#555","Kein Treffer im Bestand."))}}})}'
@@ -3396,6 +3397,7 @@ JS;
             return $kopf . '<strong>&#9878; A/B-Test läuft:</strong> ' . esc_html($asin) . ' gegen ' . esc_html((string) $lauf[1]['b'][0]) . (!empty($lauf[1]['c'][0]) ? ' gegen ' . esc_html((string) $lauf[1]['c'][0]) : '') . ' (Zahlen im Reiter A/B-Tests und in der Statistik) <button class="button" name="sab_abw" value="stop:' . esc_attr($lauf[0]) . '" onclick="return confirm(\'Test beenden? Die Zahlen bleiben gespeichert.\')">Test beenden</button></form>';
         }
         return $kopf . '<details><summary><strong>&#9878; A/B-Test: dieses Widget gegen ein anderes Produkt</strong></summary><p class="description">Besucher sehen je zur Hälfte (mit dritter Variante je zu einem Drittel) diese Karte oder die Karte mit dem anderen Produkt. Das Widget selbst bleibt unverändert. Leere Felder bleiben leer (außer dem Titel, der dann der Kurzname des Produkts ist).</p>'
+            . '<p style="margin:6px 0"><input type="text" id="sab-sq-' . esc_attr($id) . '" value="' . esc_attr((string) (self::produkte()[$asin] ?? '')) . '" style="width:60%" placeholder="Titel oder Suchbegriff"> <a class="button" target="_blank" rel="noopener" href="#" onclick="this.href=\'' . esc_js('https://www.amazon.' . self::land('') . '/s?k=') . '\'+encodeURIComponent(document.getElementById(\'sab-sq-' . esc_js($id) . '\').value)">&#128269; Bei Amazon nach Titel suchen</a><br><span class="description">Passenden Ersatz oder Gegner bei Amazon finden, dann die ASIN oder Adresse unten einfügen.</span></p>'
             . '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">'
             . '<label>ASIN oder Amazon-Link des anderen Produkts<br><input type="text" name="sab_abw_neu" style="width:100%"></label><label>Etikett<br><input type="text" name="sab_abw_marke" style="width:100%"></label><label>Titel<br><input type="text" name="sab_abw_titel" style="width:100%"></label><label>Kurztext<br><input type="text" name="sab_abw_text" style="width:100%"></label><label>Knopftext (leer = Standard)<br><input type="text" name="sab_abw_knopf" style="width:100%"></label></div>'
             . '<p class="description" style="margin-top:10px"><strong>Dritte Variante (optional, A/B/C-Test):</strong> ASIN leer lassen für einen reinen A/B-Test.</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">'

@@ -17,6 +17,7 @@ function delete_transient($k) { unset($GLOBALS['tr'][$k]); }
 function shortcode_atts($d, $a) { return array_merge($d, array_intersect_key((array) $a, $d)); }
 function esc_url($u) { return htmlspecialchars($u); } function esc_html($t) { return htmlspecialchars($t); } function esc_attr($t) { return htmlspecialchars($t); }
 function wp_json_encode($d) { return json_encode($d); }
+function esc_js($t) { return addslashes((string) $t); }
 function is_wp_error($x) { return false; }
 function wp_remote_post($u, $a) {
     if (strpos($u, 'auth') !== false) return ['code' => 200, 'body' => json_encode(['access_token' => 't', 'expires_in' => 3600])];
@@ -1954,6 +1955,7 @@ ok(empty($GLOBALS['opt']['sab_ab'][$wid]['an']) && strpos($GLOBALS['sc']['amz_wi
 $mWf2 = new ReflectionMethod('SAB', 'ab_widget_form_html'); $mWf2->setAccessible(true);
 $fh = $mWf2->invoke(null, 'block-16', ['inhalt' => '<p>[amz_widget typ="buch" asin="B0EZ000001" titel="x"]</p>']);
 ok(strpos($fh, 'Test starten') !== false && strpos($fh, 'sab_abw_neu') !== false && $mWf2->invoke(null, 'block-9', ['inhalt' => '<p>kein Shortcode</p>']) === '', 'Widget-Test: Formular nur bei umgebauten Buch-Widgets');
+ok(strpos($fh, 'Bei Amazon nach Titel suchen') !== false && strpos($fh, 'amazon.') !== false, 'A/B-Widget-Formular: Amazon-Suche nach Titel');
 $GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['tr']['sab_alle_asins']);
 
 // ---- 0.91.0: A/B/C-Test mit drei Varianten ----
