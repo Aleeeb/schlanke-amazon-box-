@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.61
+ * Version: 0.89.62
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.61';
+    const VERSION = '0.89.62';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -82,6 +82,7 @@ final class SAB {
         add_shortcode('amz_karte',   [__CLASS__, 'sc_karte']);
         add_shortcode('amz_hinweis', [__CLASS__, 'sc_hinweis']);
         add_shortcode('amz_widget',  [__CLASS__, 'sc_widget']);
+        add_shortcode('amz_startseite', [__CLASS__, 'sc_startseite']);
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
         add_shortcode('amazon',      [__CLASS__, 'sc_aawp']);   // Alias wie bei AAWP (AAWP gewinnt, solange es aktiv ist)
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
@@ -2401,6 +2402,7 @@ function run(tz,lang){var w=pick(tz,lang);if(!w||!T[w])return 0;var n=0,all=docu
 for(var i=0;i<all.length;i++){var a=all[i],u;try{u=new URL(a.href)}catch(e){continue}
 var h=u.hostname.match(/(?:^|\.)amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)$/);if(!h||h[1]===w)continue;
 if(a.hasAttribute('data-sab-fix'))continue;var tag=u.searchParams.get('tag'),ok=false;for(var k in T){if(T[k]===tag)ok=true}if(!ok)continue;
+if(a.hasAttribute('data-sab-home')){a.setAttribute('data-sab-z',w+':h');a.href='https://www.amazon.'+w+'/?tag='+T[w];n++;continue}
 var t=a.getAttribute('data-sab-t')||a.getAttribute('data-aawp-product-title')||a.getAttribute('title')||'';
 if(!t){var sg=(u.pathname.split('/')[1]||'');if(!/^(dp|gp|product|s|exec|d|o|ref|stores|hz|b)$/i.test(sg)&&!/^[A-Z0-9]{10}$/.test(sg))t=sg.replace(/-/g,' ')}
 if(!t)t=pre(a);t=t.replace(/[^\wÀ-ɏ ]+/g,' ').replace(/\s+/g,' ').trim().split(' ').slice(0,8).join(' ');if(!t)continue;
@@ -2991,6 +2993,17 @@ JS;
            . 'var x=btn("×",function(){b.remove()});setTimeout(function(){zeige(idx)},300)})();</script>';
     }
 
+    /** [amz_startseite land="es"]Bei Amazon stöbern[/amz_startseite]: Link zur Amazon-Startseite mit der Partner-ID des Landes (Länder-Umschaltung und Klickstatistik laufen mit, Kennung STARTSEITE). */
+    public static function sc_startseite($a, $inhalt = ''): string {
+        $a = shortcode_atts(['land' => '', 'class' => '', 'tag' => ''], (array) $a);
+        $land = self::land($a['land']); $tag = self::tag_erlaubt((string) $a['tag']) ?: self::tag($land);
+        if (!isset(self::LAENDER[$land])) { return esc_html((string) $inhalt); }
+        $link = 'https://' . self::LAENDER[$land][0] . '/' . ($tag !== '' ? '?tag=' . rawurlencode($tag) : '');
+        $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $a['class']));
+        self::$genutzt = true; self::$links++;
+        return '<a' . ($cls ? ' class="' . esc_attr($cls) . '"' : '') . ' href="' . esc_url($link) . '" data-sab-asin="STARTSEITE" data-sab-home="1" target="_blank" rel="nofollow sponsored noopener">' . esc_html(trim((string) $inhalt) !== '' ? (string) $inhalt : 'Amazon') . '</a>';
+    }
+
     public static function sc_link($a, $inhalt = ''): string {
         $a = shortcode_atts(['asin' => '', 'land' => '', 'class' => '', 'tag' => ''], $a);
         $orig = self::asin($a['asin']);
@@ -3121,7 +3134,7 @@ JS;
             }
         } else {
             $asin = self::asin((string) ($d['asin'] ?? ''));
-            if (strlen($asin) === 10 && in_array($asin, self::alle_asins(), true)) {
+            if (strlen($asin) === 10 && ($asin === 'STARTSEITE' || in_array($asin, self::alle_asins(), true))) {
                 $typ = in_array($d['typ'] ?? '', ['bild', 'box', 'text'], true) ? $d['typ'] : 'text';
                 $wpdb->insert($t, [
                     'ts' => gmdate('Y-m-d H:i:s'), 'kid' => $d['id'], 'asin' => $asin,
@@ -3132,7 +3145,7 @@ JS;
                     'herkunft' => preg_match('/^[A-Z]{2}$/', (string) ($d['h'] ?? '')) ? (string) $d['h'] : '',   // Land des Besuchers, nur aus Zeitzone/Browsersprache (keine IP, kein Cookie)
                     'ziel_land' => preg_match('/^(?:de|es|fr|it|co\.uk|com|ca|com\.au)$/', (string) ($d['zl'] ?? '')) ? (string) $d['zl'] : '',   // Amazon-Land, in das der Klick wirklich ging
                     'ziel_asin' => preg_match('/^[A-Z0-9]{10}$/', (string) ($d['za'] ?? '')) ? (string) $d['za'] : '',   // tatsächlich ausgelieferte ASIN (leer bei Suchlink)
-                    'ziel' => preg_match('/^(com|ca|com\.au):[as]$/', (string) ($d['z'] ?? '')) ? (string) $d['z'] : '',   // Länder-Umschaltung: Zielstore und a = ASIN im Land, s = Suche
+                    'ziel' => preg_match('/^(com|ca|com\.au):[ash]$/', (string) ($d['z'] ?? '')) ? (string) $d['z'] : '',   // Länder-Umschaltung: Zielstore und a = ASIN im Land, s = Suche
                 ]);
             }
         }
@@ -7221,6 +7234,8 @@ JS;
              '[amz_widget typ="buch" asin="' . $demo . '" marke="Zum Weiterlesen" titel="Titel des Buchs" text="Ein bis zwei Sätze, warum sich das Buch lohnt."]'],
             ['Tipp mit Frage', 'Orange Box mit Frage und Knopf zu einem Artikel (kein Affiliate-Link).',
              '[amz_widget typ="tipp" titel="Schnecken im Beet? 🐌" text="Diese drei Dinge helfen am schnellsten. Ohne Gift, und die Tiere bleiben unverletzt." knopf="Zu den Tipps" url="' . esc_url(home_url('/')) . '"]'],
+            ['Einfacher Amazon-Link (Startseite)', 'Ein Textlink zur Amazon-Startseite mit der Partner-ID des Landes, mit Länder-Umschaltung und Klickstatistik (Kennung STARTSEITE). Passt als ruhiger Ersatz für alte Startseiten-Kurzlinks in der Seitenleiste.',
+             '[amz_startseite]Bei Amazon stöbern[/amz_startseite]'],
             ['Top-3-Liste', 'Nummerierte Liste, jede Zeile: Text|Adresse (Adresse ist optional).',
              "[amz_widget typ=\"liste\" titel=\"Beliebt diese Woche\"]\nSchneckenkragen aus Kupfer|" . esc_url(home_url('/')) . "\nElektrischer Schneckenzaun|" . esc_url(home_url('/')) . "\nIgelhaus für den Garten|" . esc_url(home_url('/')) . "\n[/amz_widget]"],
         ];

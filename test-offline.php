@@ -1801,4 +1801,9 @@ $hb2 = (string) $mHb->invoke(null, 'testk', 'uebersicht', '<p>Text</p>');
 ok(strpos($hb2, '<p>Text</p>') === false && strpos($hb2, 'value="an:testk"') !== false, 'Erklärung: ausgeblendet, Knopf zum Einblenden bleibt');
 $_POST = ['sab_hinweis' => 'an:testk']; $mHs->invoke(null); $_POST = [];
 ok(strpos((string) $mHb->invoke(null, 'testk', 'uebersicht', '<p>Text</p>'), '<p>Text</p>') !== false, 'Erklärung: wieder eingeblendet');
+// 0.89.62: Startseiten-Link
+$GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es';
+$ss = SAB::sc_startseite(['land' => 'es'], 'Bei Amazon stöbern');
+ok(strpos($ss, 'href="https://www.amazon.es/?tag=ayuba09-21"') !== false && strpos($ss, 'data-sab-asin="STARTSEITE"') !== false && strpos($ss, 'data-sab-home="1"') !== false && strpos($ss, 'sponsored') !== false && strpos($ss, '>Bei Amazon stöbern</a>') !== false, 'Startseiten-Link: mit Partner-ID, Kennung und sponsored (' . $ss . ')');
+unset($GLOBALS['opt']['sab_tags'], $GLOBALS['opt']['sab_default_land']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
