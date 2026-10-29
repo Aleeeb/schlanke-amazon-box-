@@ -2076,4 +2076,13 @@ $bl = SAB::sc_widget(['typ' => 'beliebt', 'ohne' => 'c', 'land' => 'de']);
 ok(strpos($bl, 'Beliebte Artikel diese Woche') !== false && substr_count($bl, '<li>') === 2 && strpos($bl, '/impressum/') === false && substr_count($bl, 'x.test/p') === 2 && strpos($bl, '--sabc:#336699') !== false && !preg_match('/>\s*\d+\s*(Klicks|Aufrufe)/', $bl), 'Beliebt-Widget: ohne Impressum/Startseite/Ausschluss, ohne Zahlen, Seitenfarbe (' . $bl . ')');
 ok(get_option('sab_beliebt_an') === '1', 'Beliebt-Widget schaltet die Aufrufzählung ein');
 $GLOBALS['wpdb'] = $wpdb_b;
+// 0.93.4: Produkt-Widget
+$GLOBALS['opt']['sab_widget_tiere'] = '1'; $GLOBALS['opt']['sab_ab'] = [];
+$pw = SAB::sc_widget(['typ' => 'produkt', 'asin' => 'B0PROD0001', 'land' => 'es', 'marke' => 'Tipp', 'text' => 'Ohne Gift.']);
+ok(strpos($pw, 'class="sab-wb"') !== false && strpos($pw, 'sab-tw') === false && strpos($pw, 'class="sab-wtag">Tipp<') !== false && strpos($pw, 'sab-wbtn') !== false, 'Produkt-Widget: Optik wie Buch, ohne Tierchen (' . substr($pw, 0, 300) . ')');
+$GLOBALS['opt']['sab_ab'] = ['cafe0021' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0PROD0001'], 'b' => ['B0PROD0002'], 'c' => ['B0PROD0003'], 'w' => 1, 'wf' => ['titel' => 'Prod B', 'text' => 'Text B', 'marke' => '', 'knopf' => ''], 'wfc' => ['titel' => 'Prod C', 'text' => 'Text C', 'marke' => '', 'knopf' => '']]];
+unset($GLOBALS['tr']['sab_alle_asins']);
+$pab = SAB::sc_widget(['typ' => 'produkt', 'asin' => 'B0PROD0001', 'land' => 'es', 'marke' => 'Tipp', 'titel' => 'Prod A', 'text' => 'Text A']);
+ok(substr_count($pab, 'class="sab-wtag">Tipp<') === 3 && strpos($pab, 'B0PROD0002') !== false && strpos($pab, 'B0PROD0003') !== false, 'Produkt-Widget: A/B/C über drei Produkte');
+$GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['opt']['sab_widget_tiere']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.93.3
+ * Version: 0.93.4
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.93.3';
+    const VERSION = '0.93.4';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3388,7 +3388,7 @@ JS;
 
     /** Formular im Umbau-Reiter unter einem fertigen Widget: Test starten oder beenden. */
     private static function ab_widget_form_html(string $id, array $w): string {
-        if (!preg_match('#\[amz_widget\b[^\]]*\btyp="buch"[^\]]*\basin="([A-Za-z0-9]{10})"#', (string) $w['inhalt'], $m) && !preg_match('#\[amz_widget\b[^\]]*\basin="([A-Za-z0-9]{10})"[^\]]*\btyp="buch"#', (string) $w['inhalt'], $m)) { return ''; }
+        if (!preg_match('#\[amz_widget\b[^\]]*\btyp="(?:buch|produkt)"[^\]]*\basin="([A-Za-z0-9]{10})"#', (string) $w['inhalt'], $m) && !preg_match('#\[amz_widget\b[^\]]*\basin="([A-Za-z0-9]{10})"[^\]]*\btyp="(?:buch|produkt)"#', (string) $w['inhalt'], $m)) { return ''; }
         $asin = strtoupper($m[1]); $lauf = null;
         foreach (self::ab_aktiv() as $tid => $o) { if (!empty($o['w']) && ($o['a'][0] ?? '') === $asin) { $lauf = [$tid, $o]; } }
         $kopf = '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:8px;border-top:1px solid #eee;padding-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="ab_widget"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><input type="hidden" name="sab_abw_asin" value="' . esc_attr($asin) . '">';
@@ -8341,8 +8341,9 @@ JS;
         $knopf = $a['knopf'] !== '' ? (string) $a['knopf'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']);
         $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-wbtn', 'tag' => $a['tag']], $knopf);
         $alt = (get_option('sab_widget_alt') === '1' && $a['alt_text'] !== '' && esc_url((string) $a['alt_url']) !== '') ? '<a class="sab-walt" href="' . esc_url((string) $a['alt_url']) . '" target="_blank" rel="nofollow sponsored noopener">' . esc_html((string) $a['alt_text']) . '</a>' : '';
-        $titel = $a['titel'] !== '' ? (string) $a['titel'] : (string) (self::produkte()[$asin] ?? '');   // ohne eigenen Titel: Kurzname des Produkts
-        return $css . '<div class="sab-wb">' . ($a['marke'] !== '' ? '<span class="sab-wtag">' . esc_html((string) $a['marke']) . '</span>' : '') . '<div class="sab-wcover">' . $img . '</div>' . self::widget_tier($asin)
+        $titel = $a['titel'] !== '' ? (string) $a['titel'] : (string) (self::produkte()[$asin] ?? '');
+        if ($a['titel'] === '' && $titel !== '' && $typ === 'produkt') { $titel = self::kurztitel($titel); }   // ohne eigenen Titel: Kurzname des Produkts
+        return $css . '<div class="sab-wb">' . ($a['marke'] !== '' ? '<span class="sab-wtag">' . esc_html((string) $a['marke']) . '</span>' : '') . '<div class="sab-wcover">' . $img . '</div>' . ($typ === 'produkt' ? '' : self::widget_tier($asin))   // „produkt“ = Einzelprodukt-Widget: gleiche Optik, ohne Tierchen
             . ($titel !== '' ? '<h4>' . esc_html($titel) . '</h4>' : '') . ($a['text'] !== '' ? '<p>' . esc_html((string) $a['text']) . '</p>' : '') . $btn . $alt
             . (get_option('sab_widget_hinweis') === '1' || $a['hinweis'] !== '' ? '<div class="sab-wnote">' . esc_html($a['hinweis'] !== '' ? (string) $a['hinweis'] : 'Werbung · Partnerlink') . '</div>' : '') . '</div>';
     }
@@ -8354,6 +8355,8 @@ JS;
         $vorlagen = [
             ['Buch-Karte (ersetzt die alte Buch-Box)', 'Bild und Knopf sind zusammen EIN Affiliate-Link, die ganze Karte ist klickbar. Die ASIN des Buchs eintragen; Bild und Link folgen einem Austausch automatisch.',
              '[amz_widget typ="buch" asin="' . $demo . '" marke="Buchtipp" titel="Ein Lob der Unordnung im Garten" text="Wie aus Laub, Totholz und Steinen Verstecke für Igel, Kröten und Laufkäfer werden. Diese Tiere fressen Schnecken für dich." knopf="Bei Amazon ansehen" alt_text="oder bei Thalia ansehen" alt_url="https://www.thalia.de/"]'],
+            ['Produkt-Widget (allgemeines Tierhilfe-Produkt)', 'Wie die Buch-Karte, aber für ein einzelnes Produkt: Bild, Kurzname, kurzer Text, dezenter Button, ohne Tierchen. Im Umbau-Reiter lässt sich darunter ein A/B/C-Test mit zwei weiteren Produkten starten.',
+             '[amz_widget typ="produkt" asin="' . $demo . '" marke="Tipp" text="Hilft ohne Gift und ohne Verletzung der Tiere."]'],
             ['Buch-Karte kurz (ohne zweiten Link)', 'Für Seiten mit nur einem Händler.',
              '[amz_widget typ="buch" asin="' . $demo . '" marke="Zum Weiterlesen" titel="Titel des Buchs" text="Ein bis zwei Sätze, warum sich das Buch lohnt."]'],
             ['Tipp mit Frage', 'Orange Box mit Frage und Knopf zu einem Artikel (kein Affiliate-Link).',
