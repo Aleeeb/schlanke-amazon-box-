@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.22
+ * Version: 0.92.23
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.22';
+    const VERSION = '0.92.23';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -8042,7 +8042,7 @@ JS;
                 $start = [];
                 $c_alt = preg_replace_callback('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', function ($m) use (&$start) {
                     $u = html_entity_decode($m[2]);
-                    if (self::seite_art($u) !== 'startseite') { return $m[0]; }
+                    if (!in_array(self::seite_art($u), ['startseite', 'rezension'], true)) { return $m[0]; }
                     $start[] = ['url' => $u, 'text' => trim(html_entity_decode(strip_tags($m[3])))];
                     return ' ';
                 }, $c);
@@ -8056,7 +8056,7 @@ JS;
                 if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $am_, PREG_SET_ORDER)) {
                     foreach ($am_ as $a_) {
                         $u_ = html_entity_decode($a_[2]);
-                        if (!preg_match('#^https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co|link\.amazon)(?:[/?\#]|$)#i', $u_) || self::seite_art($u_) === 'startseite') { continue; }
+                        if (!preg_match('#^https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co|link\.amazon)(?:[/?\#]|$)#i', $u_) || in_array(self::seite_art($u_), ['startseite', 'rezension'], true)) { continue; }
                         $uu = self::umbau_url($a_[2]);
                         $lk[] = ['url' => $u_, 'text' => trim(html_entity_decode(strip_tags($a_[3]))), 'asin' => $uu ? (string) $uu[1] : '', 'kurz' => (bool) preg_match('#amzn\.|a\.co/|link\.amazon#i', $u_)];
                     }
@@ -8124,13 +8124,20 @@ JS;
         $n = 0;
         $neu = preg_replace_callback('#<a\b([^>]*)href=(["\'])(.*?)\2([^>]*)>(.*?)</a>#is', function ($m) use (&$n) {
             $u = html_entity_decode($m[3]);
-            if (self::seite_art($u) !== 'startseite') { return $m[0]; }
+            $art = self::seite_art($u);
+            if ($art !== 'startseite' && $art !== 'rezension') { return $m[0]; }
             $land = preg_match('#amazon\.(es|de|fr|it|co\.uk|com\.au|com|ca)#i', $u, $lm) ? strtolower($lm[1]) : '';
             $cls = preg_match('#\bclass=(["\'])(.*?)\1#i', $m[1] . $m[4], $cm) ? trim(preg_replace('/[^A-Za-z0-9 _-]/', '', $cm[2])) : '';
             $text = trim(preg_replace('/\s+/u', ' ', strip_tags($m[5], '<strong><em><b><i>')));
             if ($text === '') { return $m[0]; }
             $n++;
-            return '[amz_startseite' . ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . ($cls !== '' ? ' class="' . $cls . '"' : '') . ']' . str_replace(['[', ']'], ['(', ')'], $text) . '[/amz_startseite]';
+            $lt = ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . ($cls !== '' ? ' class="' . $cls . '"' : '');
+            $text = str_replace(['[', ']'], ['(', ')'], $text);
+            if ($art === 'rezension') {
+                $asin = self::asin_aus_text($u); if (strlen($asin) !== 10) { $n--; return $m[0]; }
+                return '[amz_rezension asin="' . $asin . '"' . $lt . ']' . $text . '[/amz_rezension]';
+            }
+            return '[amz_startseite' . $lt . ']' . $text . '[/amz_startseite]';
         }, $c);
         return [(string) $neu, $n];
     }
@@ -8202,8 +8209,8 @@ JS;
                 if (isset(self::$wi_vorschau[$id]) && strlen(self::asin((string) ($f['asin'] ?? ''))) === 10) { $h .= '<div style="background:#f1f3ee;padding:14px;border-radius:8px"><div style="width:300px">' . do_shortcode(self::widget_code($f)) . '</div></div>'; }
             }
             if (!empty($w['start'])) {
-                $h .= '<div style="margin-top:8px;padding:8px 10px;background:#f1f6ee;border:1px solid #cfe2c8;border-radius:6px"><strong>Link auf die Amazon-Startseite</strong> (' . count($w['start']) . '): ' . esc_html(implode(', ', array_map(fn($x) => '„' . mb_substr($x['text'], 0, 30) . '“', $w['start']))) . '. Das ist kein Produkt-, sondern ein Startseiten-Link und zählt nicht als alter Link. Du kannst ihn durch den Startseiten-Link des Plugins ersetzen (Partner-ID des Landes, Länder-Umschaltung, Klickstatistik).'
-                    . '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="start_vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="start" onclick="return confirm(\'Startseiten-Link in diesem Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Startseiten-Link umbauen</button></form>';
+                $h .= '<div style="margin-top:8px;padding:8px 10px;background:#f1f6ee;border:1px solid #cfe2c8;border-radius:6px"><strong>Link auf eine Amazon-Seite ohne Produkt (Startseite oder Rezensionen)</strong> (' . count($w['start']) . '): ' . esc_html(implode(', ', array_map(fn($x) => '„' . mb_substr($x['text'], 0, 30) . '“', $w['start']))) . '. Das ist kein Produktlink und zählt nicht als alter Link. Du kannst ihn durch den Link des Plugins ersetzen (Startseite oder Rezensionen, mit Partner-ID des Landes, Länder-Umschaltung, Klickstatistik).'
+                    . '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="start_vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="start" onclick="return confirm(\'Startseiten-Link in diesem Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Link umbauen</button></form>';
                 if (isset(self::$wi_start[$id])) { $h .= '<p style="margin:8px 0 2px"><strong>Neuer Inhalt:</strong></p><pre style="white-space:pre-wrap;max-height:160px;overflow:auto;background:#fff;padding:6px;font-size:12px">' . esc_html(self::$wi_start[$id]) . '</pre><div style="background:#fff;padding:8px;border-radius:6px">' . do_shortcode(wp_kses_post(self::$wi_start[$id])) . '</div>'; }
                 $h .= '</div>';
             }

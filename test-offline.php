@@ -2055,4 +2055,11 @@ delete_transient('sab_alle_asins');
 $phs = SAB::phantome_finden();
 ok(isset($phs['B0PHANTOM1']) && in_array('Produktliste', $phs['B0PHANTOM1'], true), 'Phantome: Produkt in der Liste ohne Artikel wird gefunden');
 unset($GLOBALS['opt']['sab_produkte']); delete_transient('sab_alle_asins');
+// 0.92.23: Rezensionslink im Widget
+$GLOBALS['opt']['widget_block'] = [32 => ['content' => '<p><a href="https://www.amazon.es/product-reviews/B0ABCDEFGH/">Rezensionen</a></p>']];
+$w32 = $mWf->invoke(null);
+ok(isset($w32['block-32']) && $w32['block-32']['fertig'] === true && count($w32['block-32']['start']) === 1, 'Widget: Rezensionslink ist kein alter Produktlink');
+[$ns32, $n32] = SAB::widget_start_umbauen($w32['block-32']['inhalt']);
+ok($n32 === 1 && strpos($ns32, '[amz_rezension asin="B0ABCDEFGH"') !== false, 'Widget: Rezensionslink wird zu [amz_rezension] (' . $ns32 . ')');
+unset($GLOBALS['opt']['widget_block']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
