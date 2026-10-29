@@ -1970,4 +1970,18 @@ $GLOBALS['opt']['widget_block'] = [16 => ['content' => '<p><img src="x.jpg"> ima
 $tr = SAB::textreste_finden();
 ok(count($tr) === 1 && $tr[0]['wo'] === 'Widget block-16' && strpos($tr[0]['treffer'], 'image_width') !== false, 'Textreste: sichtbares image_width="300") im Widget gefunden, vollständiger Shortcode nicht (' . json_encode($tr, JSON_UNESCAPED_UNICODE) . ')');
 unset($GLOBALS['opt']['widget_block']);
+// 0.91.2: Textreste aus alten AAWP-Shortcodes werden nie übernommen und lassen sich reparieren
+$roh16 = "<!-- wp:shortcode -->\n[amz_widget typ=\"buch\" asin=\"3895663891\" marke=\"Buchtipp\" text=\"(amazon fields=″3895663891″ value=″thumb″ image_size=″large″ image_width=″300″ image_height=″300″) Buch bei Thalia ansehen.\" alt_text=\"Haufenweise Lebensräume bei Thalia ansehen.\" alt_url=\"https://tidd.ly/3zcGOHu\"]\n<!-- /wp:shortcode -->";
+$rb = SAB::textrest_bereinigen($roh16);
+ok(strpos($rb, 'text="Buch bei Thalia ansehen."') !== false && strpos($rb, 'image_width') === false && strpos($rb, 'alt_text="Haufenweise Lebensräume bei Thalia ansehen."') !== false && strpos($rb, 'asin="3895663891"') !== false, 'Textreste: Attribut text= wird bereinigt, Rest bleibt (' . $rb . ')');
+ok(SAB::textrest_bereinigen('<p>Buch (amazon fields="X" value="thumb" image_width="300") danach</p>[aawp fields="3895663891" value="thumb"]') === '<p>Buch danach</p>[aawp fields="3895663891" value="thumb"]', 'Textreste: Text im Absatz bereinigt, echter Shortcode unberührt (' . SAB::textrest_bereinigen('<p>Buch (amazon fields="X" value="thumb" image_width="300") danach</p>[aawp fields="3895663891" value="thumb"]') . ')');
+$GLOBALS['opt']['widget_block'] = [16 => ['content' => $roh16]];
+$trx = SAB::textreste_finden();
+ok(count($trx) === 1 && $trx[0]['typ'] === 'widget' && $trx[0]['id'] === 'block-16', 'Textreste: Rest im Shortcode-Attribut wird gefunden');
+$_POST = ['sab_typ' => 'widget', 'sab_wid' => 'block-16'];
+$mTf = new ReflectionMethod('SAB', 'textrest_fix'); $mTf->setAccessible(true); $tfm = (string) $mTf->invoke(null); $_POST = [];
+ok(strpos($tfm, 'entfernt') !== false && strpos($GLOBALS['opt']['widget_block'][16]['content'], 'image_width') === false && isset($GLOBALS['opt']['sab_widget_backup']['block-16']) && count(SAB::textreste_finden()) === 0, 'Textreste: Reparieren-Knopf entfernt den Rest, sichert den alten Inhalt');
+$mWc2 = new ReflectionMethod('SAB', 'widget_code'); $mWc2->setAccessible(true);
+ok(strpos($mWc2->invoke(null, ['asin' => '3895663891', 'text' => '(amazon fields="3895663891" image_width="300") Gut.', 'titel' => '']), 'text="Gut."') !== false, 'Widget-Umbau: Reste aus AAWP-Text landen nie im Shortcode');
+unset($GLOBALS['opt']['widget_block'], $GLOBALS['opt']['sab_widget_backup']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
