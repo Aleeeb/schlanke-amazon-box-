@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.60
+ * Version: 0.89.61
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.60';
+    const VERSION = '0.89.61';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1516,6 +1516,26 @@ final class SAB {
             $zeilen[] = '<li><a href="' . esc_url('https://' . self::LAENDER[$land][0] . '/dp/' . $asin) . '" target="_blank" rel="noopener"><code>' . esc_html($asin) . '</code></a>' . ($ti !== '' ? ' ' . esc_html(self::kurz_wort($ti, 8)) : '') . ' auf ' . count($posts) . ' Seite(n): ' . implode(', ', $links) . (count($posts) > 4 ? ' …' : '') . '</li>';
         }
         return '<div class="notice notice-error" style="border-left-width:8px"><p><strong>Produktbilder fehlen (' . count($nach) . ' Produkte):</strong> An diesen Stellen bekommen Besucher kein Bild. Das hat Vorrang vor allem anderen: Produkt ersetzen oder Bild bei Amazon prüfen.</p><ul style="margin-left:18px;list-style:disc">' . implode('', $zeilen) . '</ul><p><a class="button button-primary" href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Zum Austausch: dringend tauschen</a></p></div>';
+    }
+
+    /** Erklärtext, den jeder Benutzer ausblenden (und wieder einblenden) kann. $schluessel: kurzer Name des Texts, $reiter: Reiter für den Rücksprung. */
+    private static function hinweis_box(string $schluessel, string $reiter, string $html): string {
+        $uid = function_exists('get_current_user_id') ? (int) get_current_user_id() : 0;
+        $aus = (array) (((array) get_option('sab_hinweis_aus', []))[$uid] ?? []);
+        // Die Knöpfe stehen oft in einem schon vorhandenen Formular des Reiters (keine verschachtelten Formulare): sie senden nur sab_hinweis=aus|an:Schlüssel.
+        $f = static function (string $akt, string $text) use ($schluessel): string {
+            return '<button class="button button-small" name="sab_hinweis" value="' . $akt . ':' . esc_attr($schluessel) . '">' . $text . '</button>';
+        };
+        if (in_array($schluessel, $aus, true)) { return '<p style="margin:4px 0"><small class="description">Erklärung ausgeblendet.</small> ' . $f('an', 'Erklärung einblenden') . '</p>'; }
+        return '<div style="max-width:900px;padding:2px 12px;background:#f6f7f7;border-left:4px solid #2271b1;margin:8px 0">' . $html . '<p style="margin:4px 0 8px">' . $f('aus', 'Verstanden, ausblenden') . '</p></div>';
+    }
+
+    private static function hinweis_setzen(): void {
+        if (!preg_match('/^(aus|an):([a-z0-9_]{1,30})$/', (string) wp_unslash($_POST['sab_hinweis'] ?? ''), $m)) { return; }
+        $uid = function_exists('get_current_user_id') ? (int) get_current_user_id() : 0;
+        $alle = (array) get_option('sab_hinweis_aus', []); $l = (array) ($alle[$uid] ?? []);
+        $l = $m[1] === 'aus' ? array_values(array_unique(array_merge($l, [$m[2]]))) : array_values(array_diff($l, [$m[2]]));
+        $alle[$uid] = $l; update_option('sab_hinweis_aus', $alle, false);
     }
 
     /** Fehlende Produktbilder zählen (nur Artikel, die noch veröffentlicht sind und deren Bild noch fehlt): [Produkte, Stellen]. */
@@ -4717,8 +4737,9 @@ JS;
         $d = self::uebersicht_daten($land, !empty($_POST['sab_neu']));
         $namen = self::produkte(); $ja = fn($v) => $v === null ? '?' : ($v ? '<strong style="color:#1a7f37">ja</strong>' : '<strong style="color:#a00">nein</strong>');
         $h = self::bildfehler_html() . '<h2>Übersicht aller Produkte (' . esc_html($land) . ')</h2>'
-           . '<p class="description">Stand höchstens 1 Stunde alt. Bilder kommen hier direkt von Amazon (nur im Admin-Bereich, nicht für Besucher). Die Lieferzeit liefert die API nicht; sie ist nur auf der Amazon-Seite mit spanischer Lieferadresse sichtbar.</p>'
-           . '<p class="description"><strong>Reihenfolge:</strong> nach Priorität. Priorität = Dringlichkeit (0 bis 100: nicht lieferbar oder Status unklar = 100, sonst schwacher Score, sehr lange Lieferzeit oder wenig Sterne) mal Zahl der Seiten, auf denen das Produkt steht. Oben steht also, was auf vielen Seiten dringend geprüft werden muss. Spaltenkopf anklicken, um anders zu sortieren.</p>'
+           . self::hinweis_box('uebersicht', 'uebersicht', '<p class="description">Alle Produkte dieser Seite mit Bild, Preis, Score und Priorität. Der Stand ist höchstens 1 Stunde alt. Bilder kommen hier im Admin direkt von Amazon; Besucher bekommen sie vom eigenen Server. Die Lieferzeit liefert die Amazon-Schnittstelle nicht, sie ist nur auf der Amazon-Seite für deine Lieferadresse sichtbar.</p>'
+           . '<p class="description"><strong>Reihenfolge:</strong> nach Priorität = Dringlichkeit (0 bis 100: nicht lieferbar, kein Bild oder Status unklar = 100, sonst schwacher Score, lange Lieferzeit oder wenig Sterne) mal Zahl der Seiten, auf denen das Produkt steht. Oben steht also, was auf vielen Seiten dringend geprüft werden sollte. Spaltenkopf anklicken sortiert anders.</p>'
+           . '<p class="description"><strong>Womit es weitergeht:</strong> <em>Austausch</em> ersetzt schwache oder fehlende Produkte, <em>Umbau</em> wandelt alte Links und Widgets (AAWP, feste Links, Kurzlinks) in Plugin-Platzhalter und Karten um, <em>Widgets</em> hat fertige Vorlagen für die Seitenleiste, <em>A/B-Tests</em> vergleicht Produkte oder Blöcke, <em>Statistik</em> zeigt Klicks, Herkunftsland und ausgelieferte Produkte. Rot oben stehen nur fehlende Produktbilder, alles andere sind kleine graue Hinweise.</p>')
            . '<p><button class="button" name="sab_neu" value="1">Übersicht neu laden</button></p>';
         $h .= self::stand_hinweis($d);
         if (!empty($d['fehler'])) { $h .= '<div class="notice notice-warning inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
@@ -6682,7 +6703,7 @@ JS;
 
     private static function austausch_html(bool $helfer = false): string {
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte();
-        $h = '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2><p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten aus dem eigenen Bestand plus neue Treffer der Amazon-Suche (zwei, bei wenig Passendem im Bestand bis zu vier) (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>';
+        $h = '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2>' . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="hinweis_leer">' . self::hinweis_box('austausch', 'austausch', '<p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten aus dem eigenen Bestand plus neue Treffer der Amazon-Suche (zwei, bei wenig Passendem im Bestand bis zu vier) (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>') . '</form>';
         $h .= self::scan_knopf_html('austausch') . '<form method="post" style="margin:8px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="bilder_nachladen"><button class="button">Alle Bilder jetzt prüfen und nachladen</button> <span class="description">Holt für alle Produkte dieser Seite ohne frisches Bild das Bild sofort und räumt erledigte Warnungen auf. Die Zahl in „Produkte ohne Bild“ unten zeigt, was noch fehlt.</span></form>';
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         $faelle = self::tausch_faelle((array) $d, $trotz);
@@ -7566,6 +7587,7 @@ JS;
         }
         if (!empty($_POST['sab_form']) && check_admin_referer('sab_speichern')) {
             $form = sanitize_key((string) $_POST['sab_form']);
+            if (!empty($_POST['sab_hinweis'])) { self::hinweis_setzen(); }   // Erklärung aus-/einblenden (Knopf im Formular des Reiters)
             if ($form === 'kontrolle_zurueck') {
                 $kid = (string) ($_POST['sab_id'] ?? ''); $kk = (array) get_option('sab_kontrolle', []); $e = $kk[$kid] ?? null;
                 if (!$e) { $meldung = 'Eintrag nicht gefunden.'; }

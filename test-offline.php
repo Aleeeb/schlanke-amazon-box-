@@ -1792,4 +1792,13 @@ $_POST = ['sab_wid' => 'block-22', 'sab_wakt' => 'vorschau', 'sab_w_asin' => '']
 $mWl = new ReflectionMethod('SAB', 'widget_umbau_lauf'); $mWl->setAccessible(true); $wm = (string) $mWl->invoke(null); $_POST = [];
 ok(strpos($wm, 'gültige ASIN') !== false && strpos((string) $mWh->invoke(null), 'amzn.to/3AbCdEf') !== false && strpos((string) $mWh->invoke(null), 'Es fehlt eine gültige ASIN') !== false, 'Widgets: fehlende ASIN gibt sichtbare Meldung im Widget-Kasten, Link klickbar');
 unset($GLOBALS['opt']['widget_block']);
+// 0.89.61: Erklärung ausblenden
+$mHb = new ReflectionMethod('SAB', 'hinweis_box'); $mHb->setAccessible(true); $mHs = new ReflectionMethod('SAB', 'hinweis_setzen'); $mHs->setAccessible(true);
+$hb1 = (string) $mHb->invoke(null, 'testk', 'uebersicht', '<p>Text</p>');
+ok(strpos($hb1, 'Verstanden, ausblenden') !== false && strpos($hb1, 'value="aus:testk"') !== false && strpos($hb1, '<form') === false, 'Erklärung: Text mit Ausblenden-Knopf, ohne verschachteltes Formular');
+$_POST = ['sab_hinweis' => 'aus:testk']; $mHs->invoke(null); $_POST = [];
+$hb2 = (string) $mHb->invoke(null, 'testk', 'uebersicht', '<p>Text</p>');
+ok(strpos($hb2, '<p>Text</p>') === false && strpos($hb2, 'value="an:testk"') !== false, 'Erklärung: ausgeblendet, Knopf zum Einblenden bleibt');
+$_POST = ['sab_hinweis' => 'an:testk']; $mHs->invoke(null); $_POST = [];
+ok(strpos((string) $mHb->invoke(null, 'testk', 'uebersicht', '<p>Text</p>'), '<p>Text</p>') !== false, 'Erklärung: wieder eingeblendet');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
