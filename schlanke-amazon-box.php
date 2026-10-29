@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.24
+ * Version: 0.92.25
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.24';
+    const VERSION = '0.92.25';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1490,7 +1490,7 @@ final class SAB {
         if ($p === null) {
             $v = "sab_bf_{$land}_" . $asin;
             if ($budget > 0 && !get_transient($v)) { $budget--; set_transient($v, 1, 5 * MINUTE_IN_SECONDS); $p = self::produkt($asin, $land, false, true); if (self::hat_bild($p)) { return false; } }
-            if ($p === null && time() - (int) ($e['ts'] ?? 0) < 15 * MINUTE_IN_SECONDS) { return null; }   // gerade erst eingetragen, Abruf läuft noch: noch kein Alarm
+            if ($p === null) { return null; }   // keine Daten (Zwischenspeicher leer, Abruf nicht möglich oder Budget aufgebraucht): unbekannt ist kein Fehler, nie nur deshalb melden
         }
         return true;
     }

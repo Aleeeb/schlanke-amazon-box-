@@ -1354,6 +1354,7 @@ ok($grc === 0 && trim(implode('', $gout)) === '["co.uk","ca","co.uk",null]', 'L�
 // 0.88.1: Bildwarnung klickbar, kurze Titel, Sprung; frisch eingetragene Produkte nicht sofort melden
 foreach (['get_edit_post_link' => 'https://example.test/wp-admin/post.php?post=5&action=edit', 'get_the_title' => 'Elektrozaun Akku Weidezaun Test', 'get_post_field' => '<p>[amz_link asin="B0BILDFEH2"]x[/amz_link] [amz_bild asin="B0BILDNEU3"]</p>'] as $fn_ => $rv_) { if (!function_exists($fn_)) { eval('function ' . $fn_ . '(...$a) { return ' . var_export($rv_, true) . '; }'); } }
 $GLOBALS['opt']['sab_bildfehler'] = ['B0BILDFEH2|5' => ['asin' => 'B0BILDFEH2', 'post' => 5, 'ts' => 1, 'art' => 'Bild'], 'B0BILDNEU3|5' => ['asin' => 'B0BILDNEU3', 'post' => 5, 'ts' => time(), 'art' => 'Bild']];
+foreach (['de', 'es', 'fr', 'it', 'co.uk', 'com'] as $l_t) { set_transient('sab_' . $l_t . '_B0BILDFEH2', ['titel' => 'x', 'verfuegbar' => true], 3600); }   // Amazon kennt das Produkt, liefert aber kein Bild
 $mBh = new ReflectionMethod('SAB', 'bildfehler_html'); $mBh->setAccessible(true); $bh = $mBh->invoke(null);
 ok(strpos($bh, '/dp/B0BILDFEH2') !== false && (new ReflectionMethod('SAB', 'kurz_wort'))->invoke(null, 'Elektrozaun Akku Weidezaun Test') === 'Elektrozaun Akku Weidezaun …' && strpos($bh, 'sab_zeige=B0BILDFEH2') !== false && strpos($bh, 'Editor') !== false, 'Bildwarnung: ASIN klickbar, Artikelname nur drei Wörter, Sprung zur Stelle');
 ok(strpos($bh, 'B0BILDNEU3') === false && isset(((array) get_option('sab_bildfehler', []))['B0BILDNEU3|5']), 'Bildwarnung: gerade erst eingetragenes Produkt wird nicht gemeldet, aber gemerkt');
@@ -2068,4 +2069,9 @@ delete_transient('sab_alle_asins');
 $phs = SAB::phantome_finden();
 ok(!isset($phs['3895663891']) && SAB::asin_verwendet('3895663891') === 'in einem Widget', 'Phantome: Buch, das nur in einem Widget steht, ist kein Phantom und wird nie entfernt');
 unset($GLOBALS['opt']['sab_produkte'], $GLOBALS['opt']['widget_block']); delete_transient('sab_alle_asins');
+// 0.92.25: keine Bildwarnung, nur weil Daten fehlen
+foreach (['de', 'es', 'fr', 'it', 'co.uk', 'com'] as $l_t) { unset($GLOBALS['tr']['sab_' . $l_t . '_B0BILDUNB4']); }
+$GLOBALS['opt']['sab_bildfehler'] = ['B0BILDUNB4|5' => ['asin' => 'B0BILDUNB4', 'post' => 5, 'ts' => 1, 'art' => 'Bild']];
+ok($mBh->invoke(null) === '', 'Bildwarnung: ohne Produktdaten (Zwischenspeicher leer, Abruf nicht möglich) keine rote Meldung');
+unset($GLOBALS['opt']['sab_bildfehler']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
