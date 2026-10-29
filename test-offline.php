@@ -1745,7 +1745,11 @@ $r = $pb($k1, 1, 'B0A1234567'); ok($r && $r[0] === 3, 'Partner: auch vom Textlin
 $k2 = '<p>[amz_bild asin="B0A1234567"][/amz_bild] [amz_bild asin="B0B1234567"][/amz_bild]<br>[amz_link asin="B0A1234567"]A[/amz_link] [amz_link asin="B0B1234567"]B[/amz_link]</p>';
 ok($pb($k2, 0, 'B0A1234567') === null && $pb($k2, 3, 'B0B1234567') === null, 'Partner: nebeneinander stehende Produkte werden nicht gekoppelt');
 $k3 = '[amz_bild asin="B0A1234567"][/amz_bild]</p><p>[amz_link asin="B0A1234567"]A[/amz_link]';
-ok($pb($k3, 0, 'B0A1234567') === null, 'Partner: Absatzwechsel koppelt nicht');
+ok($pb($k3, 0, 'B0A1234567') !== null, 'Partner: Absatzwechsel mit nur kurzem Zwischentext (Einzelprodukt) koppelt');
+$k3b = '[amz_bild asin="B0A1234567"][/amz_bild]</p><p>Das ist ein ganzer Satz über etwas anderes.</p><p>[amz_link asin="B0A1234567"]A[/amz_link]';
+ok($pb($k3b, 0, 'B0A1234567') === null, 'Partner: Absatzwechsel mit ganzem Satz koppelt nicht');
+$k3c = '[amz_bild asin="B0A1234567"][/amz_bild]</p><h3>Neues Thema</h3><p>[amz_link asin="B0A1234567"]A[/amz_link]';
+ok($pb($k3c, 0, 'B0A1234567') === null, 'Partner: Überschrift dazwischen koppelt nicht');
 $k4 = '<a href="https://www.amazon.de/dp/B0A1234567?tag=x"><img src="a.jpg"></a><br><a href="https://www.amazon.de/dp/B0A1234567?tag=x">Text</a>';
 $f4 = SAB::partner_bereich($k4, 0, strpos($k4, '</a>') + 4, 'B0A1234567'); ok($f4 === [0, strlen($k4)], 'Partner: feste Links Bild + Text');
 // 0.89.55: Neu scannen
@@ -2037,4 +2041,27 @@ $GLOBALS['opt']['sab_ab'] = [];
 $wTi = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000008', 'titel' => 'Buch Y', 'text' => 'Text Y']);
 $GLOBALS['opt']['sab_widget_tiere'] = '1'; $wTi2 = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000008', 'titel' => 'Buch Y', 'text' => 'Text Y']); unset($GLOBALS['opt']['sab_widget_tiere']);
 ok(strpos($wTi, 'sab-tier') === false && strpos($wTi2, 'sab-tier') !== false && strpos($wTi2, 'class="sab-tw" style="display:none"') !== false, 'Widget: Tierchen standardmäßig aus, mit Option an und dann mit sicherem Ausgangszustand (versteckt)');
+// 0.92.13: Widget-CSS kommt auch bei A/B-Widget als erstes und im Fuß
+$GLOBALS['opt']['sab_ab'] = ['cafe0009' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0EZ000009'], 'b' => ['B0EZ000010'], 'w' => 1, 'wf' => ['titel' => 'Buch B', 'text' => 'Text B', 'marke' => 'Buchtipp', 'knopf' => '']]];
+unset($GLOBALS['tr']['sab_alle_asins']);
+$mCss = new ReflectionProperty('SAB', 'widget_css'); $mCss->setAccessible(true); $mCss->setValue(null, false);
+$wAb = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000009', 'titel' => 'Buch A', 'text' => 'Text A']);
+ob_start(); SAB::widget_css_fuss(); $fz = ob_get_clean();
+ok(strpos($wAb, 'id="sab-widget"') !== false && strpos($wAb, 'sab-ab-e') !== false && strpos($fz, 'id="sab-widget-fuss"') !== false && strpos($fz, '.sab-wb') !== false, 'Widget-CSS: auch wenn das erste Widget ein A/B-Test ist; zusätzlich im Seitenfuß');
+$GLOBALS['opt']['sab_ab'] = [];
+// 0.92.15: Einzelprodukt-Karte und Kurztitel
+ok(SAB::kurztitel('杭州 ABC123 Schneckenzaun Set aus Kupfer 14-teilig, Schutz für Beete und Garten, 5 m') !== '' && !preg_match('/[\x{4e00}-\x{9fff}]|ABC123/u', SAB::kurztitel('杭州 ABC123 Schneckenzaun Set aus Kupfer 14-teilig, Schutz für Beete und Garten, 5 m')), 'Kurztitel: Fremdschrift und Markencode am Anfang weg (' . SAB::kurztitel('杭州 ABC123 Schneckenzaun Set aus Kupfer 14-teilig, Schutz für Beete und Garten, 5 m') . ')');
+ok(mb_strlen(SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm')) <= 48 && preg_match('/\d/', SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm')) === 1, 'Kurztitel: kurz und mit Zahl (' . SAB::kurztitel('KIVEEY Kupferband Schneckenschutz selbstklebend Schneckenband für Hochbeet Blumentöpfe Garten 20 m x 50 mm') . ')');
+$ek = SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Schneckenzaun-Set', 'stil' => 'einzel']);
+ok(strpos($ek, 'sab-karte-einzel') !== false && strpos($ek, 'Haz clic en la imagen') !== false && strpos($ek, 'oferta en Amazon') !== false && substr_count($ek, '<a ') === 1 && strpos($ek, 'Schneckenzaun-Set') < strpos($ek, '<img'), 'Einzelprodukt-Karte: Titel über dem Bild, Klick-auf-das-Bild-Zeile, ein Link (' . $ek . ')');
+// 0.93.2: Varianten optisch gleich, Knopftext-Experiment
+$GLOBALS['opt']['sab_ab'] = ['cafe0011' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0EZ000011'], 'b' => ['B0EZ000012'], 'c' => ['B0EZ000013'], 'w' => 1, 'wf' => ['titel' => 'Buch B', 'text' => 'Text B', 'marke' => '', 'knopf' => ''], 'wfc' => ['titel' => 'Buch C', 'text' => 'Text C', 'marke' => '', 'knopf' => '']]];
+unset($GLOBALS['tr']['sab_alle_asins']);
+$wP = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000011', 'titel' => 'Buch A', 'text' => 'Text A', 'marke' => 'Buchtipp', 'knopf' => 'Zum Buch']);
+ok(substr_count($wP, 'class="sab-wtag">Buchtipp<') === 3 && substr_count($wP, '>Zum Buch<') === 3, 'A/B/C-Widget: Etikett und Knopftext in allen drei Varianten gleich');
+$GLOBALS['opt']['sab_ab'] = [];
+$_POST = ['sab_stil' => 'knopftext', 'sab_stil_an' => '1']; $mSt2 = new ReflectionMethod('SAB', 'stil_speichern'); $mSt2->setAccessible(true); $mSt2->invoke(null); $_POST = [];
+$GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false; ob_start(); SAB::stil_skript(); $kt = ob_get_clean();
+ok(strpos($kt, 'b3e60002') !== false && strpos($kt, '.sab-karte-btn') !== false && strpos($kt, 'Angebot bei Amazon') !== false && strpos($kt, 'Preis bei Amazon pr') !== false, 'Knopftext-Experiment: ein Text je Seite für alle Kartenknöpfe, Varianten im Fußskript');
+$GLOBALS['opt']['sab_ab'] = [];
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
