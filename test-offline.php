@@ -2062,4 +2062,10 @@ ok(isset($w32['block-32']) && $w32['block-32']['fertig'] === true && count($w32[
 [$ns32, $n32] = SAB::widget_start_umbauen($w32['block-32']['inhalt']);
 ok($n32 === 1 && strpos($ns32, '[amz_rezension asin="B0ABCDEFGH"') !== false, 'Widget: Rezensionslink wird zu [amz_rezension] (' . $ns32 . ')');
 unset($GLOBALS['opt']['widget_block']);
+$GLOBALS['opt']['sab_produkte'] = "B0PHANTOM1 | Geist\n3895663891 | Buch im Widget";
+$GLOBALS['opt']['widget_block'] = [40 => ['content' => '[amz_widget typ="buch" asin="3895663891"]']];
+delete_transient('sab_alle_asins');
+$phs = SAB::phantome_finden();
+ok(!isset($phs['3895663891']) && SAB::asin_verwendet('3895663891') === 'in einem Widget', 'Phantome: Buch, das nur in einem Widget steht, ist kein Phantom und wird nie entfernt');
+unset($GLOBALS['opt']['sab_produkte'], $GLOBALS['opt']['widget_block']); delete_transient('sab_alle_asins');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

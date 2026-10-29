@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.23
+ * Version: 0.92.24
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.23';
+    const VERSION = '0.92.24';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3063,12 +3063,24 @@ JS;
     }
 
     /** Phantomprodukte: ASINs, die in Listen/Regeln des Plugins stehen, aber in keinem veröffentlichten Artikel. @return array<string,string[]> ASIN => Listen, in denen sie stehen */
+    /** Steht die ASIN irgendwo in Verwendung? Artikel/Seiten in jedem Status (auch Entwurf, privat), Widgets (Bücher, Seitenleiste), A/B-Tests. Schutz vor dem Löschen. */
+    public static function asin_verwendet(string $a): ?string {
+        global $wpdb;
+        if (isset($wpdb) && method_exists($wpdb, 'get_var') && method_exists($wpdb, 'prepare')) {
+            $n = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_status NOT IN ('trash','auto-draft','inherit') AND post_type NOT IN ('revision') AND post_content LIKE %s", '%' . $wpdb->esc_like($a) . '%'));
+            if ($n > 0) { return 'in ' . $n . ' Artikel(n) oder Seiten (auch Entwurf/privat)'; }
+        }
+        foreach (array_keys(self::WIDGET_OPT) as $o) { if (stripos(wp_json_encode((array) get_option($o, [])), $a) !== false) { return 'in einem Widget'; } }
+        foreach (self::ab_optionen() as $t) { foreach (['a', 'b', 'c'] as $l) { if (in_array($a, array_map('strval', (array) ($t[$l] ?? [])), true)) { return 'in einem A/B-Test'; } } }
+        return null;
+    }
+
     public static function phantome_finden(): array {
         $fund = self::fundstellen(self::alle_asins() ?: ['XXXXXXXXXX']);
-        $quellen = ['sab_produkte' => 'Produktliste', 'sab_slots' => 'Ersatzlisten', 'sab_tests' => 'Tests', 'sab_gruppen' => 'Gruppen', 'sab_tausch' => 'Tausch-Regeln', 'sab_ersatz' => 'Ersatz-Datenbank', 'sab_amz_alt' => 'Amazons Alternativen', 'sab_such_kand' => 'Suchtreffer', 'sab_auch_gekauft' => 'Mitgekauft', 'sab_manuell' => 'Handdaten'];
+        $quellen = ['sab_produkte' => 'Produktliste', 'sab_slots' => 'Ersatzlisten', 'sab_tests' => 'Tests', 'sab_gruppen' => 'Gruppen', 'sab_tausch' => 'Tausch-Regeln', 'sab_ersatz' => 'Ersatz-Datenbank', 'sab_amz_alt' => 'Amazons Alternativen', 'sab_such_kand' => 'Suchtreffer', 'sab_auch_gekauft' => 'Mitgekauft', 'sab_manuell' => 'Handdaten', 'sab_claude_empf' => 'Empfehlungen'];
         $out = [];
         foreach (self::alle_asins() as $a) {
-            $a = (string) $a; if (strlen($a) !== 10 || !empty($fund[$a])) { continue; }
+            $a = (string) $a; if (strlen($a) !== 10 || !empty($fund[$a]) || self::asin_verwendet($a) !== null) { continue; }
             $wo = [];
             foreach ($quellen as $o => $n) { if (stripos((string) get_option($o, ''), $a) !== false) { $wo[] = $n; } }
             foreach (['sab_marken' => 'Markierung', 'sab_trotz' => '„trotzdem behalten“', 'sab_bonus' => 'Bonus', 'sab_austausch_hinten' => 'ans Ende geschoben', 'sab_austausch_okay' => 'okay belassen'] as $o => $n) { if (isset(((array) get_option($o, []))[$a])) { $wo[] = $n; } }
@@ -3095,7 +3107,7 @@ JS;
     private static function verwaiste_entfernen(array $asins): int {
         if (!$asins) { return 0; }
         $set = array_flip($asins);
-        $schluessel = ['sab_produkte', 'sab_manuell', 'sab_ersatz', 'sab_amz_alt', 'sab_such_kand', 'sab_auch_gekauft'];   // erste Spalte = ASIN: ganze Zeile weg
+        $schluessel = ['sab_produkte', 'sab_manuell', 'sab_ersatz', 'sab_amz_alt', 'sab_such_kand', 'sab_auch_gekauft', 'sab_claude_empf'];   // erste Spalte = ASIN: ganze Zeile weg
         foreach ($schluessel as $o) {
             $neu = [];
             foreach (preg_split('/\R/', (string) get_option($o, '')) as $z) { $k = self::asin(trim(explode('|', $z)[0])); if ($k !== '' && isset($set[$k])) { continue; } $neu[] = $z; }
@@ -8850,8 +8862,10 @@ JS;
             } elseif ($form === 'phantome') {
                 $kand = array_values(array_filter(array_map([__CLASS__, 'asin'], explode(',', (string) ($_POST['sab_phantome'] ?? '')))));
                 $fund = self::fundstellen($kand ?: ['XXXXXXXXXX']);
-                $weg = array_values(array_filter($kand, fn($a) => empty($fund[$a])));   // nur, was wirklich in keinem Artikel steht
-                $meldung = self::verwaiste_entfernen($weg) . ' Phantomprodukte aus allen Listen entfernt.';
+                $weg = []; $bleibt = [];
+                foreach ($kand as $a) { $v = empty($fund[$a]) ? self::asin_verwendet($a) : 'in einem Artikel'; if ($v === null) { $weg[] = $a; } else { $bleibt[] = $a . ' (' . $v . ')'; } }   // nur, was nirgends verwendet wird
+                $meldung = self::verwaiste_entfernen($weg) . ' Phantomprodukte aus allen Listen entfernt.' . ($bleibt ? ' Nicht entfernt, weil sie benutzt werden: ' . implode(', ', $bleibt) . '.' : '');
+                delete_transient('sab_alle_asins');
             } elseif ($form === 'ersatz_suchen') {
                 delete_transient('sab_alle_asins'); delete_transient('sab_such_pruefung'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
                 $meldung = 'Ersatz wird neu gesucht: Bestand und Amazon-Treffer werden neu bewertet, die Daten der Treffer holt das Plugin im Hintergrund. Oben auf der Seite steht der Prompt für Produkte, die noch zu wenig Vorschläge haben.';
