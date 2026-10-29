@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.55
+ * Version: 0.89.56
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.55';
+    const VERSION = '0.89.56';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -81,6 +81,7 @@ final class SAB {
         add_shortcode('amz_rezension', [__CLASS__, 'sc_rezension']);
         add_shortcode('amz_karte',   [__CLASS__, 'sc_karte']);
         add_shortcode('amz_hinweis', [__CLASS__, 'sc_hinweis']);
+        add_shortcode('amz_widget',  [__CLASS__, 'sc_widget']);
         add_shortcode('aawp',        [__CLASS__, 'sc_aawp']);
         add_shortcode('amazon',      [__CLASS__, 'sc_aawp']);   // Alias wie bei AAWP (AAWP gewinnt, solange es aktiv ist)
         add_action('sab_pruefen',    [__CLASS__, 'pruefen']);
@@ -6956,6 +6957,70 @@ JS;
         return count((array) $ids) . ' Artikel auf den Zustand vor dem Umbau zurückgesetzt.';
     }
 
+    // ---------- Widgets für die Seitenleiste ----------
+
+    const WIDGET_CSS = '.sab-wb,.sab-wt,.sab-wl{box-sizing:border-box;max-width:340px;margin:0 auto 18px;font-family:inherit}.sab-wb{position:relative;background:#fff;border:1px solid #dfe6d8;border-radius:14px;padding:18px 16px 14px;box-shadow:0 2px 10px rgba(40,70,30,.08);text-align:center}.sab-wb .sab-wtag{position:absolute;top:-10px;left:14px;background:#e8873a;color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 10px;border-radius:999px}.sab-wb .sab-wcover{margin:6px auto 12px}.sab-wb .sab-wcover img{display:block;margin:0 auto;max-height:210px;width:auto;max-width:70%;height:auto;border-radius:4px 10px 10px 4px;box-shadow:-4px 4px 0 #cfd9c7,0 6px 14px rgba(0,0,0,.2)}.sab-wb h4{margin:0 0 6px;font-size:17px;line-height:1.25}.sab-wb p{margin:0 0 12px;font-size:14px;line-height:1.45;color:#44543f}.sab-wb a.sab-wbtn{display:block;background:#2f7a3d;color:#fff!important;text-decoration:none!important;font-weight:700;padding:11px 12px;border-radius:9px;font-size:15px}.sab-wb a.sab-wbtn:hover{background:#256331}.sab-wb a.sab-wbtn:after{content:"";position:absolute;inset:0;border-radius:14px}.sab-wb a.sab-walt{position:relative;z-index:2;display:inline-block;margin-top:9px;font-size:13px;color:#2f7a3d}.sab-wb .sab-wnote{font-size:11px;color:#7b8a76;margin-top:8px}.sab-wt{background:linear-gradient(160deg,#fff7e8,#ffeccb);border-radius:14px;padding:16px;border:1px solid #f1d9a8}.sab-wt b{display:block;font-size:17px;margin-bottom:6px}.sab-wt p{margin:0 0 10px;font-size:14px;line-height:1.45}.sab-wt a{display:inline-block;background:#e8873a;color:#fff!important;text-decoration:none!important;font-weight:700;padding:9px 14px;border-radius:9px;font-size:14px}.sab-wl{background:#fff;border-radius:14px;padding:14px 16px;border:1px solid #dfe6d8}.sab-wl h4{margin:0 0 10px;font-size:16px}.sab-wl ol{margin:0;padding:0;list-style:none;counter-reset:n}.sab-wl li{counter-increment:n;display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #edf1e9;font-size:14px}.sab-wl li:first-child{border-top:0}.sab-wl li:before{content:counter(n);flex:none;width:24px;height:24px;border-radius:50%;background:#2f7a3d;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}.sab-wl li a{color:inherit;text-decoration:none}';
+    private static $widget_css = false;
+
+    /**
+     * [amz_widget typ="buch" asin="…" marke="Buchtipp" titel="…" text="…" knopf="…" alt_text="oder bei Thalia ansehen" alt_url="https://…" hinweis="Werbung · Partnerlink"]
+     * [amz_widget typ="tipp" titel="…" text="…" knopf="Zu den Tipps" url="https://…"]
+     * [amz_widget typ="liste" titel="Beliebt diese Woche"]Text|https://…  (eine Zeile je Eintrag, Link ist optional)[/amz_widget]
+     * Buch-Karte: Bild und Knopf sind EIN Affiliate-Link (das Bild ist kein eigener Link, der Knopf deckt die ganze Karte ab).
+     */
+    public static function sc_widget($a, $inhalt = ''): string {
+        $a = shortcode_atts(['typ' => 'buch', 'asin' => '', 'land' => '', 'marke' => '', 'titel' => '', 'text' => '', 'knopf' => '', 'alt_text' => '', 'alt_url' => '', 'url' => '', 'hinweis' => '', 'tag' => ''], (array) $a);
+        $css = '';
+        if (!self::$widget_css) { self::$widget_css = true; $css = '<style id="sab-widget">' . self::WIDGET_CSS . '</style>'; }
+        $typ = strtolower(trim((string) $a['typ']));
+        if ($typ === 'tipp') {
+            $u = esc_url((string) $a['url']);
+            return $css . '<div class="sab-wt"><b>' . esc_html((string) $a['titel']) . '</b>' . ($a['text'] !== '' ? '<p>' . esc_html((string) $a['text']) . '</p>' : '') . ($u !== '' ? '<a href="' . $u . '">' . esc_html($a['knopf'] !== '' ? (string) $a['knopf'] : 'Mehr erfahren') . '</a>' : '') . '</div>';
+        }
+        if ($typ === 'liste') {
+            $li = '';
+            foreach (preg_split('/\R/', trim(strip_tags((string) $inhalt))) as $z) {
+                $z = trim($z); if ($z === '') { continue; }
+                [$t, $u] = array_pad(array_map('trim', explode('|', $z, 2)), 2, '');
+                $li .= '<li>' . ($u !== '' && esc_url($u) !== '' ? '<a href="' . esc_url($u) . '">' . esc_html($t) . '</a>' : esc_html($t)) . '</li>';
+            }
+            return $li === '' ? '' : $css . '<div class="sab-wl">' . ($a['titel'] !== '' ? '<h4>' . esc_html((string) $a['titel']) . '</h4>' : '') . '<ol>' . $li . '</ol></div>';
+        }
+        $land = self::land($a['land']); $asin = self::getauscht(self::asin($a['asin']));
+        if (strlen($asin) !== 10) { return ''; }
+        $bild = self::sc_bild(['asin' => $asin, 'land' => $land, 'tag' => $a['tag'], 'breite' => '240'], '');
+        $img = preg_match('#<img\b[^>]*>#i', $bild, $mi) ? $mi[0] : $bild;   // das Bild ist kein eigener Link: nur der Knopf ist der Affiliate-Link
+        $knopf = $a['knopf'] !== '' ? (string) $a['knopf'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']);
+        $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-wbtn', 'tag' => $a['tag']], $knopf);
+        $alt = ($a['alt_text'] !== '' && esc_url((string) $a['alt_url']) !== '') ? '<a class="sab-walt" href="' . esc_url((string) $a['alt_url']) . '" target="_blank" rel="nofollow sponsored noopener">' . esc_html((string) $a['alt_text']) . '</a>' : '';
+        $titel = $a['titel'] !== '' ? (string) $a['titel'] : '';
+        return $css . '<div class="sab-wb">' . ($a['marke'] !== '' ? '<span class="sab-wtag">' . esc_html((string) $a['marke']) . '</span>' : '') . '<div class="sab-wcover">' . $img . '</div>'
+            . ($titel !== '' ? '<h4>' . esc_html($titel) . '</h4>' : '') . ($a['text'] !== '' ? '<p>' . esc_html((string) $a['text']) . '</p>' : '') . $btn . $alt
+            . '<div class="sab-wnote">' . esc_html($a['hinweis'] !== '' ? (string) $a['hinweis'] : 'Werbung · Partnerlink') . '</div></div>';
+    }
+
+    /** Reiter „Widgets“: fertige Vorlagen für die Seitenleiste mit Vorschau und Kopierfeld (Shortcode in ein Text- oder HTML-Widget einfügen). */
+    private static function widgets_html(): string {
+        $asin = ''; foreach (array_keys(self::produkte()) as $k) { $asin = (string) $k; break; }
+        $demo = $asin !== '' ? $asin : 'B000000000';
+        $vorlagen = [
+            ['Buch-Karte (ersetzt die alte Buch-Box)', 'Bild und Knopf sind zusammen EIN Affiliate-Link, die ganze Karte ist klickbar. Die ASIN des Buchs eintragen; Bild und Link folgen einem Austausch automatisch.',
+             '[amz_widget typ="buch" asin="' . $demo . '" marke="Buchtipp" titel="Ein Lob der Unordnung im Garten" text="Wie aus Laub, Totholz und Steinen Verstecke für Igel, Kröten und Laufkäfer werden. Diese Tiere fressen Schnecken für dich." knopf="Bei Amazon ansehen" alt_text="oder bei Thalia ansehen" alt_url="https://www.thalia.de/"]'],
+            ['Buch-Karte kurz (ohne zweiten Link)', 'Für Seiten mit nur einem Händler.',
+             '[amz_widget typ="buch" asin="' . $demo . '" marke="Zum Weiterlesen" titel="Titel des Buchs" text="Ein bis zwei Sätze, warum sich das Buch lohnt."]'],
+            ['Tipp mit Frage', 'Orange Box mit Frage und Knopf zu einem Artikel (kein Affiliate-Link).',
+             '[amz_widget typ="tipp" titel="Schnecken im Beet? 🐌" text="Diese drei Dinge helfen am schnellsten. Ohne Gift, und die Tiere bleiben unverletzt." knopf="Zu den Tipps" url="' . esc_url(home_url('/')) . '"]'],
+            ['Top-3-Liste', 'Nummerierte Liste, jede Zeile: Text|Adresse (Adresse ist optional).',
+             "[amz_widget typ=\"liste\" titel=\"Beliebt diese Woche\"]\nSchneckenkragen aus Kupfer|" . esc_url(home_url('/')) . "\nElektrischer Schneckenzaun|" . esc_url(home_url('/')) . "\nIgelhaus für den Garten|" . esc_url(home_url('/')) . "\n[/amz_widget]"],
+        ];
+        $h = '<h2>Widgets für die Seitenleiste</h2><p class="description" style="max-width:760px">Fertige, ansprechende Vorlagen. So geht es: Unter Design &rarr; Widgets ein „Text“- oder „Eigenes HTML“-Widget in die Seitenleiste ziehen und den Shortcode aus dem Feld einfügen. Texte, Titel und ASIN kannst du frei ändern. Die Vorschau unten ist so breit wie eine Seitenleiste (300 px).</p>';
+        $h .= '<style>' . self::WIDGET_CSS . '.sab-wv{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;margin:0 0 22px;padding:16px;background:#f1f3ee;border:1px solid #dcdcde;border-radius:8px;max-width:1000px}.sab-wv .v{width:300px;flex:none}.sab-wv .c{flex:1;min-width:280px}.sab-wv textarea{width:100%;min-height:110px;font-family:monospace;font-size:12px}</style>';
+        foreach ($vorlagen as $i => [$name, $hilfe, $code]) {
+            $h .= '<div class="sab-wv"><div class="v">' . do_shortcode($code) . '</div><div class="c"><h3 style="margin-top:0">' . esc_html($name) . '</h3><p class="description">' . esc_html($hilfe) . '</p><textarea id="sab-wc' . (int) $i . '" readonly onclick="this.select()">' . esc_textarea($code) . '</textarea><p><button type="button" class="button" onclick="var t=document.getElementById(\'sab-wc' . (int) $i . '\');t.select();try{document.execCommand(\'copy\');this.textContent=\'Kopiert ✓\'}catch(e){}">Shortcode kopieren</button></p></div></div>';
+        }
+        return $h;
+    }
+
     // ---------- Verwaltung ----------
 
     const TABS = [
@@ -6975,6 +7040,7 @@ JS;
         'vorschau'      => 'Vorschau',
         'tests'         => 'A/B-Tests',
         'einstellungen' => 'Einstellungen',
+        'widgets'       => 'Widgets',
         'hilfe'         => 'Hilfe',
     ];
 
@@ -7776,6 +7842,8 @@ JS;
                 echo '</tbody></table>';
             }
             echo '</details>';
+        } elseif ($tab === 'widgets') {
+            echo self::widgets_html();
         } elseif ($tab === 'vorschau') {
             echo self::vorschau_html();
         } elseif ($tab === 'tests') {

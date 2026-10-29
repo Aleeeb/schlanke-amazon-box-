@@ -377,7 +377,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 18 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und sechzehn Untermenüs');
+ok(count($GLOBALS['menu']) === 19 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und siebzehn Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -1754,4 +1754,12 @@ $sc = new ReflectionMethod('SAB', 'umbau_scan'); $sc->setAccessible(true); $sm_ 
 ok(strpos($sm_, 'Neu eingelesen') !== false && !isset($GLOBALS['opt']['sab_name_offen']['B0GEISTER01']), 'Neu scannen: Namenshinweis zu Produkt ohne Artikel entfernt (' . $sm_ . ')');
 $sk = new ReflectionMethod('SAB', 'scan_knopf_html'); $sk->setAccessible(true);
 ok(strpos((string) $sk->invoke(null, 'umbau'), 'umbau_scan') !== false, 'Neu scannen: Knopf vorhanden');
+// 0.89.56: Widgets
+$wl = SAB::sc_widget(['typ' => 'liste', 'titel' => 'Top'], "Eins|https://example.com/a\nZwei");
+ok(substr_count($wl, '<li>') === 2 && strpos($wl, 'sab-wl') !== false && strpos($wl, '<style id="sab-widget">') !== false, 'Widget: Liste mit zwei Einträgen');
+$wt = SAB::sc_widget(['typ' => 'tipp', 'titel' => 'Frage?', 'text' => 'Antwort', 'url' => 'https://example.com/t', 'knopf' => 'Los']);
+ok(strpos($wt, 'sab-wt') !== false && strpos($wt, '<style') === false && strpos($wt, 'href="https://example.com/t"') !== false, 'Widget: Tipp-Box, Stil nur einmal');
+ok(SAB::sc_widget(['typ' => 'buch', 'asin' => 'kaputt']) === '', 'Widget: Buch ohne gültige ASIN bleibt leer');
+$wh = new ReflectionMethod('SAB', 'widgets_html'); $wh->setAccessible(true); $whh = (string) $wh->invoke(null);
+ok(strpos($whh, 'Shortcode kopieren') !== false && strpos($whh, 'Top-3-Liste') !== false, 'Widgets-Reiter rendert mit Vorlagen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
