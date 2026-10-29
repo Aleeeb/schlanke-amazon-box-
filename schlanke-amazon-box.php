@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.57
+ * Version: 0.89.58
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.57';
+    const VERSION = '0.89.58';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -112,6 +112,7 @@ final class SAB {
         add_filter('the_content',          [__CLASS__, 'ord_reset'], 9);
         add_filter('the_content',          [__CLASS__, 'attr_reparieren'], 8);
         add_action('wp_footer',            [__CLASS__, 'stellen_skript'], 97);
+        add_action('wp_footer',            [__CLASS__, 'widget_zeige_skript'], 100);
         add_action('wp_footer',            [__CLASS__, 'geo_skript'], 98);
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
@@ -6987,18 +6988,35 @@ JS;
                 if (!is_int($nr) || !is_array($w)) { continue; }
                 $c = (string) ($w[$feld] ?? '');
                 $id = $typ . '-' . $nr;
-                if (!preg_match('#amazon\.|amzn\.|aawp|\[amazon\b|tidd\.ly|\[amz_#i', $c)) { continue; }
+                // nur echte Amazon-Adressen oder AAWP zählen (ein eBay-Link mit „amazon“ im Suchwort oder [amz_ebay] ist kein Amazon-Link)
+                $re_alt = '#https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co)(?:[/?\#"\'\s]|$)|aawp|\[amazon\b#i';
+                $hat_alt = preg_match($re_alt, preg_replace('#\[amz_widget\b[^\]]*\]#', '', $c), $tm) === 1;
+                if (!$hat_alt && !preg_match('#\[amz_(?:widget|karten?|bild|link|produkt)\b#', $c)) { continue; }
                 $leiste = '';
                 foreach ($sb as $sn => $ids) { if (is_array($ids) && in_array($id, $ids, true)) { $leiste = (string) $sn; break; } }
                 $asins = [];
                 foreach (['#(?:dp|gp/product)/([A-Za-z0-9]{10})#', '#aawp-product-asin=["\']([A-Za-z0-9]{10})#', '#\[(?:aawp|amazon)\b[^\]]*\b(?:box|fields|link)=["\']([A-Za-z0-9]{10})#i', '#[?&]asin=([A-Za-z0-9]{10})#i', '#\[amz_[a-z]+\b[^\]]*\basin=["\']([A-Za-z0-9]{10})#'] as $re) { if (preg_match_all($re, $c, $m)) { foreach ($m[1] as $a_) { $asins[strtoupper($a_)] = 1; } } }
-                $out[$id] = ['id' => $id, 'opt' => $opt, 'nr' => $nr, 'feld' => $feld, 'inhalt' => $c, 'leiste' => $leiste, 'asins' => array_map('strval', array_keys($asins)), 'fertig' => (bool) preg_match('#\[amz_(?:widget|karten?|bild|link|produkt)\b#', $c) && !preg_match('#aawp|amazon\.[a-z.]+/|amzn\.|tidd\.ly#i', preg_replace('#\[amz_widget\b[^\]]*\]#', '', $c)), 'block' => $typ === 'block'];
+                $out[$id] = ['id' => $id, 'opt' => $opt, 'nr' => $nr, 'feld' => $feld, 'inhalt' => $c, 'leiste' => $leiste, 'asins' => array_map('strval', array_keys($asins)), 'fertig' => !$hat_alt, 'treffer' => $hat_alt ? trim((string) $tm[0], " \"'\t\r\n#") : '', 'block' => $typ === 'block'];
             }
         }
         return $out;
     }
 
     /** Vorbelegung für die Buch-Karte aus dem alten Widget-Inhalt (Titel, Text, zweiter Link). */
+    /** Eine Seite, auf der die Seitenleiste erscheint (neuester Beitrag; die Startseite hat oft keine). */
+    private static function widget_testseite(): string {
+        $p = function_exists('get_posts') ? get_posts(['numberposts' => 1, 'post_type' => 'post', 'post_status' => 'publish']) : [];
+        return $p ? (string) get_permalink($p[0]) : home_url('/');
+    }
+
+    /** Im Frontend (nur für Redakteure): ?sab_widget=block-16 markiert das Widget und scrollt hin; steht es nicht auf der Seite, kommt ein Hinweis. */
+    public static function widget_zeige_skript(): void {
+        $id = isset($_GET['sab_widget']) ? preg_replace('/[^a-z_0-9-]/', '', (string) wp_unslash($_GET['sab_widget'])) : '';
+        if ($id === '' || !function_exists('current_user_can') || !current_user_can('edit_posts')) { return; }
+        echo '<script>(function(){var id=' . wp_json_encode($id) . ',e=document.getElementById(id);var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:32px;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px sans-serif;text-align:center;cursor:pointer";b.onclick=function(){b.remove()};'
+           . 'if(e){e.style.cssText+=";outline:4px solid #d63638;outline-offset:4px;background:#fff3a3";e.scrollIntoView({block:"center"});b.textContent="Hier ist das Widget "+id+" (rot umrandet). Zum Schließen klicken."}else{b.textContent="Das Widget "+id+" steht auf dieser Seite nicht sichtbar. Vielleicht ist die Seitenleiste auf diesem Seitentyp aus: bitte einen anderen Beitrag öffnen."}document.body.appendChild(b)})();</script>';
+    }
+
     private static function widget_felder(array $w): array {
         $c = (string) $w['inhalt'];
         $titel = ''; $text = ''; $alt_u = ''; $alt_t = '';
@@ -7059,7 +7077,7 @@ JS;
             $f = isset(self::$wi_vorschau[$id]) ? self::$wi_vorschau[$id] : self::widget_felder($w);
             $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1000px"><strong>' . esc_html($id) . '</strong>' . ($w['leiste'] !== '' ? ' · Bereich <code>' . esc_html($w['leiste']) . '</code>' : '') . ' · ASIN: ' . ($w['asins'] ? esc_html(implode(', ', $w['asins'])) : '<em>keine gefunden</em>')
                 . ($w['fertig'] ? ' · <span style="color:#1a7f37;font-weight:700">schon umgebaut</span>' : ' · <span style="color:#a00;font-weight:700">alte Links</span>')
-                . ' · <a href="' . esc_url(admin_url('widgets.php')) . '" target="_blank" rel="noopener">Widgets bearbeiten ↗</a> · <a href="' . esc_url(home_url('/')) . '" target="_blank" rel="noopener">Seite im Frontend ansehen ↗</a>';
+                . ' · <a href="' . esc_url(admin_url('widgets.php')) . '" target="_blank" rel="noopener">Widgets bearbeiten ↗</a> · <a href="' . esc_url(add_query_arg('sab_widget', $id, self::widget_testseite())) . '" target="_blank" rel="noopener">Im Frontend ansehen (Widget wird markiert) ↗</a>' . ($w['treffer'] !== '' ? '<br><small>Erkannt wegen: <code>' . esc_html(mb_substr((string) $w['treffer'], 0, 80)) . '</code></small>' : '');
             if (!$w['fertig']) {
                 $h .= '<details style="margin-top:6px"><summary>Alter Inhalt</summary><pre style="white-space:pre-wrap;max-height:160px;overflow:auto;background:#f6f7f7;padding:6px;font-size:12px">' . esc_html(mb_substr((string) $w['inhalt'], 0, 1500)) . '</pre></details>'
                     . '<form method="post" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '">'

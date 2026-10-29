@@ -1776,4 +1776,9 @@ ok($mWs->invoke(null, 'block-16', $wc) === true && strpos($GLOBALS['opt']['widge
 $mWh = new ReflectionMethod('SAB', 'umbau_widgets_html'); $mWh->setAccessible(true);
 ok(strpos((string) $mWh->invoke(null), 'schon umgebaut') !== false, 'Widgets: Liste im Umbau-Reiter');
 unset($GLOBALS['opt']['widget_block'], $GLOBALS['opt']['sidebars_widgets']);
+// 0.89.58: eBay-Link im Widget ist kein Amazon-Link
+$GLOBALS['opt']['widget_block'] = [3 => ['content' => '<p><a href="https://www.ebay.de/sch/i.html?_nkw=amazon+kupferband&campid=1">bei eBay</a> [amz_ebay asin="B0EBAY0001" suche="x"]eBay[/amz_ebay]</p>'], 4 => ['content' => '<p><a href="https://www.amazon.de/dp/B0ECHT0001?tag=x-21">Amazon</a></p>']];
+$wf2 = $mWf->invoke(null);
+ok(!isset($wf2['block-3']) && isset($wf2['block-4']) && $wf2['block-4']['treffer'] !== '', 'Widgets: eBay-Link (auch mit „amazon“ im Suchwort) wird nicht als Amazon erkannt, Amazon-Link mit Fundstelle');
+unset($GLOBALS['opt']['widget_block']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
