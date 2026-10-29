@@ -1748,4 +1748,10 @@ $k3 = '[amz_bild asin="B0A1234567"][/amz_bild]</p><p>[amz_link asin="B0A1234567"
 ok($pb($k3, 0, 'B0A1234567') === null, 'Partner: Absatzwechsel koppelt nicht');
 $k4 = '<a href="https://www.amazon.de/dp/B0A1234567?tag=x"><img src="a.jpg"></a><br><a href="https://www.amazon.de/dp/B0A1234567?tag=x">Text</a>';
 $f4 = SAB::partner_bereich($k4, 0, strpos($k4, '</a>') + 4, 'B0A1234567'); ok($f4 === [0, strlen($k4)], 'Partner: feste Links Bild + Text');
+// 0.89.55: Neu scannen
+$GLOBALS['opt']['sab_name_offen'] = ['B0GEISTER01' => 'Weg'];
+$sc = new ReflectionMethod('SAB', 'umbau_scan'); $sc->setAccessible(true); $sm_ = (string) $sc->invoke(null);
+ok(strpos($sm_, 'Neu eingelesen') !== false && !isset($GLOBALS['opt']['sab_name_offen']['B0GEISTER01']), 'Neu scannen: Namenshinweis zu Produkt ohne Artikel entfernt (' . $sm_ . ')');
+$sk = new ReflectionMethod('SAB', 'scan_knopf_html'); $sk->setAccessible(true);
+ok(strpos((string) $sk->invoke(null, 'umbau'), 'umbau_scan') !== false, 'Neu scannen: Knopf vorhanden');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

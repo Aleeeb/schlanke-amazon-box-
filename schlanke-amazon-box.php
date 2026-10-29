@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.54
+ * Version: 0.89.55
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.54';
+    const VERSION = '0.89.55';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2870,6 +2870,32 @@ JS;
         }
         $h .= '<p><button class="button"' . ($neu ? '' : ' disabled') . '>Fehlende IDs übernehmen' . ($neu ? ' (' . $neu . ')' : '') . '</button></p></form>';
         return $h;
+    }
+
+    /** Neu einlesen: Artikel und Zwischenspeicher frisch prüfen, Warnungen zu Produkten entfernen, die in keinem Artikel mehr stehen. */
+    private static function umbau_scan(): string {
+        delete_transient('sab_alle_asins'); delete_transient('sab_such_pruefung');
+        foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); delete_transient("sab_luecke_{$l_}"); }
+        $alle = array_flip(self::alle_asins());
+        $bf = (array) get_option('sab_bildfehler', []); $bw = 0;
+        foreach ($bf as $k => $e) {
+            $pid = (int) ($e['post'] ?? 0); $po = $pid > 0 ? get_post($pid) : null;
+            if (!$po || !in_array($po->post_status, ['publish', 'future'], true) || (string) ($e['asin'] ?? '') === '' || strpos((string) $po->post_content, (string) $e['asin']) === false) { unset($bf[$k]); $bw++; }
+        }
+        update_option('sab_bildfehler', $bf, false);
+        $no = (array) get_option('sab_name_offen', []); $nw = 0;
+        foreach (array_keys($no) as $k) { if (!isset($alle[(string) $k])) { unset($no[$k]); $nw++; } }
+        update_option('sab_name_offen', $no, false);
+        $al = (array) get_option('sab_alarm', []); $aw = 0;
+        foreach (array_keys($al) as $k) { if (!isset($alle[(string) $k])) { unset($al[$k]); $aw++; } }
+        update_option('sab_alarm', $al, false);
+        $ar = count(self::umbau_artikelliste());
+        return 'Neu eingelesen: ' . $ar . ' Artikel mit Amazon-Links, ' . count($alle) . ' Produkte in Artikeln und Listen. Entfernt: ' . $bw . ' veraltete Bildwarnung(en), ' . $nw . ' Namenshinweis(e), ' . $aw . ' Alarm(e) zu Produkten, die in keinem Artikel mehr stehen. Die Amazon-Daten werden beim nächsten Aufruf frisch geholt.';
+    }
+
+    /** Knopf „Neu scannen“ oben auf Umbau und Austausch. */
+    private static function scan_knopf_html(string $tab): string {
+        return '<form method="post" style="margin:8px 0 12px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="' . esc_attr($tab) . '"><input type="hidden" name="sab_form" value="umbau_scan"><button class="button button-primary">&#8635; Neu scannen</button> <span class="description">Liest alle Artikel und die Produktliste neu ein und entfernt Anzeigen zu Produkten, die in keinem Artikel mehr stehen (nach Änderungen am Artikel).</span></form>';
     }
 
     /** Entfernt ASINs aus allen Listen (Produkte, Handdaten, Slots, Tests, Gruppen, Tausch, Alternativen, Kandidaten, Markierungen); Rückgabe: Zahl der entfernten ASINs. */
@@ -6615,7 +6641,7 @@ JS;
     private static function austausch_html(bool $helfer = false): string {
         $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte();
         $h = '<h2>Austausch: Produkte ersetzen, die Amazon nicht mehr liefert</h2><p class="description">Hauptaufgabe des Plugins neben der Ausgabe von Bildern, Links und Karten: Produkte, die bei Amazon fehlen, rechtzeitig durch passende ersetzen. Zu jedem Problemprodukt zeigt das Plugin bis zu vier <strong>passende</strong> Kandidaten aus dem eigenen Bestand plus neue Treffer der Amazon-Suche (zwei, bei wenig Passendem im Bestand bis zu vier) (gleiche Art oder Gruppe, bei Spezialprodukten auch zur Textstelle) aus Amazons Alternativen, Favoriten und dem Katalog, geordnet nach Score; der höhere Provisionssatz zählt stark (5 % schlägt 3 %, es sei denn der Score ist deutlich schlechter). Du kannst einen wählen oder eine eigene ASIN eintragen.</p>';
-        $h .= '<form method="post" style="margin:8px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="bilder_nachladen"><button class="button">Alle Bilder jetzt prüfen und nachladen</button> <span class="description">Holt für alle Produkte dieser Seite ohne frisches Bild das Bild sofort und räumt erledigte Warnungen auf. Die Zahl in „Produkte ohne Bild“ unten zeigt, was noch fehlt.</span></form>';
+        $h .= self::scan_knopf_html('austausch') . '<form method="post" style="margin:8px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="austausch"><input type="hidden" name="sab_form" value="bilder_nachladen"><button class="button">Alle Bilder jetzt prüfen und nachladen</button> <span class="description">Holt für alle Produkte dieser Seite ohne frisches Bild das Bild sofort und räumt erledigte Warnungen auf. Die Zahl in „Produkte ohne Bild“ unten zeigt, was noch fehlt.</span></form>';
         if (!empty($d['fehler'])) { return $h . '<div class="notice notice-error inline"><p>' . esc_html($d['fehler']) . '</p></div>'; }
         $faelle = self::tausch_faelle((array) $d, $trotz);
         $fund = self::fundstellen(array_keys($faelle) ?: ['XXXXXXXXXX']);
@@ -7373,6 +7399,8 @@ JS;
             } elseif ($form === 'asin_diag') {
                 $da = trim((string) wp_unslash($_POST['sab_diag_asin'] ?? ''));
                 $meldung = $da !== '' ? self::asin_rohantwort($da) : 'Bitte eine ASIN eintragen (mehrere mit Komma, höchstens 10).';
+            } elseif ($form === 'umbau_scan') {
+                $meldung = self::umbau_scan();
             } elseif ($form === 'ersatz_suchen') {
                 delete_transient('sab_alle_asins'); delete_transient('sab_such_pruefung'); foreach (array_keys(self::LAENDER) as $l_) { delete_transient("sab_uebersicht_{$l_}"); }
                 $meldung = 'Ersatz wird neu gesucht: Bestand und Amazon-Treffer werden neu bewertet, die Daten der Treffer holt das Plugin im Hintergrund. Oben auf der Seite steht der Prompt für Produkte, die noch zu wenig Vorschläge haben.';
@@ -7687,7 +7715,7 @@ JS;
             }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
-            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>'
+            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau')
                . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
                . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'
