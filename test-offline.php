@@ -2005,4 +2005,32 @@ ok(strpos($tfm, 'entfernt') !== false && strpos($GLOBALS['opt']['widget_block'][
 $mWc2 = new ReflectionMethod('SAB', 'widget_code'); $mWc2->setAccessible(true);
 ok(strpos($mWc2->invoke(null, ['asin' => '3895663891', 'text' => '(amazon fields="3895663891" image_width="300") Gut.', 'titel' => '']), 'text="Gut."') !== false, 'Widget-Umbau: Reste aus AAWP-Text landen nie im Shortcode');
 unset($GLOBALS['opt']['widget_block'], $GLOBALS['opt']['sab_widget_backup']);
+
+// ---- 0.93.0: Stil-Experiment (Bewegung im Buch-Widget) ----
+$GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['tr']['sab_alle_asins']); $GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false;
+$mSt = new ReflectionMethod('SAB', 'stil_speichern'); $mSt->setAccessible(true);
+$_POST = ['sab_stil' => 'bewegung', 'sab_stil_an' => '1']; $stm = (string) $mSt->invoke(null); $_POST = [];
+$oS = $GLOBALS['opt']['sab_ab']['b3e60001'] ?? [];
+ok(strpos($stm, 'gestartet') !== false && !empty($oS['an']) && ($oS['s'] ?? '') === 'bewegung' && ($oS['start'] ?? '') === gmdate('Y-m-d'), 'Stil-Experiment: Start legt den Test an');
+$GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000007', 'titel' => 'Buch X', 'text' => 'Text X']);
+ob_start(); SAB::stil_skript(); $sk = ob_get_clean();
+ok(strpos($sk, 'b3e60001') !== false && strpos($sk, 'sab-m-a') !== false && strpos($sk, 'sab-m-b') !== false && strpos($sk, 'sab-m-c') !== false && strpos($sk, 'Math.random') !== false, 'Stil-Experiment: Fußskript weist per Zufall eine von drei Klassen zu');
+$GLOBALS['loggedin'] = true; $GLOBALS['admin'] = true; ob_start(); SAB::stil_skript(); $sk2 = ob_get_clean(); $GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false;
+ok($sk2 === '', 'Stil-Experiment: Redakteure sehen die Grundfassung ohne Zuteilung');
+ob_start(); SAB::messskript(); $ms = ob_get_clean();
+ok(strpos($ms, 'data-sab-xs') !== false && strpos($ms, 'data-sab-xv') !== false, 'Stil-Experiment: Klick übernimmt Test und Variante vom Widget');
+$mAz = new ReflectionMethod('SAB', 'ab_ansichten_zaehlen'); $mAz->setAccessible(true);
+$GLOBALS['wpdb'] = new class { public $prefix = 'wp_'; public $q = []; function prepare($q, ...$a) { return vsprintf(str_replace('%s', "'%s'", $q), $a); } function query($q) { $this->q[] = $q; return 1; } function get_results($q, $o = null) { return []; } };
+$mAz->invoke(null, [['b' => 'b3e60001', 'v' => 'B'], ['b' => 'deadbeef', 'v' => 'A']], '/x/');
+$qq = implode(' ', (array) ($GLOBALS['wpdb']->q ?? []));
+ok(strpos($qq, 'b3e60001') !== false && strpos($qq, 'deadbeef') === false, 'Stil-Experiment: Einblendung zählt nur für das laufende Experiment');
+$mTb = new ReflectionMethod('SAB', 'ab_tab_html'); $mTb->setAccessible(true); $th = (string) $mTb->invoke(null);
+ok(strpos($th, 'Experimente mit der Aufmachung') !== false && strpos($th, 'Bewegung im Buch-Widget') !== false && strpos($th, 'Wippen und Glanz') !== false && strpos($th, 'Experiment beenden') !== false, 'Stil-Experiment: Reiter zeigt Experiment, Varianten und Beenden-Knopf');
+$_POST = ['sab_ab_an' => [], 'sab_ab_ziel' => []]; $mAb = new ReflectionMethod('SAB', 'ab_speichern'); $mAb->setAccessible(true); $mAb->invoke(null); $_POST = [];
+ok(!empty($GLOBALS['opt']['sab_ab']['b3e60001']['an']), 'Stil-Experiment: normales Speichern der Block-Tests lässt es unberührt');
+$_POST = ['sab_stil' => 'bewegung', 'sab_stil_an' => '0']; $mSt->invoke(null); $_POST = [];
+ok(empty($GLOBALS['opt']['sab_ab']['b3e60001']['an']), 'Stil-Experiment: Beenden schaltet es ab');
+ob_start(); SAB::stil_skript(); $sk3 = ob_get_clean();
+ok($sk3 === '', 'Stil-Experiment: beendet => keine Zuteilung mehr');
+$GLOBALS['opt']['sab_ab'] = [];
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

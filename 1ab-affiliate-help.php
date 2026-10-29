@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.11
+ * Version: 0.93.0
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.11';
+    const VERSION = '0.93.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -107,6 +107,7 @@ final class SAB {
         add_action('rest_api_init',  [__CLASS__, 'rest']);
         add_action('wp_footer',      [__CLASS__, 'messskript']);
         add_action('wp_footer',      [__CLASS__, 'zeige_skript'], 99);
+        add_action('wp_footer',      [__CLASS__, 'stil_skript'], 9);
         add_action('admin_footer-post.php', [__CLASS__, 'zeige_editor_skript']);
         add_filter('pre_do_shortcode_tag', [__CLASS__, 'ord_pre'], 10, 4);
         add_filter('do_shortcode_tag',     [__CLASS__, 'ord_post'], 10, 4);
@@ -3684,6 +3685,67 @@ JS;
     }
 
     /** Eine Test-Karte: Produkte beider Paare, Score, Fortschritt, Bereiche, Urteil, Seiten und Verlauf. */
+    // ---- Stil-Experimente: dasselbe Widget in drei Aufmachungen (A/B/C), Variante wählt der Browser per Zufall ----
+
+    /** Katalog der Experimente. Jede Variante setzt nur eine CSS-Klasse am Widget. */
+    private static function stil_katalog(): array {
+        return [
+            'bewegung' => ['id' => 'b3e60001', 'name' => 'Bewegung im Buch-Widget', 'ziel' => 3000,
+                'text' => 'Zeigt dasselbe Buch-Widget in drei Aufmachungen und misst, bei welcher mehr Besucher auf den Knopf klicken.',
+                'v' => ['A' => ['Wippen und Glanz', 'sab-m-a'], 'B' => ['Tierchen mit Blüte', 'sab-m-b'], 'C' => ['Ruhig, ohne Bewegung', 'sab-m-c']]],
+        ];
+    }
+
+    /** Laufende Stil-Experimente (nur die mit gesetztem Haken). @return array<string,array> Kennung => Katalogeintrag */
+    private static function stil_aktiv(): array {
+        $out = [];
+        foreach (self::ab_aktiv() as $id => $o) {
+            $k = self::stil_katalog()[(string) ($o['s'] ?? '')] ?? null;
+            if ($k && $k['id'] === (string) $id) { $out[(string) $id] = $k; }
+        }
+        return $out;
+    }
+
+    private static bool $stil_n = false;
+
+    /** Im Fuß: weist jedem sichtbaren Widget eine Variante zu (Zufall, ohne Cookie/IP) und meldet die Einblendung. Redakteure sehen immer die Grundfassung. */
+    public static function stil_skript(): void {
+        if (!self::$stil_n || self::ab_editor()) { return; }
+        $akt = self::stil_aktiv(); if (!$akt) { return; }
+        $e = [];
+        foreach ($akt as $id => $k) { $m = []; foreach ($k['v'] as $b => $v) { $m[$b] = $v[1]; } $e[] = ['id' => $id, 'k' => $m]; }
+        echo '<script>(function(T){var w=document.querySelectorAll(".sab-wb"),i,j,t,v,c;(window.sabAB=window.sabAB||[]);'
+           . 'for(i=0;i<w.length;i++){if(!w[i].getClientRects().length||w[i].hasAttribute("data-sab-xs"))continue;'
+           . 'for(j=0;j<T.length;j++){t=T[j];v=Object.keys(t.k);c=v[Math.floor(Math.random()*v.length)];w[i].classList.add(t.k[c]);w[i].setAttribute("data-sab-xs","ab-"+t.id);w[i].setAttribute("data-sab-xv",c);window.sabAB.push({b:t.id,v:c})}}})(' . wp_json_encode($e) . ');</script>';
+    }
+
+    /** Reiter „A/B-Tests“: Abschnitt „Experimente“ mit Start- und Stopp-Knopf je Experiment. */
+    private static function stil_tab_html(): string {
+        $opt = self::ab_optionen();
+        $h = '<h3 style="margin-top:2em">Experimente mit der Aufmachung (A/B/C)</h3><p class="description">Hier wird nicht das Produkt getestet, sondern die Aufmachung. Jeder Besucher bekommt per Zufall eine von drei Varianten, ohne Cookie und ohne IP. Der Test läuft über alle Seiten mit dem Widget und zählt Einblendungen und Klicks auf den Knopf.</p>';
+        foreach (self::stil_katalog() as $key => $k) {
+            $an = !empty($opt[$k['id']]['an']);
+            $h .= '<form method="post" style="margin:0 0 10px;padding:10px 12px;background:#fff;border:1px solid #dcdcde;border-radius:6px;max-width:900px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false)
+               . '<input type="hidden" name="sab_tab" value="tests"><input type="hidden" name="sab_form" value="ab_stil"><input type="hidden" name="sab_stil" value="' . esc_attr($key) . '">'
+               . '<strong>' . esc_html($k['name']) . '</strong> · ' . ($an ? '<span style="color:#1a7f37">läuft</span>' : '<span style="color:#666">aus</span>') . '<br><span class="description">' . esc_html($k['text']) . '</span><br>';
+            foreach ($k['v'] as $b => $v) { $h .= '<small><strong>' . $b . ':</strong> ' . esc_html($v[0]) . '</small> &nbsp; '; }
+            $h .= '<br><button class="button' . ($an ? '' : ' button-primary') . '" name="sab_stil_an" value="' . ($an ? '0' : '1') . '" style="margin-top:6px">' . ($an ? 'Experiment beenden' : 'Experiment starten (Ziel ' . (int) $k['ziel'] . ' Einblendungen)') . '</button>'
+               . ($an ? ' <button class="button" name="sab_stil_an" value="2" onclick="return confirm(\'Zähler dieses Experiments auf null setzen und neu starten?\')" style="margin-top:6px">Zähler neu starten</button>' : '') . '</form>';
+        }
+        return $h;
+    }
+
+    private static function stil_speichern(): string {
+        $key = (string) ($_POST['sab_stil'] ?? ''); $k = self::stil_katalog()[$key] ?? null;
+        if (!$k) { return 'Unbekanntes Experiment.'; }
+        $opt = self::ab_optionen(); $id = $k['id']; $m = (string) ($_POST['sab_stil_an'] ?? '');
+        $o = $opt[$id] ?? ['a' => [], 'b' => [], 'c' => ['x'], 's' => $key, 'ziel' => (int) $k['ziel']];
+        if ($m === '1' || $m === '2') { $o['an'] = 1; if ($m === '2' || empty($o['start'])) { $o['start'] = gmdate('Y-m-d'); } }
+        else { $o['an'] = 0; if (empty($o['start'])) { return 'Das Experiment lief nicht.'; } }
+        $opt[$id] = $o; update_option('sab_ab', $opt, false);
+        return $m === '2' ? 'Neu gestartet, gezählt wird ab heute.' : ($m === '1' ? 'Experiment gestartet. Beobachte die Zahlen oben unter „Laufende Tests“.' : 'Experiment beendet, die Zahlen bleiben stehen.');
+    }
+
     private static function ab_karte_html(string $id, array $o, array $z, bool $voll): string {
         if (!empty($o['c'])) { return self::ab_karte_multi_html($id, $o, $z, $voll); }
         $r = $z['r'] ?? self::ab_bewerten(0, 0, 0, 0, max(1, (int) ($o['ziel'] ?? self::AB_ZIEL)));
@@ -3727,7 +3789,7 @@ JS;
         $ziel = max(1, (int) ($o['ziel'] ?? self::AB_ZIEL));
         $r = $z['r'] ?? self::ab_bewerten_n(['A' => [0, 0], 'B' => [0, 0], 'C' => [0, 0]], $ziel, $id);
         [$kl, $titel, $erkl] = self::ab_status_text($r);
-        $h = '<div class="sab-ab-karte"><div class="sab-ab-kopf"><strong>Test ' . esc_html($id) . ' (drei Varianten)</strong><span class="sab-ab-badge ' . $kl . '">' . esc_html($titel) . '</span></div>';
+        $h = '<div class="sab-ab-karte"><div class="sab-ab-kopf"><strong>' . (!empty($o['s']) ? esc_html((string) (self::stil_katalog()[(string) $o['s']]['name'] ?? $id)) : 'Test ' . esc_html($id) . ' (drei Varianten)') . '</strong><span class="sab-ab-badge ' . $kl . '">' . esc_html($titel) . '</span></div>';
         $h .= '<p class="sab-ab-klein" style="margin:0 0 8px">' . esc_html($erkl) . '</p>';
         $h .= '<div class="sab-ab-balken" title="Fortschritt zum Ziel"><i class="z" style="width:' . round(($r['fortschritt'] ?? 0) * 100) . '%"></i></div>';
         $h .= '<p class="sab-ab-klein" style="margin:0 0 10px">' . (int) $r['gesamt'] . ' von ' . $ziel . ' Besuchen (' . round(($r['fortschritt'] ?? 0) * 100) . ' %) · Start ' . esc_html(date_i18n('d.m.Y', strtotime((string) ($o['start'] ?? 'now')))) . '</p>';
@@ -3737,7 +3799,7 @@ JS;
             $l = strtolower($b); $x = $r['v'][$b] ?? ['n' => 0, 'k' => 0, 'p' => 0.0, 'se' => 0.0, 'ci' => [0.0, 0.0]];
             $sieg = $r['status'] === 'klar' && $r['sieger'] === $b;
             $h .= '<div class="sab-ab-paar ' . $l . ($sieg ? ' sieg' : '') . '"><h4>Variante ' . $b . ($sieg ? ' &#127942;' : '') . '</h4>';
-            foreach ((array) ($o[$l] ?? []) as $a) { $h .= self::ab_produkt_html((string) $a); }
+            if (!empty($o['s'])) { $h .= '<p style="margin:0 0 6px"><strong>' . esc_html((string) (self::stil_katalog()[(string) $o['s']]['v'][$b][0] ?? '')) . '</strong></p>'; } else { foreach ((array) ($o[$l] ?? []) as $a) { $h .= self::ab_produkt_html((string) $a); } }
             $h .= '<div class="sab-ab-zahl">' . self::ab_pct($x['p']) . '</div><div class="sab-ab-klein">Klickrate: ' . (int) $x['k'] . ' Klicks bei ' . (int) $x['n'] . ' Einblendungen</div>'
                . '<div class="sab-ab-bereich" title="95 %-Bereich der wahren Klickrate"><i class="' . $l . '" style="left:' . round(100 * $x['ci'][0] / $max / 1.05, 1) . '%;width:' . max(1, round(100 * ($x['ci'][1] - $x['ci'][0]) / $max / 1.05, 1)) . '%"></i></div>'
                . '<div class="sab-ab-klein">Wahrscheinlich zwischen ' . self::ab_pct($x['ci'][0]) . ' und ' . self::ab_pct($x['ci'][1]) . ' (±' . self::ab_pct($x['se'], 2) . ' Streuung)</div>'
@@ -3801,12 +3863,13 @@ JS;
             if ($s) { $h .= '<p class="sab-ab-klein" style="margin:-8px 0 0 4px">Gefunden in: ' . self::bloecke_artikel_links($s, 8) . '</p>'; }
         }
         $h .= self::ab_erklaerung_html();
+        $h .= self::stil_tab_html();
         $h .= self::ab_seiten_html();
         $h .= '<h3 style="margin-top:2em">Alle Viererblöcke (' . count($scan) . ')</h3><p class="description">Gefunden in veröffentlichten Artikeln: zwei benachbarte Kartenblöcke mit je zwei Produkten oder ein Kartenblock mit vier. Neu eingefügte Blöcke erscheinen nach „Neu suchen“. Ziel = Besuche insgesamt.</p>'
            . '<form method="post" style="margin:0 0 8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="tests"><button class="button" name="sab_ab_neu" value="1">Neu suchen</button></form>'
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="tests"><input type="hidden" name="sab_form" value="ab">';
         if (!$scan && !$opt) { $h .= '<p>Keine Viererblöcke gefunden. Sie entstehen im Reiter Umbau, wenn Tabellen zu Karten werden.</p>'; }
-        $ids = array_unique(array_merge(array_keys($scan), array_keys($opt)));
+        $ids = array_values(array_filter(array_unique(array_merge(array_keys($scan), array_keys($opt))), fn($i) => empty($opt[$i]['s'])));
         $h .= '<table class="widefat striped" style="max-width:1100px"><thead><tr><th style="width:60px">Test</th><th>Paar A</th><th>Paar B</th><th>Seiten</th><th style="width:90px">Ziel</th></tr></thead><tbody>';
         foreach ($ids as $id) {
             $o = $opt[$id] ?? []; $asins = $scan[$id]['asins'] ?? ['A' => (array) ($o['a'] ?? []), 'B' => (array) ($o['b'] ?? [])];
@@ -3868,7 +3931,7 @@ JS;
         $an = (array) ($_POST['sab_ab_an'] ?? []); $zl = (array) ($_POST['sab_ab_ziel'] ?? []);
         $null = !empty($_POST['sab_ab_null']);
         foreach (array_unique(array_merge(array_keys($scan), array_keys($opt))) as $id) {
-            if (!preg_match('/^[a-f0-9]{8}$/', (string) $id)) { continue; }
+            if (!preg_match('/^[a-f0-9]{8}$/', (string) $id) || !empty($opt[$id]['s'])) { continue; }
             $o = $opt[$id] ?? [];
             $neu = isset($an[$id]);
             $o['ziel'] = max(100, (int) ($zl[$id] ?? ($o['ziel'] ?? self::AB_ZIEL)));
@@ -4018,7 +4081,7 @@ JS;
            . 'if(document.readyState==="complete"){W()}else{addEventListener("load",W)}'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
-           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
+           . 'var X=a.closest("[data-sab-xs]");S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||(X?X.getAttribute("data-sab-xs"):""),var:a.getAttribute("data-sab-var")||(X?X.getAttribute("data-sab-xv"):""),typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
            . 'p={id:id,t:Date.now(),h:false}},true);'
            . 'document.addEventListener("visibilitychange",function(){if(!p)return;'
            . 'if(document.visibilityState==="hidden"){p.h=true;return}'
@@ -8122,7 +8185,7 @@ JS;
 
     // ---------- Widgets für die Seitenleiste ----------
 
-    const WIDGET_CSS = '.sab-wb,.sab-wt,.sab-wl{box-sizing:border-box;max-width:340px;margin:0 auto 18px;font-family:inherit}.sab-wb{position:relative;background:#fff;border:1px solid #dfe6d8;border-radius:14px;padding:18px 16px 14px;box-shadow:0 2px 10px rgba(40,70,30,.08);text-align:center}.sab-wb .sab-wtag{position:absolute;top:-10px;left:14px;background:#e8873a;color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 10px;border-radius:999px}.sab-wb .sab-wcover{margin:6px auto 12px}.sab-wb .sab-wcover img{display:block;margin:0 auto;max-height:210px;width:auto;max-width:70%;height:auto;border-radius:4px 10px 10px 4px;box-shadow:-4px 4px 0 #cfd9c7,0 6px 14px rgba(0,0,0,.2)}.sab-wb h4{margin:0 0 6px;font-size:17px;line-height:1.25}.sab-wb p{margin:0 0 12px;font-size:14px;line-height:1.45;color:#44543f}.sab-wb a.sab-wbtn{display:block;background:transparent;border:1px solid #c5d6c3;color:#2f7a3d!important;text-decoration:none!important;font-weight:600;padding:8px 12px;border-radius:9px;font-size:14px}.sab-wb a.sab-wbtn:hover{background:#f1f6f0}.sab-wb a.sab-wbtn:after{content:"";position:absolute;inset:0;border-radius:14px}.sab-wb a.sab-walt{position:relative;z-index:2;display:inline-block;margin-top:9px;font-size:13px;color:#2f7a3d}.sab-wb .sab-wnote{font-size:11px;color:#7b8a76;margin-top:8px}.sab-wt{background:linear-gradient(160deg,#fff7e8,#ffeccb);border-radius:14px;padding:16px;border:1px solid #f1d9a8}.sab-wt b{display:block;font-size:17px;margin-bottom:6px}.sab-wt p{margin:0 0 10px;font-size:14px;line-height:1.45}.sab-wt a{display:inline-block;background:#e8873a;color:#fff!important;text-decoration:none!important;font-weight:700;padding:9px 14px;border-radius:9px;font-size:14px}.sab-wl{background:#fff;border-radius:14px;padding:14px 16px;border:1px solid #dfe6d8}.sab-wl h4{margin:0 0 10px;font-size:16px}.sab-wl ol{margin:0;padding:0;list-style:none;counter-reset:n}.sab-wl li{counter-increment:n;display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #edf1e9;font-size:14px}.sab-wl li:first-child{border-top:0}.sab-wl li:before{content:counter(n);flex:none;width:24px;height:24px;border-radius:50%;background:#2f7a3d;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}.sab-wl li a{color:inherit;text-decoration:none}.sab-tw,.sab-tier,.sab-perch{display:none}@media (hover:hover) and (pointer:fine) and (min-width:1024px) and (prefers-reduced-motion:no-preference){.sab-wb .sab-wcover{position:relative;overflow:hidden;padding:0 14px 20px;margin:6px -14px -8px}.sab-wb .sab-wcover img{transform-origin:bottom left;animation:sabwip 20s ease-in-out infinite}.sab-wb .sab-wcover::after{content:"";position:absolute;top:0;left:-60%;width:30%;height:100%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-15deg);animation:sabgl 20s ease-in-out infinite}@keyframes sabwip{0%,38%,46%,100%{transform:none}41%{transform:rotate(-4deg) translateY(-3px)}44%{transform:rotate(1.5deg)}}@keyframes sabgl{0%,80%{left:-60%}92%,100%{left:130%}}.sab-tw{display:block;position:relative;left:50%;width:0;height:0;pointer-events:none}.sab-tier{display:block;position:absolute;left:0;top:0;width:34px;height:23px;pointer-events:none;opacity:0;z-index:2}.sab-tier svg{display:block;width:100%;height:100%;overflow:visible}.sab-tier .fw{transform-box:fill-box;transform-origin:50% 50%;animation:sabfl .12s ease-in-out infinite alternate}@keyframes sabfl{to{transform:scaleY(.3)}}.sab-tier .fd{transform-box:fill-box;transform-origin:50% 50%}@supports (offset-path:path("M0 0")){.sab-perch{display:block;position:absolute;z-index:1;pointer-events:none;opacity:0;transform-origin:50% 100%;height:30px;top:-26px;width:36px}.sab-perch svg{display:block;width:100%;height:100%;overflow:visible}.sab-pa{left:77px}.sab-pb{left:-113px}.sab-p3{width:44px;top:-27px}.sab-p3.sab-pa{left:73px}.sab-p3.sab-pb{left:-117px}.sab-t1,.sab-p1{animation-duration:90s}.sab-t2,.sab-p2{animation-duration:110s}.sab-t3,.sab-p3{animation-duration:76s}.sab-tier{offset-path:path("M-150 -70C-100 -150 -50 10 0 -80C50 -170 90 -160 150 -70C210 20 250 -20 340 -100");offset-rotate:auto;animation-name:sabfly;animation-iteration-count:infinite;animation-timing-function:ease-in-out}.sab-tier .fd{animation:sabfd 90s infinite}.sab-t2 .fd{animation-duration:110s}.sab-t3 .fd{animation-duration:76s}.sab-pa{animation-name:sabpa;animation-iteration-count:infinite}.sab-pb{animation-name:sabpb;animation-iteration-count:infinite}.sab-wb:hover .sab-tier{offset-path:path("M-150 -70C-100 -150 -50 10 0 -80C50 -170 90 -160 150 -70C210 20 250 -20 340 -100");animation:sabhov 2.6s ease-in-out 1}@keyframes sabfly{0%,19.9%{opacity:0;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:0%}20%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:0%}28%,35%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:57.7%}41%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:100%}41.3%{opacity:0;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:100%}41.4%,69.9%{opacity:0;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:0%}70%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:0%}78%,85%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:57.7%}91%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:100%}91.3%,100%{opacity:0;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:100%}}@keyframes sabfd{0%,27.5%{transform:none}28.5%,34.5%{transform:scaleY(.5)}35.5%,77.5%{transform:none}78.5%,84.5%{transform:scaleY(.5)}85.5%,100%{transform:none}}@keyframes sabpa{0%,14%{opacity:0;transform:scale(0)}18%,42%{opacity:1;transform:scale(1)}46%,100%{opacity:0;transform:scale(0)}}@keyframes sabpb{0%,64%{opacity:0;transform:scale(0)}68%,92%{opacity:1;transform:scale(1)}96%,100%{opacity:0;transform:scale(0)}}@keyframes sabhov{0%{opacity:0;offset-distance:0%}8%{opacity:1}92%{opacity:1}100%{opacity:0;offset-distance:100%}}}}';
+    const WIDGET_CSS = '.sab-wb,.sab-wt,.sab-wl{box-sizing:border-box;max-width:340px;margin:0 auto 18px;font-family:inherit}.sab-wb{position:relative;background:#fff;border:1px solid #dfe6d8;border-radius:14px;padding:18px 16px 14px;box-shadow:0 2px 10px rgba(40,70,30,.08);text-align:center}.sab-wb .sab-wtag{position:absolute;top:-10px;left:14px;background:#e8873a;color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 10px;border-radius:999px}.sab-wb .sab-wcover{margin:6px auto 12px}.sab-wb .sab-wcover img{display:block;margin:0 auto;max-height:210px;width:auto;max-width:70%;height:auto;border-radius:4px 10px 10px 4px;box-shadow:-4px 4px 0 #cfd9c7,0 6px 14px rgba(0,0,0,.2)}.sab-wb h4{margin:0 0 6px;font-size:17px;line-height:1.25}.sab-wb p{margin:0 0 12px;font-size:14px;line-height:1.45;color:#44543f}.sab-wb a.sab-wbtn{display:block;background:transparent;border:1px solid #c5d6c3;color:#2f7a3d!important;text-decoration:none!important;font-weight:600;padding:8px 12px;border-radius:9px;font-size:14px}.sab-wb a.sab-wbtn:hover{background:#f1f6f0}.sab-wb a.sab-wbtn:after{content:"";position:absolute;inset:0;border-radius:14px}.sab-wb a.sab-walt{position:relative;z-index:2;display:inline-block;margin-top:9px;font-size:13px;color:#2f7a3d}.sab-wb .sab-wnote{font-size:11px;color:#7b8a76;margin-top:8px}.sab-wt{background:linear-gradient(160deg,#fff7e8,#ffeccb);border-radius:14px;padding:16px;border:1px solid #f1d9a8}.sab-wt b{display:block;font-size:17px;margin-bottom:6px}.sab-wt p{margin:0 0 10px;font-size:14px;line-height:1.45}.sab-wt a{display:inline-block;background:#e8873a;color:#fff!important;text-decoration:none!important;font-weight:700;padding:9px 14px;border-radius:9px;font-size:14px}.sab-wl{background:#fff;border-radius:14px;padding:14px 16px;border:1px solid #dfe6d8}.sab-wl h4{margin:0 0 10px;font-size:16px}.sab-wl ol{margin:0;padding:0;list-style:none;counter-reset:n}.sab-wl li{counter-increment:n;display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #edf1e9;font-size:14px}.sab-wl li:first-child{border-top:0}.sab-wl li:before{content:counter(n);flex:none;width:24px;height:24px;border-radius:50%;background:#2f7a3d;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}.sab-wl li a{color:inherit;text-decoration:none}.sab-tw,.sab-tier,.sab-perch{display:none}@media (hover:hover) and (pointer:fine) and (min-width:1024px) and (prefers-reduced-motion:no-preference){.sab-wb .sab-wcover{position:relative;overflow:hidden;padding:0 14px 20px;margin:6px -14px -8px}.sab-wb .sab-wcover img{transform-origin:bottom left;animation:sabwip 20s ease-in-out infinite}.sab-wb .sab-wcover::after{content:"";position:absolute;top:0;left:-60%;width:30%;height:100%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-15deg);animation:sabgl 20s ease-in-out infinite}@keyframes sabwip{0%,38%,46%,100%{transform:none}41%{transform:rotate(-4deg) translateY(-3px)}44%{transform:rotate(1.5deg)}}@keyframes sabgl{0%,80%{left:-60%}92%,100%{left:130%}}.sab-tw{display:block;position:relative;left:50%;width:0;height:0;pointer-events:none}.sab-tier{display:block;position:absolute;left:0;top:0;width:34px;height:23px;pointer-events:none;opacity:0;z-index:2}.sab-tier svg{display:block;width:100%;height:100%;overflow:visible}.sab-tier .fw{transform-box:fill-box;transform-origin:50% 50%;animation:sabfl .12s ease-in-out infinite alternate}@keyframes sabfl{to{transform:scaleY(.3)}}.sab-tier .fd{transform-box:fill-box;transform-origin:50% 50%}.sab-wb.sab-m-a .sab-tw,.sab-wb.sab-m-c .sab-tw{display:none}.sab-wb.sab-m-b .sab-wcover img,.sab-wb.sab-m-c .sab-wcover img{animation:none}.sab-wb.sab-m-b .sab-wcover::after,.sab-wb.sab-m-c .sab-wcover::after{display:none}@supports (offset-path:path("M0 0")){.sab-perch{display:block;position:absolute;z-index:1;pointer-events:none;opacity:0;transform-origin:50% 100%;height:30px;top:-26px;width:36px}.sab-perch svg{display:block;width:100%;height:100%;overflow:visible}.sab-pa{left:77px}.sab-pb{left:-113px}.sab-p3{width:44px;top:-27px}.sab-p3.sab-pa{left:73px}.sab-p3.sab-pb{left:-117px}.sab-t1,.sab-p1{animation-duration:90s}.sab-t2,.sab-p2{animation-duration:110s}.sab-t3,.sab-p3{animation-duration:76s}.sab-tier{offset-path:path("M-150 -70C-100 -150 -50 10 0 -80C50 -170 90 -160 150 -70C210 20 250 -20 340 -100");offset-rotate:auto;animation-name:sabfly;animation-iteration-count:infinite;animation-timing-function:ease-in-out}.sab-tier .fd{animation:sabfd 90s infinite}.sab-t2 .fd{animation-duration:110s}.sab-t3 .fd{animation-duration:76s}.sab-pa{animation-name:sabpa;animation-iteration-count:infinite}.sab-pb{animation-name:sabpb;animation-iteration-count:infinite}.sab-wb:hover .sab-tier{offset-path:path("M-150 -70C-100 -150 -50 10 0 -80C50 -170 90 -160 150 -70C210 20 250 -20 340 -100");animation:sabhov 2.6s ease-in-out 1}@keyframes sabfly{0%,19.9%{opacity:0;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:0%}20%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:0%}28%,35%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:57.7%}41%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:100%}41.3%{opacity:0;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:100%}41.4%,69.9%{opacity:0;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:0%}70%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:0%}78%,85%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:57.7%}91%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:100%}91.3%,100%{opacity:0;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:100%}}@keyframes sabfd{0%,27.5%{transform:none}28.5%,34.5%{transform:scaleY(.5)}35.5%,77.5%{transform:none}78.5%,84.5%{transform:scaleY(.5)}85.5%,100%{transform:none}}@keyframes sabpa{0%,14%{opacity:0;transform:scale(0)}18%,42%{opacity:1;transform:scale(1)}46%,100%{opacity:0;transform:scale(0)}}@keyframes sabpb{0%,64%{opacity:0;transform:scale(0)}68%,92%{opacity:1;transform:scale(1)}96%,100%{opacity:0;transform:scale(0)}}@keyframes sabhov{0%{opacity:0;offset-distance:0%}8%{opacity:1}92%{opacity:1}100%{opacity:0;offset-distance:100%}}}}';
     private static $widget_css = false;
 
     /** Kleines Tierchen (Biene, Schmetterling, Libelle), das ab und zu am Desktop durchs Widget fliegt; reines CSS, je Buch fest (nach ASIN), also cache-sicher. */
@@ -8160,6 +8223,7 @@ JS;
         $land = self::land($a['land']); $asin = self::getauscht(self::asin($a['asin']));
         if (strlen($asin) !== 10) { return ''; }
         if (!self::$ab_in && !self::$ab_ctx && ($wz = self::ab_widget(self::asin($a['asin'])))) { $wh = self::ab_widget_html($a, $wz); if ($wh !== '') { return $wh; } }
+        self::$stil_n = true;
         $bild = self::sc_bild(['asin' => $asin, 'land' => $land, 'tag' => $a['tag'], 'breite' => '240'], '');
         $img = preg_match('#<img\b[^>]*>#i', $bild, $mi) ? $mi[0] : $bild;   // das Bild ist kein eigener Link: nur der Knopf ist der Affiliate-Link
         $knopf = $a['knopf'] !== '' ? (string) $a['knopf'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']);
@@ -8580,6 +8644,8 @@ JS;
                 $meldung = 'Gespeichert.';
             } elseif ($form === 'ab') {
                 $meldung = self::ab_speichern();
+            } elseif ($form === 'ab_stil') {
+                $meldung = self::stil_speichern();
             } elseif ($form === 'tests') {
                 update_option('sab_tests', sanitize_textarea_field(wp_unslash($_POST['sab_tests'] ?? '')), false);
                 update_option('sab_bildtests', sanitize_textarea_field(wp_unslash($_POST['sab_bildtests'] ?? '')), false);
