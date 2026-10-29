@@ -2074,4 +2074,12 @@ foreach (['de', 'es', 'fr', 'it', 'co.uk', 'com'] as $l_t) { unset($GLOBALS['tr'
 $GLOBALS['opt']['sab_bildfehler'] = ['B0BILDUNB4|5' => ['asin' => 'B0BILDUNB4', 'post' => 5, 'ts' => 1, 'art' => 'Bild']];
 ok($mBh->invoke(null) === '', 'Bildwarnung: ohne Produktdaten (Zwischenspeicher leer, Abruf nicht möglich) keine rote Meldung');
 unset($GLOBALS['opt']['sab_bildfehler']);
+// 0.92.27: link.amazon mit ASIN in der Adresse
+$mUu = new ReflectionMethod('SAB', 'umbau_url'); $mUu->setAccessible(true);
+$ul = $mUu->invoke(null, 'https://link.amazon/dp/B0ABCDEFGH?x=1');
+ok(is_array($ul) && $ul[1] === 'B0ABCDEFGH', 'link.amazon: ASIN in der Adresse wird gelesen');
+$ul2 = $mUu->invoke(null, 'https://link.amazon/AbCdEfGh');
+ok($ul2 === null, 'link.amazon: reiner Kurzcode ohne ASIN wird nicht geraten');
+$ul3 = $mUu->invoke(null, 'https://www.amazon.de/gp/aw/d/B0ABCDEFGH/ref=x');
+ok(is_array($ul3) && $ul3[1] === 'B0ABCDEFGH', 'Amazon: /gp/aw/d/ASIN wird gelesen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

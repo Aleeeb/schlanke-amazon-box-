@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.26
+ * Version: 0.92.27
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.26';
+    const VERSION = '0.92.27';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -5817,6 +5817,18 @@ JS;
             $o = $r['http_response'] ?? null;
             $ziel = ($o && method_exists($o, 'get_response_object') && !empty($o->get_response_object()->url)) ? (string) $o->get_response_object()->url : '';
         }
+        if (($ziel === '' || preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $ziel)) && !is_wp_error($r) || ($ziel === '' && is_wp_error($r))) {   // Weiterleitung nicht verfolgt (z. B. neues link.amazon-Format): Location-Köpfe von Hand folgen, notfalls mit GET
+            $u = $url;
+            for ($i = 0; $i < 6; $i++) {
+                $rr = wp_remote_get($u, ['timeout' => 4, 'redirection' => 0, 'headers' => ['Range' => 'bytes=0-0']]);
+                if (is_wp_error($rr)) { break; }
+                $loc = wp_remote_retrieve_header($rr, 'location'); if (is_array($loc)) { $loc = (string) end($loc); }
+                if ($loc === '' || $loc === null) { if ($i > 0) { $ziel = $u; } break; }
+                if (strpos((string) $loc, 'http') !== 0) { $loc = preg_replace('#^(https?://[^/]+).*$#', '$1', $u) . '/' . ltrim((string) $loc, '/'); }
+                $u = (string) $loc; $ziel = $u;
+                if (!preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $u)) { break; }
+            }
+        }
         if ($ziel === '' && !is_wp_error($r)) { return ''; }   // nicht entscheidbar, später nochmal
         set_transient($key, $ziel, $ziel === '' ? DAY_IN_SECONDS : 30 * DAY_IN_SECONDS);
         return $ziel;
@@ -5958,8 +5970,9 @@ JS;
 
     private static function umbau_url(string $url, bool $aufloesen = false): ?array {
         $url = html_entity_decode($url);
+        if (preg_match('#^https?://link\.amazon/(?:[^?\#]*/)?(?:dp/|gp/product/|asin=)?\??(B0[A-Z0-9]{8})(?![A-Za-z0-9])#', $url, $lk) || preg_match('#^https?://link\.amazon/[^\#]*[?&]asin=([A-Z0-9]{10})(?![A-Za-z0-9])#i', $url, $lk)) { return [self::land(''), strtoupper($lk[1])]; }   // neues link.amazon-Format mit ASIN in der Adresse: Land der Webseite
         if ($aufloesen && preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $url)) { $url = self::kurzlink_aufloesen($url); if ($url === '') { return null; } }
-        if (!preg_match('#^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com)/(?:[^?\#]*/)?(?:dp|gp/product)/([A-Za-z0-9]{10})#i', $url, $u)) { return null; }
+        if (!preg_match('#^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com)/(?:[^?\#]*/)?(?:dp|gp/product|gp/aw/d)/([A-Za-z0-9]{10})#i', $url, $u) && !preg_match('#^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com)/[^\#]*[?&]asin=([A-Z0-9]{10})(?![A-Za-z0-9])#i', $url, $u)) { return null; }
         return [strtolower($u[1]), strtoupper($u[2])];
     }
 
