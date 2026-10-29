@@ -2042,4 +2042,11 @@ $GLOBALS['opt']['sab_produkte'] = "B0STRICH03 | Solar-Maulwurfvertreiber   2er-P
 $pmv = $pm->invoke(null);
 ok(($pmv['B0STRICH03'] ?? '') === 'Solar-Maulwurfvertreiber | 2er-Pack', 'Produktliste: drei Leerzeichen werden als Strich angezeigt');
 unset($GLOBALS['opt']['sab_produkte']);
+// 0.92.20: Startseiten-Link im Widget ist kein alter Produktlink
+$GLOBALS['opt']['widget_block'] = [31 => ['content' => '<!-- wp:paragraph --><p><a href="https://www.amazon.es/?tag=x-21">Amazon</a> · <a href="https://www.ebay.es/sch/i.html?_nkw=topo&campid=1">eBay</a></p><!-- /wp:paragraph -->']];
+$w31 = $mWf->invoke(null);
+ok(isset($w31['block-31']) && $w31['block-31']['fertig'] === true && count($w31['block-31']['start']) === 1 && $w31['block-31']['links'] === [], 'Widget: Startseiten-Link + eBay-Link sind kein alter Amazon-Link, Startseite wird getrennt gelistet');
+[$ns31, $n31] = SAB::widget_start_umbauen($w31['block-31']['inhalt']);
+ok($n31 === 1 && strpos($ns31, '[amz_startseite land="es"]Amazon[/amz_startseite]') !== false && strpos($ns31, 'ebay.es') !== false, 'Widget: Startseiten-Link wird zu [amz_startseite], eBay bleibt (' . $ns31 . ')');
+unset($GLOBALS['opt']['widget_block']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

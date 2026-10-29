@@ -8006,8 +8006,16 @@ JS;
                 $id = $typ . '-' . $nr;
                 // nur echte Amazon-Adressen oder AAWP zählen (ein eBay-Link mit „amazon“ im Suchwort oder [amz_ebay] ist kein Amazon-Link)
                 $re_alt = '#https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co)(?:[/?\#"\'\s]|$)|aawp|\[amazon\b#i';
-                $hat_alt = preg_match($re_alt, preg_replace('#\[amz_widget\b[^\]]*\]#', '', $c), $tm) === 1;
-                if (!$hat_alt && !preg_match('#\[amz_(?:widget|karten?|bild|link|produkt)\b#', $c)) { continue; }
+                // Links auf die Amazon-Startseite (ohne Produkt) sind keine alten Produktlinks: eigene Liste, Umbau zu [amz_startseite]
+                $start = [];
+                $c_alt = preg_replace_callback('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', function ($m) use (&$start) {
+                    $u = html_entity_decode($m[2]);
+                    if (self::seite_art($u) !== 'startseite') { return $m[0]; }
+                    $start[] = ['url' => $u, 'text' => trim(html_entity_decode(strip_tags($m[3])))];
+                    return ' ';
+                }, $c);
+                $hat_alt = preg_match($re_alt, preg_replace('#\[amz_widget\b[^\]]*\]#', '', (string) $c_alt), $tm) === 1;
+                if (!$hat_alt && !$start && !preg_match('#\[amz_(?:widget|karten?|bild|link|produkt)\b#', $c)) { continue; }
                 $leiste = '';
                 foreach ($sb as $sn => $ids) { if (is_array($ids) && in_array($id, $ids, true)) { $leiste = (string) $sn; break; } }
                 $asins = [];
@@ -8016,12 +8024,12 @@ JS;
                 if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $am_, PREG_SET_ORDER)) {
                     foreach ($am_ as $a_) {
                         $u_ = html_entity_decode($a_[2]);
-                        if (!preg_match('#^https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co|link\.amazon)(?:[/?\#]|$)#i', $u_)) { continue; }
+                        if (!preg_match('#^https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co|link\.amazon)(?:[/?\#]|$)#i', $u_) || self::seite_art($u_) === 'startseite') { continue; }
                         $uu = self::umbau_url($a_[2]);
                         $lk[] = ['url' => $u_, 'text' => trim(html_entity_decode(strip_tags($a_[3]))), 'asin' => $uu ? (string) $uu[1] : '', 'kurz' => (bool) preg_match('#amzn\.|a\.co/|link\.amazon#i', $u_)];
                     }
                 }
-                $out[$id] = ['links' => $lk, 'ok' => ((array) get_option('sab_widget_ok', []))[$id] ?? '' , 'id' => $id, 'opt' => $opt, 'nr' => $nr, 'feld' => $feld, 'inhalt' => $c, 'leiste' => $leiste, 'asins' => array_map('strval', array_keys($asins)), 'fertig' => !$hat_alt, 'treffer' => $hat_alt ? trim((string) $tm[0], " \"'\t\r\n#") : '', 'block' => $typ === 'block'];
+                $out[$id] = ['links' => $lk, 'start' => $start, 'ok' => ((array) get_option('sab_widget_ok', []))[$id] ?? '' , 'id' => $id, 'opt' => $opt, 'nr' => $nr, 'feld' => $feld, 'inhalt' => $c, 'leiste' => $leiste, 'asins' => array_map('strval', array_keys($asins)), 'fertig' => !$hat_alt, 'treffer' => $hat_alt ? trim((string) $tm[0], " \"'\t\r\n#") : '', 'block' => $typ === 'block'];
             }
         }
         return $out;
@@ -8079,6 +8087,25 @@ JS;
         return $m;
     }
 
+    /** Ersetzt Links auf die Amazon-Startseite durch [amz_startseite] (Partner-ID des Landes, Länder-Umschaltung, Klickstatistik). @return array{0:string,1:int} */
+    public static function widget_start_umbauen(string $c): array {
+        $n = 0;
+        $neu = preg_replace_callback('#<a\b([^>]*)href=(["\'])(.*?)\2([^>]*)>(.*?)</a>#is', function ($m) use (&$n) {
+            $u = html_entity_decode($m[3]);
+            if (self::seite_art($u) !== 'startseite') { return $m[0]; }
+            $land = preg_match('#amazon\.(es|de|fr|it|co\.uk|com\.au|com|ca)#i', $u, $lm) ? strtolower($lm[1]) : '';
+            $cls = preg_match('#\bclass=(["\'])(.*?)\1#i', $m[1] . $m[4], $cm) ? trim(preg_replace('/[^A-Za-z0-9 _-]/', '', $cm[2])) : '';
+            $text = trim(preg_replace('/\s+/u', ' ', strip_tags($m[5], '<strong><em><b><i>')));
+            if ($text === '') { return $m[0]; }
+            $n++;
+            return '[amz_startseite' . ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . ($cls !== '' ? ' class="' . $cls . '"' : '') . ']' . str_replace(['[', ']'], ['(', ')'], $text) . '[/amz_startseite]';
+        }, $c);
+        return [(string) $neu, $n];
+    }
+
+    /** Vorschau der Startseiten-Umbauten je Widget (Neuer Inhalt), wird nach „Vorschau“ gezeigt. */
+    private static $wi_start = [];
+
     private static function widget_umbau_innen(): string {
         $id = preg_replace('/[^a-z_0-9-]/', '', (string) wp_unslash($_POST['sab_wid'] ?? '')); $akt = (string) ($_POST['sab_wakt'] ?? '');
         $alle = self::widgets_finden(); $bk = (array) get_option('sab_widget_backup', []);
@@ -8094,6 +8121,15 @@ JS;
             return $ok ? 'Widget ' . $id . ' wieder auf den Zustand vorher gesetzt.' : 'Widget nicht gefunden.';
         }
         if (!isset($alle[$id])) { return 'Widget nicht gefunden.'; }
+        if ($akt === 'start_vorschau' || $akt === 'start') {
+            [$neu, $n] = self::widget_start_umbauen((string) $alle[$id]['inhalt']);
+            if ($n < 1) { return 'Im Widget ' . $id . ' steht kein Link auf die Amazon-Startseite, den man umbauen könnte.'; }
+            if ($akt === 'start_vorschau') { self::$wi_start[$id] = $neu; self::$wi_meldung[$id] = 'Vorschau unten (' . $n . ' Startseiten-Link' . ($n === 1 ? '' : 's') . '). Es wurde nichts gespeichert.'; return self::$wi_meldung[$id]; }
+            $bk[$id] = ['ts' => time(), 'vorher' => $alle[$id]['inhalt']]; update_option('sab_widget_backup', $bk, false);
+            if (!self::widget_speichern($id, $neu)) { return 'Widget nicht gespeichert.'; }
+            delete_transient('sab_alle_asins');
+            return 'Widget ' . $id . ': ' . $n . ' Startseiten-Link' . ($n === 1 ? '' : 's') . ' umgebaut (Sicherung gespeichert, Rückgängig unten). Bitte im Frontend ansehen.';
+        }
         $f = []; foreach (['asin', 'marke', 'titel', 'text', 'knopf', 'alt_text', 'alt_url'] as $k) { $f[$k] = sanitize_text_field(wp_unslash($_POST['sab_w_' . $k] ?? '')); }
         if (strlen(self::asin($f['asin'])) !== 10) { self::$wi_vorschau[$id] = $f; self::$wi_meldung[$id] = 'Es fehlt eine gültige ASIN (10 Zeichen). Im Widget steht kein Link mit ASIN, vermutlich ein Kurzlink oder Bild. Bitte die ASIN des Produkts von Hand eintragen.'; return self::$wi_meldung[$id]; }
         self::$wi_vorschau[$id] = $f;
@@ -8132,6 +8168,12 @@ JS;
                 }
                 $h .= '</div><p><button class="button" name="sab_wakt" value="vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="speichern" onclick="return confirm(\'Dieses Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Umbauen</button></p></form>';
                 if (isset(self::$wi_vorschau[$id]) && strlen(self::asin((string) ($f['asin'] ?? ''))) === 10) { $h .= '<div style="background:#f1f3ee;padding:14px;border-radius:8px"><div style="width:300px">' . do_shortcode(self::widget_code($f)) . '</div></div>'; }
+            }
+            if (!empty($w['start'])) {
+                $h .= '<div style="margin-top:8px;padding:8px 10px;background:#f1f6ee;border:1px solid #cfe2c8;border-radius:6px"><strong>Link auf die Amazon-Startseite</strong> (' . count($w['start']) . '): ' . esc_html(implode(', ', array_map(fn($x) => '„' . mb_substr($x['text'], 0, 30) . '“', $w['start']))) . '. Das ist kein Produkt-, sondern ein Startseiten-Link und zählt nicht als alter Link. Du kannst ihn durch den Startseiten-Link des Plugins ersetzen (Partner-ID des Landes, Länder-Umschaltung, Klickstatistik).'
+                    . '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="start_vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="start" onclick="return confirm(\'Startseiten-Link in diesem Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Startseiten-Link umbauen</button></form>';
+                if (isset(self::$wi_start[$id])) { $h .= '<p style="margin:8px 0 2px"><strong>Neuer Inhalt:</strong></p><pre style="white-space:pre-wrap;max-height:160px;overflow:auto;background:#fff;padding:6px;font-size:12px">' . esc_html(self::$wi_start[$id]) . '</pre><div style="background:#fff;padding:8px;border-radius:6px">' . do_shortcode(wp_kses_post(self::$wi_start[$id])) . '</div>'; }
+                $h .= '</div>';
             }
             if ($w['fertig']) { $h .= self::ab_widget_form_html((string) $id, $w); }
             if (isset($bk[$id])) { $h .= '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="zurueck">Rückgängig (alter Inhalt von ' . esc_html(wp_date('d.m.Y H:i', (int) $bk[$id]['ts'])) . ')</button></form>'; }
