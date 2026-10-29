@@ -1938,7 +1938,12 @@ $_POST = ['sab_abw' => 'start', 'sab_abw_asin' => 'B0EZ000001', 'sab_abw_neu' =>
 ok(strpos($msg0, 'Nichts gestartet') !== false && !$GLOBALS['opt']['sab_ab'], 'Widget-Test: gleiches Produkt wird abgelehnt');
 $wid = 'cafe0001';
 $GLOBALS['opt']['sab_ab'] = [$wid => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0EZ000001'], 'b' => ['B0EZ000002'], 'w' => 1, 'wf' => ['titel' => 'Buch B', 'text' => 'Text B', 'marke' => '', 'knopf' => '']]];
+$GLOBALS['opt']['sab_widget_alt'] = '1';
 $wT = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A', 'text' => 'Text A', 'alt_text' => 'Zweiter', 'alt_url' => 'https://x.test/']);
+$wAlt0 = $GLOBALS['opt']['sab_widget_alt']; unset($GLOBALS['opt']['sab_widget_alt']);
+$wOhne = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000003', 'titel' => 'Buch C', 'text' => 'Text C', 'alt_text' => 'Zweiter', 'alt_url' => 'https://x.test/']);
+ok(strpos($wOhne, 'sab-walt') === false && strpos($wOhne, 'sab-wbtn') !== false && strpos((string) SAB::WIDGET_CSS, 'sabwip') !== false, 'Widget: zweiter Link standardmäßig aus, Wippen-CSS nur mit Bewegungs-Schutz');
+$GLOBALS['opt']['sab_widget_alt'] = $wAlt0;
 ok(strpos($wT, 'data-sab-abe="' . $wid . '"') !== false && strpos($wT, 'Buch A') !== false && strpos($wT, 'Text B') !== false && strpos($wT, 'data-sab-var="B"') !== false && strpos($wT, 'data-sab-slot="ab-' . $wid . '"') !== false && substr_count($wT, 'sab-walt') === 1, 'Widget-Test: beide Karten, Klicks zählen für Test, Alternativlink nur bei A');
 $_POST = ['sab_abw' => 'stop:' . $wid]; $msg2 = $mWsp->invoke(null); $_POST = [];
 ok(empty($GLOBALS['opt']['sab_ab'][$wid]['an']) && strpos($GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A']), 'sab-ab-e') === false, 'Widget-Test: beenden stellt das einfache Widget wieder her');
