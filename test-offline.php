@@ -2005,4 +2005,8 @@ ok(strpos($tfm, 'entfernt') !== false && strpos($GLOBALS['opt']['widget_block'][
 $mWc2 = new ReflectionMethod('SAB', 'widget_code'); $mWc2->setAccessible(true);
 ok(strpos($mWc2->invoke(null, ['asin' => '3895663891', 'text' => '(amazon fields="3895663891" image_width="300") Gut.', 'titel' => '']), 'text="Gut."') !== false, 'Widget-Umbau: Reste aus AAWP-Text landen nie im Shortcode');
 unset($GLOBALS['opt']['widget_block'], $GLOBALS['opt']['sab_widget_backup']);
+// 0.92.12: Tierchen nur auf Wunsch
+$wTi = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000008', 'titel' => 'Buch Y', 'text' => 'Text Y']);
+$GLOBALS['opt']['sab_widget_tiere'] = '1'; $wTi2 = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000008', 'titel' => 'Buch Y', 'text' => 'Text Y']); unset($GLOBALS['opt']['sab_widget_tiere']);
+ok(strpos($wTi, 'sab-tier') === false && strpos($wTi2, 'sab-tier') !== false && strpos($wTi2, 'class="sab-tw" style="display:none"') !== false, 'Widget: Tierchen standardmäßig aus, mit Option an und dann mit sicherem Ausgangszustand (versteckt)');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
