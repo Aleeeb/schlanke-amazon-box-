@@ -7947,13 +7947,13 @@ JS;
         if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $am, PREG_SET_ORDER)) {
             foreach ($am as $a_) { if (!preg_match('#amazon\.|amzn\.|aawp|/dp/#i', $a_[2]) && ($t = trim(html_entity_decode(strip_tags($a_[3])))) !== '' && mb_strlen($t) <= 60) { $alt_u = html_entity_decode($a_[2]); $alt_t = $t; break; } }
         }
-        return ['asin' => (string) ($w['asins'][0] ?? ''), 'marke' => 'Buchtipp', 'titel' => mb_substr($titel, 0, 90), 'text' => mb_substr($text, 0, 220), 'knopf' => '', 'alt_text' => $alt_t, 'alt_url' => $alt_u];
+        return ['asin' => (string) ($w['asins'][0] ?? ''), 'marke' => 'Buchtipp', 'titel' => mb_substr(self::textrest_sauber($titel), 0, 90), 'text' => mb_substr(self::textrest_sauber($text), 0, 220), 'knopf' => '', 'alt_text' => $alt_t, 'alt_url' => $alt_u];
     }
 
     private static function widget_code(array $f): string {
         $q = fn(string $v): string => str_replace(['"', '[', ']'], ['″', '(', ')'], trim($v));
         $a = ['typ' => 'buch', 'asin' => self::asin($f['asin'] ?? '')];
-        foreach (['marke', 'titel', 'text', 'knopf', 'alt_text'] as $k) { if (trim((string) ($f[$k] ?? '')) !== '') { $a[$k] = $q((string) $f[$k]); } }
+        foreach (['marke', 'titel', 'text', 'knopf', 'alt_text'] as $k) { if (self::textrest_sauber((string) ($f[$k] ?? '')) !== '') { $a[$k] = $q(self::textrest_sauber((string) $f[$k])); } }
         if (esc_url((string) ($f['alt_url'] ?? '')) !== '') { $a['alt_url'] = esc_url_raw((string) $f['alt_url']); }
         $o = '[amz_widget'; foreach ($a as $k => $v) { $o .= ' ' . $k . '="' . $v . '"'; } return $o . ']';
     }
@@ -8037,6 +8037,89 @@ JS;
         return $h;
     }
 
+    // ---------- Sichtbare Shortcode-Reste finden (z. B. image_width="300") im Widget- und Artikeltext) ----------
+
+    private static $textreste = null;
+
+    /** Alte AAWP-Reste im Text: „(amazon fields=… image_width=…)“ und lose Attribute (auch mit typografischen Anführungszeichen). */
+    private static function textrest_entfernen(string $t): string {
+        $t = preg_replace('/\(\s*(?:amazon|aawp)\b[^)]*\)/iu', ' ', $t);
+        $t = preg_replace('/\b(?:fields|value|box|tracking_id|image_(?:size|width|height))\s*=\s*["“”″\']?[^\s"“”″\')\]]*["“”″\']?\)?/u', ' ', (string) $t);
+        return (string) preg_replace('/ {2,}/u', ' ', (string) $t);
+    }
+
+    /** Für einen Kurztext/Titel: Reste entfernen, Leerraum glätten. */
+    public static function textrest_sauber(string $t): string { return trim(preg_replace('/\s+/u', ' ', self::textrest_entfernen($t))); }
+
+    /** Bereinigt Widget-/Artikeltext: nur Textstücke (nicht Tags, nicht Shortcodes) und die Attribute text/titel/alt_text von [amz_widget]. */
+    public static function textrest_bereinigen(string $c): string {
+        $teile = preg_split('/(<[^>]*>|\[[^\[\]]*\])/u', $c, -1, PREG_SPLIT_DELIM_CAPTURE);
+        foreach ($teile as $i => $t) {
+            if ($t === '' || $t[0] === '<') { continue; }
+            if ($t[0] === '[') {
+                if (strpos($t, '[amz_widget') === 0) { $teile[$i] = preg_replace_callback('/\b(text|titel|alt_text)="([^"]*)"/u', fn($m) => $m[1] . '="' . self::textrest_sauber($m[2]) . '"', $t); }
+                continue;
+            }
+            $teile[$i] = self::textrest_entfernen($t);
+        }
+        return implode('', $teile);
+    }
+
+    /** Text ohne Tags und ohne vollständige [Klammern]: was dann noch wie Shortcode-Attribute aussieht, wird den Besuchern vermutlich als Text gezeigt. @return array<int,array{wo:string,treffer:string,link:string,edit:string}> */
+    public static function textreste_finden(): array {
+        $pruefen = function (string $c): string {
+            if (self::textrest_bereinigen($c) === $c) { return ''; }   // nichts, was die Bereinigung ändern würde (auch Reste in Attributen von [amz_widget] zählen)
+            return preg_match('/\(\s*(?:amazon|aawp)\b[^)]*\)|\b(?:image_(?:size|width|height)|fields|value|tracking_id)\s*=\s*[^\s<>\[\]]{0,30}/iu', html_entity_decode($c, ENT_QUOTES, 'UTF-8'), $m) ? trim($m[0]) : 'Rest';
+        };
+        $out = [];
+        foreach (self::WIDGET_OPT as $opt => [$typ, $feld]) {
+            foreach ((array) get_option($opt, []) as $nr => $w) {
+                if (!is_int($nr) || !is_array($w)) { continue; }
+                if (($tr = $pruefen((string) ($w[$feld] ?? ''))) !== '') { $id = $typ . '-' . $nr; $out[] = ['typ' => 'widget', 'id' => $id, 'wo' => 'Widget ' . $id, 'treffer' => $tr, 'link' => add_query_arg('sab_widget', $id, self::widget_testseite()), 'edit' => admin_url('widgets.php')]; }
+            }
+        }
+        global $wpdb;
+        if (isset($wpdb)) {
+            $rows = $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND (post_content LIKE '%image\\_width%' OR post_content LIKE '%image\\_size%' OR post_content LIKE '%image\\_height%' OR post_content LIKE '%tracking\\_id%' OR post_content LIKE '%fields=%' OR post_content LIKE '%value=%')", ARRAY_A);
+            foreach ((array) $rows as $r) {
+                if (($tr = $pruefen((string) $r['post_content'])) !== '') { $out[] = ['typ' => 'post', 'id' => (string) (int) $r['ID'], 'wo' => 'Artikel „' . ((string) $r['post_title'] ?: ('Beitrag ' . $r['ID'])) . '“', 'treffer' => $tr, 'link' => (string) get_permalink((int) $r['ID']), 'edit' => admin_url('post.php?post=' . (int) $r['ID'] . '&action=edit')]; }
+            }
+        }
+        return $out;
+    }
+
+    /** Reparieren-Knopf der Textrest-Suche: Reste entfernen, alten Inhalt vorher sichern. */
+    private static function textrest_fix(): string {
+        $typ = (string) ($_POST['sab_typ'] ?? ''); $id = preg_replace('/[^a-z_0-9-]/', '', (string) wp_unslash($_POST['sab_wid'] ?? ''));
+        if ($typ === 'widget') {
+            $roh = null;
+            foreach (self::WIDGET_OPT as $opt => [$t_, $feld]) { if (strpos($id, $t_ . '-') === 0) { $roh = ((array) (((array) get_option($opt, []))[(int) substr($id, strlen($t_) + 1)] ?? []))[$feld] ?? null; } }
+            if ($roh === null) { return 'Widget nicht gefunden.'; }
+            $neu = self::textrest_bereinigen((string) $roh);
+            if ($neu === $roh) { return 'Nichts zu ändern in ' . $id . '.'; }
+            $bk = (array) get_option('sab_widget_backup', []); $bk[$id] = ['ts' => time(), 'vorher' => (string) $roh]; update_option('sab_widget_backup', $bk, false);
+            return self::widget_speichern($id, $neu) ? 'Reste in ' . $id . ' entfernt (alter Inhalt gesichert, im Umbau-Reiter beim Widget „Rückgängig“).' : 'Widget nicht gespeichert.';
+        }
+        $pid = (int) $id; $post = $pid > 0 ? get_post($pid) : null;
+        if (!$post || !current_user_can('edit_post', $pid)) { return 'Artikel nicht gefunden.'; }
+        $c = (string) $post->post_content; $c2 = self::textrest_bereinigen($c);
+        if ($c2 === $c) { return 'Nichts zu ändern.'; }
+        $b = (array) get_post_meta($pid, '_sab_stelle_backup', true);
+        $b = array_slice(array_merge($b, [['ts' => time(), 'hash' => md5($c2), 'vorher' => $c, 'alt' => 'Textrest', 'neu' => 'Textrest']]), -5);
+        update_post_meta($pid, '_sab_stelle_backup', wp_slash($b)); wp_update_post(['ID' => $pid, 'post_content' => wp_slash($c2)]);
+        return 'Reste im Artikel entfernt (mit Sicherung, WordPress-Revision vorhanden).';
+    }
+
+    private static function umbau_textreste_html(): string {
+        $h = '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-textreste')) . '" style="margin:10px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="textreste"><button class="button">Nach sichtbaren Shortcode-Resten suchen</button> <span class="description">Sucht in Widgets und Artikeln nach Textstücken wie <code>image_width="300")</code>, die Besucher als Text sehen könnten.</span></form>';
+        if (self::$textreste === null) { return $h; }
+        $h .= '<div id="sab-textreste" style="max-width:1000px;padding:8px 12px;background:#fff;border:1px solid ' . (self::$textreste ? '#d63638' : '#c3c4c7') . '">';
+        if (!self::$textreste) { return $h . '<strong style="color:#1a7f37">Keine sichtbaren Shortcode-Reste gefunden.</strong></div>'; }
+        $h .= '<strong>' . count(self::$textreste) . ' Fundstelle(n):</strong><ul style="margin:6px 0 0 16px;list-style:disc">';
+        foreach (array_slice(self::$textreste, 0, 60) as $t) { $h .= '<li>' . esc_html($t['wo']) . ': <code>' . esc_html(mb_substr($t['treffer'], 0, 70)) . '</code> <a href="' . esc_url($t['link']) . '" target="_blank" rel="noopener">ansehen ↗</a> · <a href="' . esc_url($t['edit']) . '" target="_blank" rel="noopener">bearbeiten ↗</a> <form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-textreste')) . '" style="display:inline" onsubmit="return confirm(\'Reste in diesem Text entfernen? Der alte Inhalt wird gesichert.\')">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="textrest_fix"><input type="hidden" name="sab_typ" value="' . esc_attr($t['typ']) . '"><input type="hidden" name="sab_wid" value="' . esc_attr($t['id']) . '"><button class="button button-small">Reparieren</button></form></li>'; }
+        return $h . '</ul></div>';
+    }
+
     // ---------- Widgets für die Seitenleiste ----------
 
     const WIDGET_CSS = '.sab-wb,.sab-wt,.sab-wl{box-sizing:border-box;max-width:340px;margin:0 auto 18px;font-family:inherit}.sab-wb{position:relative;background:#fff;border:1px solid #dfe6d8;border-radius:14px;padding:18px 16px 14px;box-shadow:0 2px 10px rgba(40,70,30,.08);text-align:center}.sab-wb .sab-wtag{position:absolute;top:-10px;left:14px;background:#e8873a;color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 10px;border-radius:999px}.sab-wb .sab-wcover{margin:6px auto 12px}.sab-wb .sab-wcover img{display:block;margin:0 auto;max-height:210px;width:auto;max-width:70%;height:auto;border-radius:4px 10px 10px 4px;box-shadow:-4px 4px 0 #cfd9c7,0 6px 14px rgba(0,0,0,.2)}.sab-wb h4{margin:0 0 6px;font-size:17px;line-height:1.25}.sab-wb p{margin:0 0 12px;font-size:14px;line-height:1.45;color:#44543f}.sab-wb a.sab-wbtn{display:block;background:transparent;border:1px solid #c5d6c3;color:#2f7a3d!important;text-decoration:none!important;font-weight:600;padding:8px 12px;border-radius:9px;font-size:14px}.sab-wb a.sab-wbtn:hover{background:#f1f6f0}.sab-wb a.sab-wbtn:after{content:"";position:absolute;inset:0;border-radius:14px}.sab-wb a.sab-walt{position:relative;z-index:2;display:inline-block;margin-top:9px;font-size:13px;color:#2f7a3d}.sab-wb .sab-wnote{font-size:11px;color:#7b8a76;margin-top:8px}.sab-wt{background:linear-gradient(160deg,#fff7e8,#ffeccb);border-radius:14px;padding:16px;border:1px solid #f1d9a8}.sab-wt b{display:block;font-size:17px;margin-bottom:6px}.sab-wt p{margin:0 0 10px;font-size:14px;line-height:1.45}.sab-wt a{display:inline-block;background:#e8873a;color:#fff!important;text-decoration:none!important;font-weight:700;padding:9px 14px;border-radius:9px;font-size:14px}.sab-wl{background:#fff;border-radius:14px;padding:14px 16px;border:1px solid #dfe6d8}.sab-wl h4{margin:0 0 10px;font-size:16px}.sab-wl ol{margin:0;padding:0;list-style:none;counter-reset:n}.sab-wl li{counter-increment:n;display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #edf1e9;font-size:14px}.sab-wl li:first-child{border-top:0}.sab-wl li:before{content:counter(n);flex:none;width:24px;height:24px;border-radius:50%;background:#2f7a3d;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}.sab-wl li a{color:inherit;text-decoration:none}.sab-tw,.sab-tier,.sab-perch{display:none}@media (hover:hover) and (pointer:fine) and (min-width:1024px) and (prefers-reduced-motion:no-preference){.sab-wb .sab-wcover{position:relative;overflow:hidden;padding:0 14px 20px;margin:6px -14px -8px}.sab-wb .sab-wcover img{transform-origin:bottom left;animation:sabwip 20s ease-in-out infinite}.sab-wb .sab-wcover::after{content:"";position:absolute;top:0;left:-60%;width:30%;height:100%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-15deg);animation:sabgl 20s ease-in-out infinite}@keyframes sabwip{0%,38%,46%,100%{transform:none}41%{transform:rotate(-4deg) translateY(-3px)}44%{transform:rotate(1.5deg)}}@keyframes sabgl{0%,80%{left:-60%}92%,100%{left:130%}}.sab-tw{display:block;position:relative;left:50%;width:0;height:0;pointer-events:none}.sab-tier{display:block;position:absolute;left:0;top:0;width:34px;height:23px;pointer-events:none;opacity:0;z-index:2}.sab-tier svg{display:block;width:100%;height:100%;overflow:visible}.sab-tier .fw{transform-box:fill-box;transform-origin:50% 50%;animation:sabfl .12s ease-in-out infinite alternate}@keyframes sabfl{to{transform:scaleY(.3)}}.sab-tier .fd{transform-box:fill-box;transform-origin:50% 50%}@supports (offset-path:path("M0 0")){.sab-perch{display:block;position:absolute;z-index:1;pointer-events:none;opacity:0;transform-origin:50% 100%;height:30px;top:-26px;width:36px}.sab-perch svg{display:block;width:100%;height:100%;overflow:visible}.sab-pa{left:77px}.sab-pb{left:-113px}.sab-p3{width:44px;top:-27px}.sab-p3.sab-pa{left:73px}.sab-p3.sab-pb{left:-117px}.sab-t1,.sab-p1{animation-duration:90s}.sab-t2,.sab-p2{animation-duration:110s}.sab-t3,.sab-p3{animation-duration:76s}.sab-tier{offset-path:path("M-150 -70C-100 -150 -50 10 0 -80C50 -170 90 -160 150 -70C210 20 250 -20 340 -100");offset-rotate:auto;animation-name:sabfly;animation-iteration-count:infinite;animation-timing-function:ease-in-out}.sab-tier .fd{animation:sabfd 90s infinite}.sab-t2 .fd{animation-duration:110s}.sab-t3 .fd{animation-duration:76s}.sab-pa{animation-name:sabpa;animation-iteration-count:infinite}.sab-pb{animation-name:sabpb;animation-iteration-count:infinite}.sab-wb:hover .sab-tier{offset-path:path("M-150 -70C-100 -150 -50 10 0 -80C50 -170 90 -160 150 -70C210 20 250 -20 340 -100");animation:sabhov 2.6s ease-in-out 1}@keyframes sabfly{0%,19.9%{opacity:0;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:0%}20%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:0%}28%,35%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:57.7%}41%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:100%}41.3%{opacity:0;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:100%}41.4%,69.9%{opacity:0;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:0%}70%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:0%}78%,85%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:57.7%}91%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:100%}91.3%,100%{opacity:0;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:100%}}@keyframes sabfd{0%,27.5%{transform:none}28.5%,34.5%{transform:scaleY(.5)}35.5%,77.5%{transform:none}78.5%,84.5%{transform:scaleY(.5)}85.5%,100%{transform:none}}@keyframes sabpa{0%,14%{opacity:0;transform:scale(0)}18%,42%{opacity:1;transform:scale(1)}46%,100%{opacity:0;transform:scale(0)}}@keyframes sabpb{0%,64%{opacity:0;transform:scale(0)}68%,92%{opacity:1;transform:scale(1)}96%,100%{opacity:0;transform:scale(0)}}@keyframes sabhov{0%{opacity:0;offset-distance:0%}8%{opacity:1}92%{opacity:1}100%{opacity:0;offset-distance:100%}}}}';
@@ -8082,7 +8165,7 @@ JS;
         $knopf = $a['knopf'] !== '' ? (string) $a['knopf'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']);
         $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-wbtn', 'tag' => $a['tag']], $knopf);
         $alt = (get_option('sab_widget_alt') === '1' && $a['alt_text'] !== '' && esc_url((string) $a['alt_url']) !== '') ? '<a class="sab-walt" href="' . esc_url((string) $a['alt_url']) . '" target="_blank" rel="nofollow sponsored noopener">' . esc_html((string) $a['alt_text']) . '</a>' : '';
-        $titel = $a['titel'] !== '' ? (string) $a['titel'] : '';
+        $titel = $a['titel'] !== '' ? (string) $a['titel'] : (string) (self::produkte()[$asin] ?? '');   // ohne eigenen Titel: Kurzname des Produkts
         return $css . '<div class="sab-wb">' . ($a['marke'] !== '' ? '<span class="sab-wtag">' . esc_html((string) $a['marke']) . '</span>' : '') . '<div class="sab-wcover">' . $img . '</div>' . self::widget_tier($asin)
             . ($titel !== '' ? '<h4>' . esc_html($titel) . '</h4>' : '') . ($a['text'] !== '' ? '<p>' . esc_html((string) $a['text']) . '</p>' : '') . $btn . $alt
             . (get_option('sab_widget_hinweis') === '1' || $a['hinweis'] !== '' ? '<div class="sab-wnote">' . esc_html($a['hinweis'] !== '' ? (string) $a['hinweis'] : 'Werbung · Partnerlink') . '</div>' : '') . '</div>';
@@ -8561,6 +8644,10 @@ JS;
                 $meldung = $da !== '' ? self::asin_rohantwort($da) : 'Bitte eine ASIN eintragen (mehrere mit Komma, höchstens 10).';
             } elseif ($form === 'ab_widget') {
                 $meldung = self::ab_widget_speichern();
+            } elseif ($form === 'textrest_fix') {
+                $meldung = self::textrest_fix(); self::$textreste = self::textreste_finden();
+            } elseif ($form === 'textreste') {
+                self::$textreste = self::textreste_finden(); $meldung = self::$textreste ? count(self::$textreste) . ' Fundstelle(n) mit sichtbaren Shortcode-Resten, Liste im Umbau-Reiter unten bei den Widgets.' : 'Keine sichtbaren Shortcode-Reste gefunden.';
             } elseif ($form === 'widget_umbau') {
                 $meldung = self::widget_umbau_lauf();
             } elseif ($form === 'umbau_scan') {
@@ -8880,7 +8967,7 @@ JS;
             }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
-            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::umbau_widgets_html()
+            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::umbau_widgets_html() . self::umbau_textreste_html()
                . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
                . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'
