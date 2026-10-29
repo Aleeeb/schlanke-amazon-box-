@@ -1965,4 +1965,20 @@ $mKh3 = new ReflectionMethod('SAB', 'ab_karte_html'); $mKh3->setAccessible(true)
 $k3 = $mKh3->invoke(null, 'cafe0003', $GLOBALS['opt']['sab_ab']['cafe0003'], ['r' => $n3, 'v' => [], 's' => ['/x/' => ['A' => ['n' => 5, 'k' => 1]]], 't' => ['2026-10-29' => ['C' => ['n' => 5, 'k' => 1]], '2026-10-30' => ['C' => ['n' => 9, 'k' => 2]]]], true);
 ok(strpos($k3, 'Klarer Sieger: Paar A') !== false && strpos($k3, 'Variante C') !== false && strpos($k3, 'Wahrscheinlichkeit, die beste zu sein') !== false && strpos($k3, 'sicher besser') !== false, 'A/B/C: Karte zeigt drei Varianten, Gesamttest und Vergleiche');
 $GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['tr']['sab_alle_asins']);
+
+// ---- 0.92.0: Zweierblock-Test und Begründung der Vorschläge ----
+foreach (['B0ZW000001', 'B0ZW000002', 'B0ZW000003', 'B0ZW000004'] as $a_) { $GLOBALS['http'][$a_] = item($a_, [$money('1 €')]); }
+$GLOBALS['opt']['sab_ab'] = ['beef0001' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0ZW000001', 'B0ZW000002'], 'b' => ['B0ZW000003', 'B0ZW000004'], 'z' => 1]];
+$zin = $kk2('B0ZW000002') . $kk2('B0ZW000001');
+$zh = $GLOBALS['sc']['amz_karten']([], $zin);
+ok(strpos($zh, 'data-sab-abe="beef0001"') !== false && substr_count($zh, 'class="sab-ab-ep"') === 2 && strpos($zh, 'B0ZW000003') !== false && strpos($zh, 'B0ZW000004') !== false && strpos($zh, 'data-sab-var="B"') !== false && strpos($zh, 'data-sab-slot="ab-beef0001"') !== false, 'Zweierblock-Test: Block erscheint mit dem anderen Block als zweite Variante (Reihenfolge egal)');
+$zo = $GLOBALS['sc']['amz_karten']([], $kk2('B0ZW000001') . $kk2('B0ZW000009'));
+ok(strpos($zo, 'sab-ab-e') === false, 'Zweierblock-Test: andere Blöcke bleiben unberührt');
+$GLOBALS['opt']['sab_ab']['beef0001']['an'] = 0;
+ok(strpos($GLOBALS['sc']['amz_karten']([], $zin), 'sab-ab-e') === false, 'Zweierblock-Test: beendet => wieder der einfache Block');
+$GLOBALS['opt']['sab_ab'] = [];
+$mW = new ReflectionMethod('SAB', 'ab_warum'); $mW->setAccessible(true);
+$wt = $mW->invoke(null, ['asin' => 'B0ZW000003', 'quelle' => 'Ersatz-Datenbank (Kupferband)', 'passt' => 3, 'score' => 82, 'ok' => true], ['B0ZW000003' => ['n' => 14]], ['B0ZW000003']);
+ok(strpos($wt, 'selben Produktgruppe') !== false && strpos($wt, 'Score 82 von 100') !== false && strpos($wt, '14 Klicks') !== false && strpos($wt, 'lieferbar') !== false, 'Begründung nennt Gruppe, Quelle, Score, eigene Klicks und Lieferbarkeit');
+unset($GLOBALS['tr']['sab_alle_asins']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

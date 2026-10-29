@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.91.0
+ * Version: 0.92.0
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.91.0';
+    const VERSION = '0.92.0';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -119,6 +119,9 @@ final class SAB {
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_ab_schalten',    [__CLASS__, 'ajax_ab_schalten']);
         add_action('wp_ajax_sab_ab_einzel',      [__CLASS__, 'ajax_ab_einzel']);
+        add_action('wp_ajax_sab_ab_kand',        [__CLASS__, 'ajax_ab_kand']);
+        add_action('wp_ajax_sab_ab_blockkand',   [__CLASS__, 'ajax_ab_blockkand']);
+        add_action('wp_ajax_sab_ab_block',       [__CLASS__, 'ajax_ab_block']);
         add_action('wp_ajax_sab_stelle_tausch',  [__CLASS__, 'ajax_stelle_tausch']);
         add_action('wp_ajax_sab_stelle_karte',   [__CLASS__, 'ajax_stelle_karte']);
         add_action('wp_ajax_sab_stelle_zurueck', [__CLASS__, 'ajax_stelle_zurueck']);
@@ -2244,6 +2247,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         // wpautop macht aus den Zeilenumbrüchen zwischen den Karten <br> und <p>: das würde im Raster zusätzliche Spalten erzeugen
         $inhalt = preg_replace('#</?p\b[^>]*>|<br\s*/?>#i', '', (string) $inhalt);
         $n = max(1, min(4, substr_count($inhalt, '[amz_karte')));
+        if (!self::$ab_in && !self::$ab_ctx && (!is_array($a) || empty($a['ab'])) && ($za = self::ab_karten_asins_roh($inhalt)) && count($za) === 2 && ($zz = self::ab_zweier($za))) { $zh = self::ab_zweier_html($a, $inhalt, $zz, $za); if ($zh !== '') { return $zh; } }
         $ab = self::ab_karten_start($a);
         $abx = is_array($a) && !empty($a['abx']) && preg_match('/^[a-f0-9]{8}$/', (string) $a['abx']) ? (string) $a['abx'] : '';
         if ($ab) { self::$ab_ctx = ['slot' => 'ab-' . $ab['id'], 'var' => $ab['v']]; }
@@ -2353,12 +2357,12 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     public static function ord_reset($c) { self::$ord = 0; self::$ord_stack = []; return $c; }
 
     public static function ord_pre($r, $tag, $attr, $m) {
-        if (in_array($tag, self::ORD_TAGS, true) && self::ord_aktiv()) { self::$ord++; self::$ord_stack[] = self::$ord; }
+        if (in_array($tag, self::ORD_TAGS, true) && !self::$ord_aus && self::ord_aktiv()) { self::$ord++; self::$ord_stack[] = self::$ord; }
         return $r;
     }
 
     public static function ord_post($out, $tag, $attr, $m) {
-        if (!in_array($tag, self::ORD_TAGS, true) || !self::$ord_stack) { return $out; }
+        if (!in_array($tag, self::ORD_TAGS, true) || self::$ord_aus || !self::$ord_stack) { return $out; }
         $n = array_pop(self::$ord_stack);
         return str_replace('data-sab-asin="', 'data-sab-ord="' . (int) $n . '" data-sab-asin="', (string) $out);
     }
@@ -2876,11 +2880,21 @@ JS;
            . 'inf.textContent="Lade Vorschläge …";var lst=el("div","");bx.appendChild(lst);'
            . 'function los(neu){if(!confirm("A/B-Test starten? Besucher sehen dann je zur Hälfte das jetzige Produkt oder dieses. Ziel: 1000 Besuche.")){return}inf.style.color="#555";inf.textContent="Starte …";post("sab_ab_einzel",{asin:asin,neu:neu},function(r){if(r.success){location.reload()}else{inf.textContent="Nicht möglich: "+r.data;inf.style.color="#a00"}})}'
            . 'function zeile(c,sub){var row=el("div","display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eee");if(c.img){var im=el("img","width:56px;height:56px;object-fit:contain;flex:none");im.src=c.img;row.appendChild(im)}var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.name||c.asin));tx.appendChild(el("div","font-size:12px;color:#555",sub));row.appendChild(tx);var bt=el("button",BS,"Dagegen testen");bt.type="button";bt.onclick=function(){los(c.asin)};row.appendChild(bt);return row}'
-           . 'post("sab_stelle_kand",{ord:o,asin:asin},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}inf.textContent="Jetzt: "+r.data.alt+". Der Artikel bleibt unverändert; beide Produkte zählen Klicks, danach siehst du den Sieger.";'
+           . 'post("sab_ab_kand",{ord:o,asin:asin},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}inf.textContent="Jetzt: "+r.data.alt+". Vorgeschlagen werden nur Produkte, die noch nicht in diesem Artikel stehen, ohne tötende oder verletzende Produkte. Der Artikel bleibt unverändert; beide Produkte zählen Klicks, danach siehst du den Sieger.";'
            . 'var fr=el("div","display:flex;gap:8px;padding:0 0 10px");var ip=el("input","flex:1;padding:6px;border:1px solid #bbb;border-radius:6px");ip.placeholder="Eigene ASIN oder Amazon-Produktlink einfügen";var b2=el("button",BS,"Starten");b2.type="button";b2.onclick=function(){los(ip.value)};fr.appendChild(ip);fr.appendChild(b2);lst.appendChild(fr);'
-           . 'r.data.liste.forEach(function(c){lst.appendChild(zeile(c,"Score "+(c.score===null?"?":c.score)+(c.preis?" · "+c.preis:"")+" · "+c.quelle+(c.ok?"":" · nicht lieferbar")))});'
+           . 'r.data.liste.forEach(function(c){lst.appendChild(zeile(c,"Warum: "+c.warum+(c.preis?" · "+c.preis:"")))});'
            . 'var si=el("input","display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:6px;border:1px solid #bbb;border-radius:6px");si.type="search";si.placeholder="Im Bestand suchen: Name, Stichwort oder ASIN";var so=el("div","");bx.appendChild(si);bx.appendChild(so);'
            . 'si.oninput=function(){var q=si.value.toLowerCase().trim().split(/\s+/).filter(Boolean);so.textContent="";if(!q.length||si.value.trim().length<2){return}var rs=[];(r.data.ps||[]).forEach(function(p){var h=(p[0]+" "+p[1]+" "+p[2]).toLowerCase(),c=0;q.forEach(function(w){if(h.indexOf(w)>=0){c++}});if(c&&p[0]!==asin){rs.push([c,p])}});rs.sort(function(a,b){return b[0]-a[0]||b[1][3]-a[1][3]});rs.slice(0,8).forEach(function(x){var p=x[1];so.appendChild(zeile({asin:p[0],name:p[1]||p[2]||p[0]},(p[3]>=0?"Score "+p[3]+" · ":"")+p[0]))});if(!rs.length){so.appendChild(el("p","margin:6px 0;color:#555","Kein Treffer im Bestand."))}}})}'
+           . 'function abBlock(k,as,id){var ov=el("div","position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto");'
+           . 'var bx=el("div","background:#fff;color:#222;max-width:680px;width:100%;border-radius:10px;padding:18px;font:14px/1.4 sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)");ov.appendChild(bx);ov.onclick=function(e){if(e.target===ov){ov.remove()}};document.body.appendChild(ov);'
+           . 'var BS="padding:6px 12px;border:0;border-radius:6px;background:#8a5a00;color:#fff;cursor:pointer;font-weight:600";bx.appendChild(el("h3","margin:0 0 6px;font-size:18px","A/B-Test: diesen Zweierblock gegen einen anderen"));var inf=el("p","margin:0 0 10px;color:#555","");bx.appendChild(inf);'
+           . 'if(id){inf.textContent="Für diesen Block läuft ein Test. Zahlen: Plugin, Reiter A/B-Tests und Statistik.";var st=el("button",BS,"Test beenden");st.type="button";st.onclick=function(){abAus(id,st)};bx.appendChild(st);return}'
+           . 'inf.textContent="Lade Vorschläge …";var lst=el("div","");bx.appendChild(lst);'
+           . 'function los(b){if(!confirm("A/B-Test starten? Besucher sehen dann je zur Hälfte den jetzigen oder den anderen Zweierblock. Ziel: 1000 Besuche.")){return}inf.style.color="#555";inf.textContent="Starte …";post("sab_ab_block",{a:as.join(","),b:b.join(",")},function(r){if(r.success){location.reload()}else{inf.textContent="Nicht möglich: "+r.data;inf.style.color="#a00"}})}'
+           . 'post("sab_ab_blockkand",{},function(r){if(!r.success){inf.textContent=r.data;inf.style.color="#a00";return}inf.textContent=r.data.liste.length?"Vorschläge: Zweierblöcke, die auf deinen Seiten schon vorkommen, mit gutem Score, nicht schon in diesem Artikel, ohne tötende oder verletzende Produkte.":"Keine passenden Blöcke gefunden. Trage unten zwei ASINs ein.";'
+           . 'r.data.liste.forEach(function(c){var row=el("div","display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eee");c.prod.forEach(function(p){if(p.img){var im=el("img","width:56px;height:56px;object-fit:contain;flex:none");im.src=p.img;row.appendChild(im)}});var tx=el("div","flex:1;min-width:0");tx.appendChild(el("strong","",c.prod.map(function(p){return p.name||p.asin}).join(" + ")));tx.appendChild(el("div","font-size:12px;color:#555","Warum: "+c.warum));row.appendChild(tx);var bt=el("button",BS,"Dagegen testen");bt.type="button";bt.onclick=function(){los(c.asins)};row.appendChild(bt);lst.appendChild(row)});'
+           . 'var fr=el("div","display:flex;gap:8px;padding:10px 0 0");var ip=el("input","flex:1;padding:6px;border:1px solid #bbb;border-radius:6px");ip.placeholder="Zwei ASINs oder Amazon-Links, mit Komma getrennt";var b2=el("button",BS,"Starten");b2.type="button";b2.onclick=function(){los(ip.value.split(","))};fr.appendChild(ip);fr.appendChild(b2);bx.appendChild(fr)})}'
+           . 'var zb=document.querySelectorAll(".sab-karten");for(var zi=0;zi<zb.length;zi++){(function(k){if(k.hasAttribute("data-sab-abx")||(k.hasAttribute("data-sab-ab")&&!k.closest(".sab-ab-e"))){return}var cs=k.querySelectorAll(":scope > .sab-karte");if(cs.length!==2){return}var v=k.getAttribute("data-sab-abv");if(v==="B"){return}var as=[];for(var ci=0;ci<2;ci++){var l=cs[ci].querySelector("a[data-sab-asin]");if(l){as.push(l.getAttribute("data-sab-asin"))}}if(as.length!==2){return}var w=k.closest(".sab-ab-e");abBtn(k,4,1,w?"⚖ Block-Test läuft":"⚖ Block testen","Diesen Zweierblock gegen einen anderen testen (nur für dich sichtbar)",function(){abBlock(k,as,w?w.getAttribute("data-sab-abe"):"")})})(zb[zi])}'
            . 'var ks=document.querySelectorAll(".sab-karte");for(var qi=0;qi<ks.length;qi++){(function(k){var l=k.querySelector("a[data-sab-ord]");if(!l||k.closest(".sab-karten[data-sab-ab]")){return}var vb=k.closest(".sab-ab-ep");if(vb&&vb.getAttribute("data-v")==="B"){return}var w=k.closest(".sab-ab-e"),o=l.getAttribute("data-sab-ord"),as=l.getAttribute("data-sab-asin");if(getComputedStyle(k).position==="static"){k.style.position="relative"}abBtn(k,56,0,w?"⚖ A/B läuft":"⚖ A/B-Test","Dieses Produkt gegen ein anderes testen (nur für dich sichtbar)",function(){abOeffne(o,as,w?w.getAttribute("data-sab-abe"):"")})})(ks[qi])}'
            . '})();</script>';
     }
@@ -3382,6 +3396,111 @@ JS;
         return 'A/B' . ($c !== '' ? '/C' : '') . '-Test gestartet: ' . $asin . ' gegen ' . $neu . ($c !== '' ? ' gegen ' . $c : '') . '. Die Zahlen erscheinen im Reiter A/B-Tests.';
     }
 
+
+    // ---- Zweierblock-Test: ein Zweierblock gegen einen anderen Zweierblock (nicht im Artikel, nur zur Ausgabe) ----
+    private static bool $ord_aus = false;
+
+    private static function ab_karten_asins_roh(string $inhalt): array {
+        preg_match_all('#\[amz_karte\b[^\]]*\]#i', $inhalt, $m);
+        return self::ab_karten_asins($m[0]);
+    }
+
+    private static function ab_zweier(array $asins): ?array {
+        sort($asins);
+        foreach (self::ab_aktiv() as $id => $o) {
+            if (empty($o['z'])) { continue; }
+            $a = (array) ($o['a'] ?? []); sort($a);
+            if ($a === $asins && count((array) ($o['b'] ?? [])) === 2) { return ['id' => $id, 'b' => array_values((array) $o['b'])]; }
+        }
+        return null;
+    }
+
+    private static function ab_zweier_html($a, string $inhalt, array $zz, array $asins): string {
+        self::$ab_in = true; $o = ++self::$ab_n;
+        $ha = self::sc_karten(['ab' => $zz['id'], 'abv' => 'A', 'abo' => (string) $o, 'abi' => '1'], $inhalt);
+        $ib = ''; foreach ($zz['b'] as $x) { $ib .= '[amz_karte asin="' . $x . '"]'; }
+        self::$ord_aus = true;   // die eingeblendeten Karten zählen nicht in der Reihenfolge der Stellen im Artikel
+        $hb = self::sc_karten(['ab' => $zz['id'], 'abv' => 'B', 'abo' => (string) $o, 'abi' => '1'], $ib);
+        self::$ord_aus = false; self::$ab_in = false;
+        return $ha === '' || $hb === '' ? '' : self::ab_huelle($zz['id'], [$ha, $hb], $o);
+    }
+
+    /** Grund, warum ein Produkt als Gegner vorgeschlagen wird (aus Quelle, Passung, Score, eigenen Klicks). */
+    private static function ab_warum(array $c, array $kz, array $gruppe): string {
+        $q = (string) ($c['quelle'] ?? ''); $t = [];
+        if (in_array($c['asin'], $gruppe, true)) { $t[] = 'gehört zur selben Produktgruppe'; }
+        elseif ((int) ($c['passt'] ?? 0) >= 2) { $t[] = 'gleiche Produktart'; }
+        elseif ((int) ($c['passt'] ?? 0) === 1) { $t[] = 'ähnlicher Name'; }
+        $t[] = 'Quelle: ' . $q;
+        if (isset($c['score']) && $c['score'] !== null) { $t[] = 'Score ' . (int) $c['score'] . ' von 100'; }
+        $k = (int) ($kz[$c['asin']]['n'] ?? 0);
+        $t[] = $k > 0 ? $k . ' Klicks bisher auf deinen Seiten' : 'noch keine Klicks bei dir (neu im Test)';
+        $t[] = !empty($c['ok']) ? 'lieferbar' : 'Lieferbarkeit unklar';
+        return implode(' · ', $t);
+    }
+
+    /** Frontend: Gegner für ein einzelnes Produkt vorschlagen (wie beim Tauschen, aber ohne Produkte, die schon im Artikel stehen, mit Begründung). */
+    public static function ajax_ab_kand(): void {
+        [$post, $c_, , , $tag_, $pos_, , $asin] = self::stelle_pruefen();
+        $land = self::land(''); $d = self::uebersicht_daten($land, false); $trotz = (array) get_option('sab_trotz', []);
+        $fund = self::fundstellen([$asin]); $namen = self::produkte();
+        $name = ($namen[$asin] ?? '') ?: self::kurzname_aus_titel((string) ($d['items'][$asin]['titel'] ?? ''));
+        $k = self::austausch_kandidaten($asin, (string) $name, (array) $d, $trotz, $fund, 12);
+        $kz = self::klickzahlen(); $out = [];
+        $gruppe = []; foreach (self::gruppen() as $liste) { if (in_array($asin, $liste, true)) { $gruppe = array_merge($gruppe, $liste); } }
+        foreach ($k['liste'] as $c) {
+            if (stripos($c_, (string) $c['asin']) !== false) { continue; }   // steht schon im Artikel: kein Gegner
+            $x = (array) $c['x'];
+            $out[] = ['asin' => $c['asin'], 'name' => ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? '')), 'score' => $c['score'], 'preis' => (string) ($x['preis'] ?? ''), 'img' => !empty($x['bilder'][0]) ? (string) $x['bilder'][0] : '', 'quelle' => $c['quelle'], 'ok' => (bool) $c['ok'], 'warum' => self::ab_warum($c, $kz, $gruppe)];
+        }
+        $ps = []; foreach (self::alle_asins() as $a_) { if (stripos($c_, (string) $a_) !== false) { continue; } $ps[] = [(string) $a_, (string) ($namen[$a_] ?? ''), mb_substr((string) ($d['items'][$a_]['titel'] ?? ''), 0, 90), isset($d['items'][$a_]) ? (int) self::score(array_merge((array) $d['items'][$a_], ['trotz' => isset($trotz[$a_])]))[0] : -1]; }
+        wp_send_json_success(['alt' => $name ?: $asin, 'liste' => $out, 'ps' => $ps]);
+    }
+
+    /** Frontend: Gegner für einen Zweierblock vorschlagen: andere Zweierblöcke, die auf deiner Webseite schon vorkommen, mit gutem Score. */
+    public static function ajax_ab_blockkand(): void {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0);
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $post = get_post($pid); if (!$post) { wp_send_json_error('Artikel nicht gefunden.'); }
+        $c_ = (string) $post->post_content; $land = self::land(''); $d = self::uebersicht_daten($land, false); $items = (array) ($d['items'] ?? []); $namen = self::produkte(); $trotz = (array) get_option('sab_trotz', []); $kz = self::klickzahlen();
+        $bl = self::bloecke_daten(); $out = [];
+        foreach ((array) ($bl['bloecke'][2] ?? []) as $b) {
+            $as = (array) $b['asins']; if (count($as) !== 2) { continue; }
+            $skip = false; $sum = 0; $kl = 0; $prod = [];
+            foreach ($as as $a) {
+                $x = $items[$a] ?? null; $tc = ($namen[$a] ?? '') . ' ' . (string) ($x['titel'] ?? '');
+                if (!$x || stripos($c_, (string) $a) !== false || self::toetend($tc) || empty($x['lieferbar'])) { $skip = true; break; }
+                $sc = (int) self::score(array_merge((array) $x, ['trotz' => isset($trotz[$a])]))[0]; $sum += $sc; $kl += (int) ($kz[$a]['n'] ?? 0);
+                $prod[] = ['asin' => $a, 'name' => ($namen[$a] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? '')), 'img' => !empty($x['bilder'][0]) ? (string) $x['bilder'][0] : '', 'score' => $sc];
+            }
+            if ($skip) { continue; }
+            $out[] = ['asins' => $as, 'prod' => $prod, 'rang' => $sum / 2 + min(10, (int) $b['n']), 'warum' => 'Steht als Zweierblock schon in ' . count((array) $b['posts']) . ' Artikel(n) · Ø Score ' . (int) round($sum / 2) . ' von 100 · beide lieferbar · ' . $kl . ' Klicks bisher · keines steht schon in diesem Artikel'];
+        }
+        usort($out, fn($p, $q) => $q['rang'] <=> $p['rang']);
+        wp_send_json_success(['liste' => array_slice($out, 0, 6)]);
+    }
+
+    /** Frontend: Zweierblock-Test starten. */
+    public static function ajax_ab_block(): void {
+        check_ajax_referer('sab_stelle', 'n');
+        $pid = (int) ($_POST['post'] ?? 0);
+        if (!$pid || !current_user_can('edit_post', $pid)) { wp_send_json_error('Keine Berechtigung.'); }
+        $post = get_post($pid);
+        $a = array_values(array_unique(array_filter(array_map([__CLASS__, 'asin'], explode(',', (string) wp_unslash($_POST['a'] ?? ''))))));
+        $b = array_values(array_unique(array_filter(array_map([__CLASS__, 'asin_aus_text'], array_map('trim', explode(',', (string) wp_unslash($_POST['b'] ?? '')))))));
+        if (!$post || count($a) !== 2 || count($b) !== 2 || array_intersect($a, $b)) { wp_send_json_error('Bitte zwei andere Produkte für den zweiten Block wählen.'); }
+        foreach ($a as $x) { if (stripos((string) $post->post_content, $x) === false) { wp_send_json_error('Der Block steht nicht mehr so im Artikel. Bitte die Seite neu laden.'); } }
+        if (self::ab_zweier($a)) { wp_send_json_error('Für diesen Block läuft schon ein Test.'); }
+        foreach ($b as $x) { if (!self::neues_produkt_vorladen($x)) { wp_send_json_error('Amazon liefert zu ' . $x . ' gerade kein Bild oder keine Daten. Nicht gestartet.'); } }
+        $sa = $a; sort($sa); $sb = $b; sort($sb);
+        $id = substr(md5('z|' . implode(',', $sa) . '|' . implode(',', $sb)), 0, 8);
+        $opt = self::ab_optionen();
+        $opt[$id] = ['an' => 1, 'ziel' => self::AB_ZIEL, 'start' => gmdate('Y-m-d'), 'a' => $a, 'b' => $b, 'z' => 1];
+        update_option('sab_ab', $opt, false); delete_transient('sab_alle_asins');
+        wp_send_json_success(['id' => $id]);
+    }
+
     /** Frontend-Knopf: Test an oder aus. Viererblock starten (Block muss im Artikel stehen) oder einen laufenden Test beenden. */
     public static function ajax_ab_schalten(): void {
         check_ajax_referer('sab_stelle', 'n');
@@ -3691,7 +3810,7 @@ JS;
         $h .= '<table class="widefat striped" style="max-width:1100px"><thead><tr><th style="width:60px">Test</th><th>Paar A</th><th>Paar B</th><th>Seiten</th><th style="width:90px">Ziel</th></tr></thead><tbody>';
         foreach ($ids as $id) {
             $o = $opt[$id] ?? []; $asins = $scan[$id]['asins'] ?? ['A' => (array) ($o['a'] ?? []), 'B' => (array) ($o['b'] ?? [])];
-            $h .= '<tr><td data-l="Test"><label><input type="checkbox" name="sab_ab_an[' . esc_attr($id) . ']" value="1"' . (!empty($o['an']) ? ' checked' : '') . '> <strong>an</strong></label><br><small><code>' . esc_html($id) . '</code></small>' . (!empty($o['e']) ? '<br><small>Einzelprodukt</small>' : '') . (!empty($o['w']) ? '<br><small>Widget</small>' : '') . '</td>';
+            $h .= '<tr><td data-l="Test"><label><input type="checkbox" name="sab_ab_an[' . esc_attr($id) . ']" value="1"' . (!empty($o['an']) ? ' checked' : '') . '> <strong>an</strong></label><br><small><code>' . esc_html($id) . '</code></small>' . (!empty($o['e']) ? '<br><small>Einzelprodukt</small>' : '') . (!empty($o['w']) ? '<br><small>Widget</small>' : '') . (!empty($o['z']) ? '<br><small>Zweierblock</small>' : '') . '</td>';
             foreach (['A', 'B'] as $v) { $h .= '<td data-l="Paar ' . $v . '">'; foreach ($asins[$v] as $a) { $h .= self::ab_produkt_html((string) $a); } if ($v === 'B' && !empty($o['c'])) { $h .= '<p class="sab-ab-klein" style="margin:6px 0 2px"><strong>Variante C:</strong></p>'; foreach ((array) $o['c'] as $a) { $h .= self::ab_produkt_html((string) $a); } } $h .= '</td>'; }
             $s = $scan[$id]['seiten'] ?? [];
             $h .= '<td data-l="Seiten">' . ($s ? self::bloecke_artikel_links($s, 6) : '<em>nicht mehr gefunden</em>') . '</td>'
