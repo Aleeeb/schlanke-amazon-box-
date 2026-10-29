@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.17
+ * Version: 0.92.18
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.17';
+    const VERSION = '0.92.18';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2265,12 +2265,12 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         return implode(' ', empty($gestrichen) ? self::marke_vorn($w) : $w);
     }
 
-    /** Kurztitel für Karten, Widgets und Tauschvorschläge: ohne Markenmüll, auf die Produktart gekürzt, am Ende wenn vorhanden eine Zahl, z. B. „Schneckenzaun-Set, 14-teilig“. */
-    public static function kurztitel(string $t, int $max = 48): string {
+    /** Kurztitel für Karten, Widgets und Tauschvorschläge: 2 bis 5 Wörter Produktart, nach einem geraden Strich eine Zahl oder kurze Erklärung (nur wenn vorhanden, nie erzwungen), insgesamt etwa 52 Zeichen, z. B. „Schneckenzaun Set Kupfer | 14-teilig“. */
+    public static function kurztitel(string $t, int $max = 52): string {
         $e = explode(' | ', self::kurzname_aus_titel($t), 2); $art = $e[0]; $zahl = $e[1] ?? '';
-        $platz = $max - ($zahl !== '' ? mb_strlen($zahl) + 2 : 0);
+        $platz = $max - ($zahl !== '' ? mb_strlen($zahl) + 3 : 0);
         if (mb_strlen($art) > $platz) { $art = rtrim(mb_substr($art, 0, max(12, $platz)), " ,.-–"); $art = preg_replace('/[\s,]+\S*$/u', '', $art) ?: $art; }
-        return trim($art . ($zahl !== '' ? ', ' . $zahl : ''), " ,.;:-–");
+        return trim($art . ($zahl !== '' ? ' | ' . $zahl : ''), " ,.;:-–|");
     }
 
     public static function sc_titel($a, $inhalt = ''): string {
@@ -7233,7 +7233,7 @@ JS;
     private static function kurzname_wahl_html(string $alt, array $c, array $namen, array $x): string {
         if (($namen[$c['asin']] ?? '') !== '' || empty($x['titel'])) { return ''; }
         $v = self::kurzname_varianten((string) $x['titel']); if (!$v) { return ''; }
-        $h = '<span class="sab-kn" style="display:block;margin-top:6px;border-top:1px dashed #ccc;padding-top:4px"><small><strong>Name im Artikel:</strong> kurz, ohne Marke, wenn passend mit Zahl am Ende (z. B. „Schneckenzaun-Set, 14-teilig“)</small>';
+        $h = '<span class="sab-kn" style="display:block;margin-top:6px;border-top:1px dashed #ccc;padding-top:4px"><small><strong>Name im Artikel:</strong> kurz, ohne Marke, wenn passend mit Zahl am Ende (z. B. „Schneckenzaun Set Kupfer | 14-teilig“, ohne erzwungene Zahl)</small>';
         foreach ($v as $i => $n) { $h .= '<br><label style="display:inline"><input type="radio" name="sab_kn[' . esc_attr($alt) . '][' . esc_attr($c['asin']) . ']" value="' . esc_attr($n) . '"' . ($i === 0 ? ' checked' : '') . '> <small>' . esc_html($n) . '</small></label>'; }
         return $h . '</span>';
     }
