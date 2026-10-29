@@ -2033,4 +2033,5 @@ SAB::belassen_setzen('B0OKAY0002', true);
 ok(isset(get_option('sab_austausch_okay', [])['B0OKAY0002']), 'Okay-belassen: wird gemerkt');
 SAB::belassen_setzen('B0OKAY0002', false);
 ok(!isset(get_option('sab_austausch_okay', [])['B0OKAY0002']), 'Okay-belassen: „Wieder prüfen“ nimmt es zurück');
+ok(strpos(SAB::kurztitel('Gardena Schlauchwagen 20 m Gartenschlauch Set für Garten'), 'Gardena') === 0 && strpos(SAB::kurztitel('Zoomfix Schneckenband Kupfer 5 m selbstklebend'), 'Zoomfix') === false && strpos(SAB::kurztitel('Schneckenzaun Set aus Kupfer 14-teilig'), 'Schneckenzaun') === 0, 'Kurztitel: weltbekannte Marke bleibt, unbekannte Firma weg, Produktwort bleibt (' . SAB::kurztitel('Gardena Schlauchwagen 20 m Gartenschlauch Set für Garten') . ' / ' . SAB::kurztitel('Zoomfix Schneckenband Kupfer 5 m selbstklebend') . ' / ' . SAB::kurztitel('Schneckenzaun Set aus Kupfer 14-teilig') . ')');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

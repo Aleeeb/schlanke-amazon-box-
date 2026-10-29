@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.16
+ * Version: 0.92.17
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.16';
+    const VERSION = '0.92.17';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2226,19 +2226,43 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     }
 
     /** [amz_titel asin="…"]: Produktname als reiner Text (Kurzname, sonst Amazon-Titel); folgt automatisch einem Austausch. */
+    /** Weltbekannte Marken, die im Kurztitel stehen bleiben dürfen (klein geschrieben). Weitere Marken: Option sab_bekannte_marken, kommagetrennt. */
+    const BEKANNTE_MARKEN = ['gardena', 'bosch', 'makita', 'karcher', 'kärcher', 'fiskars', 'wolf-garten', 'compo', 'neudorff', 'celaflor', 'dehner', 'oase', 'heissner', 'philips', 'samsung', 'sony', 'apple', 'logitech', 'brother', 'hp', 'canon', 'epson', 'ikea', 'lego', 'tesa', 'leifheit', 'wmf', 'fackelmann', 'black+decker', 'dewalt', 'einhell', 'stihl', 'husqvarna', 'wolfcraft', 'hornbach', 'bauhaus', 'schleich', 'playmobil', 'ravensburger', 'kosmos', 'tetra', 'sera', 'jbl', 'hobby', 'trixie', 'zolux', 'royal canin', 'ferplast', 'kong', 'vitakraft', 'sanicat', 'cat\'s best', 'beaphar', 'frontline', 'advantage', 'tick twister', 'ticktwister', 'duracell', 'varta', 'energizer', 'leatherman', 'victorinox', 'opinel', 'bresser', 'zeiss', 'swarovski', 'nikon', 'olympus', 'steiner', 'garmin', 'gopro', 'xiaomi', 'anker', 'ugreen', 'nabu', 'nabu', 'bio', 'rapid', 'wolf', 'pattex', 'uhu', 'loctite'];
+    /** Wortteile, an denen man ein Produktwort erkennt (dann ist das erste Wort keine Marke). */
+    const PRODUKT_STAMM = ['zaun', 'band', 'netz', 'schutz', 'folie', 'vlies', 'falle', 'ring', 'kragen', 'box', 'haus', 'kasten', 'nest', 'futter', 'trog', 'pumpe', 'kabel', 'draht', 'streu', 'kupfer', 'schnecke', 'maulwurf', 'teich', 'beet', 'garten', 'pflanz', 'blumen', 'vogel', 'zecken', 'zange', 'karte', 'pinzette', 'spray', 'mittel', 'pulver', 'granulat', 'set', 'kit', 'paket', 'buch', 'lupe', 'fernglas', 'kamera', 'lampe', 'licht', 'kamera', 'hochbeet', 'rasen', 'erde', 'dünger', 'saat', 'samen', 'brunnen', 'filter', 'kescher', 'handschuh', 'schere', 'spaten', 'harke', 'rechen', 'cuello', 'malla', 'gallinero', 'madera', 'nido', 'cinta', 'valla', 'red', 'trampa', 'collar', 'caja', 'casa', 'comida', 'bomba', 'cable', 'alambre', 'cobre', 'caracol', 'topo', 'estanque', 'jard', 'planta', 'flor', 'pájaro', 'garrapata', 'pinza', 'tarjeta', 'libro', 'lupa', 'prismático', 'cámara', 'lámpara', 'tierra', 'abono', 'semilla', 'filtro', 'guante', 'tijera', 'pala', 'rastrillo', 'bande', 'clôture', 'filet', 'piège', 'boîte', 'maison', 'pompe', 'cuivre', 'escargot', 'taupe', 'étang', 'jardin', 'oiseau', 'tique', 'pince', 'livre', 'loupe', 'jumelle', 'fence', 'tape', 'trap', 'box', 'house', 'pump', 'wire', 'copper', 'snail', 'mole', 'pond', 'garden', 'bird', 'tick', 'tweezers', 'book', 'camera', 'light', 'soil', 'seed', 'filter', 'glove'];
+
+    /** Entfernt unbekannte Firmen-/Markennamen am Anfang (ein bis zwei Wörter); weltbekannte Marken und Produktwörter bleiben. */
+    public static function marke_vorn(array $w): array {
+        $bek = self::BEKANNTE_MARKEN;
+        foreach (preg_split('/\s*,\s*/u', mb_strtolower((string) get_option('sab_bekannte_marken', '')), -1, PREG_SPLIT_NO_EMPTY) as $x) { $bek[] = $x; }
+        $n = 0;
+        while (count($w) > 2 && $n++ < 1) {   // höchstens ein Wort: lieber eine Marke zu viel stehen lassen als ein Produktwort zu streichen
+            $f = trim($w[0], " ,.;:-–|()[]„“\"'*®™"); $fl = mb_strtolower($f);
+            if ($f === '' ) { array_shift($w); continue; }
+            if (in_array($fl, $bek, true) || (isset($w[1]) && in_array($fl . ' ' . mb_strtolower(trim($w[1], " ,.;:-–|")), $bek, true))) { break; }
+            $produkt = false; foreach (self::PRODUKT_STAMM as $st) { if (mb_strpos($fl, $st) !== false) { $produkt = true; break; } }
+            if ($produkt || preg_match('/^\d/u', $f)) { break; }
+            $kapital = preg_match('/^\p{Lu}/u', $f) === 1; $trenner = isset($w[0]) && preg_match('/[-–|:]$/u', $w[0]) || (isset($w[1]) && preg_match('/^[-–|:]$/u', $w[1]));
+            // Unbekanntes Wort am Anfang, kein Produktwort: Firmen-/Markenname (Großbuchstaben, Mischschreibung, mit Trenner oder einfach unbekannt und groß geschrieben) raus
+            if ($kapital || $trenner || preg_match('/[A-Z].*[A-Z]/', $f)) { array_shift($w); if (isset($w[0]) && preg_match('/^[-–|:]$/u', $w[0])) { array_shift($w); } continue; }
+            break;
+        }
+        return $w;
+    }
+
     /** Markenmüll am Anfang eines Amazon-Titels entfernen: Wörter in Fremdschrift (z. B. chinesisch), GROSSBUCHSTABEN-Marken, Buchstaben-Zahlen-Codes. Sonderzeichen werden zu Leerzeichen. */
     public static function titel_ohne_marke(string $t): string {
         $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($t), ENT_QUOTES, 'UTF-8')));
         $t = trim((string) preg_replace('/[^\p{Latin}\p{N}\p{P}\p{S}\s]+/u', ' ', $t));   // Fremdschrift überall raus
         $t = trim((string) preg_replace('/\s+/u', ' ', $t));
-        $w = $t === '' ? [] : preg_split('/\s+/u', $t);
+        $w = $t === '' ? [] : preg_split('/\s+/u', $t); $gestrichen = false;
         while (count($w) > 2) {
             $f = trim($w[0], " ,.;:-–|()[]„“\"'*®™");
             $marke = $f === '' || (preg_match('/^[A-Z0-9]{3,9}$/u', $f) === 1 && preg_match('/[A-Z]/', $f) === 1) || (preg_match('/\d/u', $f) && preg_match('/[A-Za-z]/', $f) && mb_strlen($f) <= 8 && !preg_match('/^\d+[\p{L}]{0,3}$/u', $f));
             if (!$marke) { break; }
-            array_shift($w);
+            array_shift($w); $gestrichen = true;
         }
-        return implode(' ', $w);
+        return implode(' ', empty($gestrichen) ? self::marke_vorn($w) : $w);
     }
 
     /** Kurztitel für Karten, Widgets und Tauschvorschläge: ohne Markenmüll, auf die Produktart gekürzt, am Ende wenn vorhanden eine Zahl, z. B. „Schneckenzaun-Set, 14-teilig“. */
@@ -5842,8 +5866,7 @@ JS;
         }
         $t0 = $t;
         if (preg_match('/^\S+(?:\s\S+)?\s[-–|:]\s+(.{12,})$/u', $t, $mb)) { $t = $mb[1]; }   // „Marke – Produktname“: Marke vorn weglassen
-        $w = preg_split('/\s+/u', $t);
-        if (count($w) > 2 && (preg_match('/^[A-ZÄÖÜ0-9][A-ZÄÖÜ0-9]+$/u', $w[0]) || preg_match('/^\p{Lu}\p{L}*\p{Lu}/u', $w[0]) || preg_match('/®|™/u', $w[0]))) { array_shift($w); }   // Marke vorn
+        $w = preg_split('/\s+/u', $t);   // unbekannte Marke vorn ist schon in titel_ohne_marke() entfernt
         $art = trim(preg_split('/\s[-–|]\s|[,:(]|\s(?:con|para|contra|mit|für|de\s+\d)\s/iu', implode(' ', $w), 2)[0]);
         $art = preg_replace('/\s*\d.*$/u', '', $art);   // ab der ersten Zahl abschneiden
         $art = trim(implode(' ', array_slice(preg_split('/\s+/u', $art), 0, 5)), " -–|,");
