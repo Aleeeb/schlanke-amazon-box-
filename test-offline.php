@@ -1781,4 +1781,8 @@ $GLOBALS['opt']['widget_block'] = [3 => ['content' => '<p><a href="https://www.e
 $wf2 = $mWf->invoke(null);
 ok(!isset($wf2['block-3']) && isset($wf2['block-4']) && $wf2['block-4']['treffer'] !== '', 'Widgets: eBay-Link (auch mit „amazon“ im Suchwort) wird nicht als Amazon erkannt, Amazon-Link mit Fundstelle');
 unset($GLOBALS['opt']['widget_block']);
+// 0.89.59: Links je Artikel im Umbau, Score-Abfall nur als Hinweis
+$mUl = new ReflectionMethod('SAB', 'umbau_links_html'); $mUl->setAccessible(true);
+$ul = (string) $mUl->invoke(null, 7);
+ok(strpos($ul, 'Kurzlink') !== false && strpos($ul, 'fester Link') !== false && strpos($ul, 'sab_zeige=B0BBBBBBB1') !== false && strpos($ul, 'action=edit') !== false, 'Umbau: Kurzlinks und feste Links je Artikel mit Sprung ins Frontend und in den Editor');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

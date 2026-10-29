@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.58
+ * Version: 0.89.59
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.58';
+    const VERSION = '0.89.59';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -994,23 +994,26 @@ final class SAB {
 
     /** Prüft alle verwendeten Produkte auf Absturz oder Nicht-Lieferbarkeit und merkt sich die Alarme samt bereitstehendem Ersatz. @return array<string,array> */
     public static function alarm_berechnen(): array {
-        $land = self::land(''); $d = (array) self::uebersicht_daten($land, false); $v = (array) get_option('sab_verlauf', []); $trotz = (array) get_option('sab_trotz', []); $alt = (array) get_option('sab_alarm', []); $neu = [];
+        $land = self::land(''); $d = (array) self::uebersicht_daten($land, false); $v = (array) get_option('sab_verlauf', []); $trotz = (array) get_option('sab_trotz', []); $alt = (array) get_option('sab_alarm', []); $neu = []; $abfall = [];
         foreach (self::alle_asins() as $a) {
             if (!empty($d['fehler'])) { continue; }
             // Rot oben nur, wenn Amazon das Produkt nicht mehr kennt (Bildausfall meldet bild_hinweis). Score-Abfall und „nicht lieferbar“ sind nur Anlass zum Tausch und laufen über den Reiter Austausch.
             $grund = isset($d['items'][$a]) || !self::asin_weg((string) $a, $land) ? '' : 'Amazon kennt das Produkt nicht mehr';
+            if (isset($d['items'][$a]) && ($f = self::alarm_fall((array) ($v[$a] ?? []))) !== null) { $abfall[$a] = $f[1]; }   // nur als kleiner Hinweis im Plugin
             if ($grund === '') { continue; }
             $er = self::ersatz_fuer($a, $land); arsort($er); $er = array_keys($er);   // „neu“ vor „geprüft“ sortiert alphabetisch, daher unten gezielt geprüfte zuerst
             $ge = array_values(array_filter($er, fn($b) => (self::ersatz_fuer($a, $land)[$b] ?? '') === 'geprüft'));
             $neu[$a] = ['seit' => $alt[$a]['seit'] ?? time(), 'grund' => $grund, 'ersatz' => array_slice(array_merge($ge, array_diff($er, $ge)), 0, 3)];
         }
-        update_option('sab_alarm', $neu, false);
+        update_option('sab_alarm', $neu, false); update_option('sab_score_abfall', $abfall, false);
         return $neu;
     }
 
     /** Roter Hinweis auf den Seiten des Plugins, solange Produkte offen sind, die Amazon nicht mehr kennt. */
     public static function alarm_hinweis(): void {
         if (!function_exists('current_user_can') || !current_user_can('manage_options') || strpos((string) ($_GET['page'] ?? ''), 'sab') !== 0) { return; }
+        $ab_ = (array) get_option('sab_score_abfall', []);
+        if ($ab_) { echo '<div class="notice notice-info inline" style="padding:4px 12px;margin:6px 0"><p style="margin:2px 0"><small>' . count($ab_) . ' Produkt(e) mit Score-Abfall (nur ein Hinweis, kein Muss): <a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">im Austausch ansehen</a></small></p></div>'; }
         $al = (array) get_option('sab_alarm', []); if (!$al) { return; }
         $namen = self::produkte(); $li = '';
         foreach (array_slice($al, 0, 10, true) as $a => $e) {
@@ -5401,6 +5404,30 @@ JS;
         return $out;
     }
 
+    /** Alle noch offenen festen Links, Kurzlinks und AAWP-Platzhalter eines Artikels mit Sprung ins Frontend und in den Editor (markiert die Stelle). */
+    private static function umbau_links_html(int $pid): string {
+        $post = get_post($pid); if (!$post) { return ''; }
+        $c = (string) preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', (string) $post->post_content);
+        $items = [];
+        if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                $url = html_entity_decode($x[2]); $txt = trim(html_entity_decode(strip_tags($x[3]))); if ($txt === '') { $txt = '(Bild)'; }
+                if (($u = self::umbau_url($x[2])) !== null) { $items[] = ['fest', $txt, $url, (string) $u[1]]; }
+                elseif (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/([A-Za-z0-9]+)#i', $url, $km) && !self::kurz_ok($x[2])) { $items[] = ['kurz', $txt, $url, (string) $km[1]]; }
+            }
+        }
+        if (preg_match_all('/\[(?:aawp|amazon)\b[^\]]*\b(?:box|link|fields)=["\']([A-Za-z0-9]{10})/i', $c, $am)) { foreach ($am[1] as $a_) { $items[] = ['aawp', '[aawp-Platzhalter]', '', strtoupper($a_)]; } }
+        if (!$items) { return ''; }
+        $kennung_n = []; $li = '';
+        foreach (array_slice($items, 0, 30) as [$art, $txt, $url, $k]) {
+            $k = preg_replace('/[^A-Za-z0-9]/', '', $k); $kennung_n[$k] = ($kennung_n[$k] ?? 0) + 1;
+            $fe = add_query_arg(['sab_zeige' => $k, 'sab_nr' => $kennung_n[$k]], (string) get_permalink($pid));
+            $be = admin_url('post.php?post=' . $pid . '&action=edit&sab_zeige=' . rawurlencode($k) . '&sab_nr=' . $kennung_n[$k]);
+            $li .= '<li><strong>' . esc_html(['fest' => 'fester Link', 'kurz' => 'Kurzlink', 'aawp' => 'AAWP'][$art]) . '</strong> „' . esc_html(mb_substr($txt, 0, 40)) . '“ <code>' . esc_html($k) . '</code> <a href="' . esc_url($fe) . '" target="_blank" rel="noopener">Frontend ↗</a> · <a href="' . esc_url($be) . '" target="_blank" rel="noopener">Editor ↗</a></li>';
+        }
+        return '<details style="margin-top:4px"><summary><small>Links dieses Artikels (' . count($items) . ')</small></summary><ul style="margin:4px 0 0 16px;list-style:disc">' . $li . '</ul></details>';
+    }
+
     /** ASIN aus der aufgelösten Zieladresse (Produkt-Rezensionsseite /product-reviews/ASIN, sonst jede Adresse mit ASIN). */
     private static function kurzlink_ziel_asin(string $kurz): string {
         $z = self::kurzlink_aufloesen($kurz);
@@ -5552,7 +5579,7 @@ JS;
             else { $status = '<strong style="color:#1a7f37">bereit</strong>' . ($info ? ' <small>(' . $info . ' Anpassung' . ($info === 1 ? '' : 'en') . ' nach dem Bild)</small>' : ''); $bereit[] = (int) $a['id']; }
             $meld = ''; foreach (array_slice($abw, 0, 3) as $m) { $meld .= '<li>' . esc_html($m) . self::ort_links($m, (int) $a['id']) . '</li>'; }
             $kl_ = self::kurzlink_liste_html((int) $a['id'], '<input type="hidden" name="sab_alle_vorschau" value="1"><input type="hidden" name="sab_ab" value="' . (int) $ab . '">');
-            $zeilen[] = [$abw ? 1 : 0, '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . $kl_ . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>'];
+            $zeilen[] = [$abw ? 1 : 0, '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a> <small><a href="' . esc_url(admin_url('post.php?post=' . (int) $a['id'] . '&action=edit')) . '" target="_blank" rel="noopener">Bearbeiten ↗</a></small>' . self::umbau_links_html((int) $a['id']) . '</td><td>' . $status . '</td><td>' . ($meld !== '' ? '<ul style="margin:0 0 0 14px">' . $meld . (count($abw) > 3 ? '<li>… und ' . (count($abw) - 3) . ' weitere</li>' : '') . '</ul>' : '–') . $kl_ . '</td><td><a class="button" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'))) . '">Einzelvorschau</a></td></tr>'];
         }
         $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', array_column((function (array $z) { usort($z, fn($a, $b) => $a[0] <=> $b[0]); return $z; })($zeilen), 1)) : '<tr><td colspan="4">Keine weiteren offenen Artikel.</td></tr>') . '</tbody></table>';
         $nGeprueft = $geprueft;
@@ -7939,7 +7966,7 @@ JS;
             if ($liste) {
                 $zeile = function (array $a): void {
                     $vu = add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'));
-                    echo '<tr><td>' . ($a['fertig'] ? '' : '<input type="checkbox" name="sab_ids[]" form="umbau-sammel" value="' . (int) $a['id'] . '" class="sab-wahl">') . '</td><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a></td><td data-v="' . (int) $a['fest'] . '">' . (int) $a['fest'] . '</td><td data-v="' . (int) $a['kurz'] . '">' . (int) $a['kurz'] . '</td>'
+                    echo '<tr><td>' . ($a['fertig'] ? '' : '<input type="checkbox" name="sab_ids[]" form="umbau-sammel" value="' . (int) $a['id'] . '" class="sab-wahl">') . '</td><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['titel'] ?: ('Beitrag ' . $a['id'])) . '</a> <small><a href="' . esc_url(admin_url('post.php?post=' . (int) $a['id'] . '&action=edit')) . '" target="_blank" rel="noopener">Bearbeiten ↗</a></small>' . ($a['fertig'] ? '' : self::umbau_links_html((int) $a['id'])) . '</td><td data-v="' . (int) $a['fest'] . '">' . (int) $a['fest'] . '</td><td data-v="' . (int) $a['kurz'] . '">' . (int) $a['kurz'] . '</td>'
                        . '<td>' . ($a['fertig'] ? '<strong style="color:#1a7f37">umgebaut</strong>' : (!empty($a['teil']) ? '<strong style="color:#b36b00">teilweise umgebaut</strong>' : 'offen')) . ($a['status'] !== 'publish' && $a['status'] !== '' ? ' <small>(' . esc_html(['draft' => 'Entwurf', 'private' => 'privat', 'pending' => 'zur Review', 'future' => 'geplant'][$a['status']] ?? $a['status']) . ')</small>' : '') . '</td><td><a class="button" href="' . esc_url($vu) . '">Vorschau</a> ';
                     echo '<form method="post" style="display:inline">'; wp_nonce_field('sab_speichern');
                     echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_id" value="' . (int) $a['id'] . '">'
