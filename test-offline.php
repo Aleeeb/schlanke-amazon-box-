@@ -2033,4 +2033,8 @@ ok(empty($GLOBALS['opt']['sab_ab']['b3e60001']['an']), 'Stil-Experiment: Beenden
 ob_start(); SAB::stil_skript(); $sk3 = ob_get_clean();
 ok($sk3 === '', 'Stil-Experiment: beendet => keine Zuteilung mehr');
 $GLOBALS['opt']['sab_ab'] = [];
+// 0.92.12: Tierchen nur auf Wunsch
+$wTi = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000008', 'titel' => 'Buch Y', 'text' => 'Text Y']);
+$GLOBALS['opt']['sab_widget_tiere'] = '1'; $wTi2 = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000008', 'titel' => 'Buch Y', 'text' => 'Text Y']); unset($GLOBALS['opt']['sab_widget_tiere']);
+ok(strpos($wTi, 'sab-tier') === false && strpos($wTi2, 'sab-tier') !== false && strpos($wTi2, 'class="sab-tw" style="display:none"') !== false, 'Widget: Tierchen standardmäßig aus, mit Option an und dann mit sicherem Ausgangszustand (versteckt)');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
