@@ -2087,4 +2087,10 @@ $GLOBALS['opt']['widget_text'] = [41 => ['text' => "<a href='http://amazon.de/?t
 $w41 = $mWf->invoke(null);
 ok(isset($w41['text-41']) && $w41['text-41']['fertig'] === true && $w41['text-41']['links'] === [] && count($w41['text-41']['start']) === 2, 'Widget (Text): Startseite ohne www, Amazon-Seite ohne Produkt und eBay sind kein alter Produktlink');
 unset($GLOBALS['opt']['widget_text']);
+// 0.92.29: Zweierblock mit Platzhaltern als Ganzes zu zwei Karten
+$tb = '<table><tbody><tr><td>[amz_bild asin="B0TABLE001" land="es"][/amz_bild]</td><td>[amz_bild asin="B0TABLE002" land="es"][/amz_bild]</td></tr><tr><td>[amz_titel asin="B0TABLE001" land="es" titel="Komplettset 14-teilig"]</td><td>[amz_titel asin="B0TABLE002" land="es" titel="Schneckenzaun aus Kunststoff"]</td></tr><tr><td>[amz_link asin="B0TABLE001" land="es"]Angebot bei Amazon[/amz_link]</td><td>[amz_link asin="B0TABLE002" land="es"]Angebot bei Amazon[/amz_link]</td></tr></tbody></table>';
+$tags_vorher = $GLOBALS['opt']['sab_tags'] ?? null; $GLOBALS['opt']['sab_tags'] = "es=t-21"; $tk = SAB::tabelle_zu_karten_platzhalter($tb);
+ok($tk !== null && strpos($tk, '[amz_karten]') === 0 && substr_count($tk, '[amz_karte ') === 2 && strpos($tk, 'titel="Komplettset 14-teilig"') !== false && strpos($tk, 'amz_link') === false && strpos($tk, '<') === false, 'Zweierblock: Bild, Titel und Textlink werden je Spalte zu EINER Karte (' . $tk . ')');
+ok(SAB::tabelle_zu_karten_platzhalter(str_replace('B0TABLE002', 'B0TABLE001', $tb)) === null, 'Zweierblock: dasselbe Produkt in beiden Spalten wird nicht umgebaut');
+if ($tags_vorher === null) { unset($GLOBALS['opt']['sab_tags']); } else { $GLOBALS['opt']['sab_tags'] = $tags_vorher; }
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
