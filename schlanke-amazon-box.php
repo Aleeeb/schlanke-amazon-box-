@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.89.59
+ * Version: 0.89.60
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.89.59';
+    const VERSION = '0.89.60';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1015,11 +1015,7 @@ final class SAB {
         $ab_ = (array) get_option('sab_score_abfall', []);
         if ($ab_) { echo '<div class="notice notice-info inline" style="padding:4px 12px;margin:6px 0"><p style="margin:2px 0"><small>' . count($ab_) . ' Produkt(e) mit Score-Abfall (nur ein Hinweis, kein Muss): <a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">im Austausch ansehen</a></small></p></div>'; }
         $al = (array) get_option('sab_alarm', []); if (!$al) { return; }
-        $namen = self::produkte(); $li = '';
-        foreach (array_slice($al, 0, 10, true) as $a => $e) {
-            $li .= '<li><code>' . esc_html((string) $a) . '</code> ' . esc_html((string) ($namen[$a] ?? '')) . ': <strong>' . esc_html((string) $e['grund']) . '</strong> · ' . ($e['ersatz'] ? 'Ersatz bereit: ' . esc_html(implode(', ', $e['ersatz'])) : '<span style="color:#a00">kein Ersatz in der Datenbank</span>') . '</li>';
-        }
-        echo '<div class="notice notice-error"><p><strong>Alarm: ' . count($al) . ' Produkt(e), die Amazon nicht mehr kennt.</strong> Tausch unter <a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">Austausch</a> (mit Freigabe und Rückgängig).</p><ul style="margin-left:18px;list-style:disc">' . $li . '</ul></div>';
+        echo '<div class="notice notice-info inline" style="padding:4px 12px;margin:6px 0"><p style="margin:2px 0"><small>' . count($al) . ' Produkt(e), die Amazon nicht mehr kennt (nur ein Hinweis): <a href="' . esc_url(admin_url('admin.php?page=sab-austausch')) . '">im Austausch ansehen</a></small></p></div>';
     }
 
     /** Produkte ohne Handdaten oder mit Handdaten älter als 30 Tage: [ASIN => Hinweis]. */
@@ -7006,6 +7002,7 @@ JS;
 
     const WIDGET_OPT = ['widget_block' => ['block', 'content'], 'widget_text' => ['text', 'text'], 'widget_custom_html' => ['custom_html', 'content']];
     private static $wi_vorschau = [];
+    private static $wi_meldung = [];
 
     /** Widgets mit Amazon-/AAWP-Links. @return array<string,array> Widget-ID => Angaben */
     private static function widgets_finden(): array {
@@ -7023,7 +7020,16 @@ JS;
                 foreach ($sb as $sn => $ids) { if (is_array($ids) && in_array($id, $ids, true)) { $leiste = (string) $sn; break; } }
                 $asins = [];
                 foreach (['#(?:dp|gp/product)/([A-Za-z0-9]{10})#', '#aawp-product-asin=["\']([A-Za-z0-9]{10})#', '#\[(?:aawp|amazon)\b[^\]]*\b(?:box|fields|link)=["\']([A-Za-z0-9]{10})#i', '#[?&]asin=([A-Za-z0-9]{10})#i', '#\[amz_[a-z]+\b[^\]]*\basin=["\']([A-Za-z0-9]{10})#'] as $re) { if (preg_match_all($re, $c, $m)) { foreach ($m[1] as $a_) { $asins[strtoupper($a_)] = 1; } } }
-                $out[$id] = ['id' => $id, 'opt' => $opt, 'nr' => $nr, 'feld' => $feld, 'inhalt' => $c, 'leiste' => $leiste, 'asins' => array_map('strval', array_keys($asins)), 'fertig' => !$hat_alt, 'treffer' => $hat_alt ? trim((string) $tm[0], " \"'\t\r\n#") : '', 'block' => $typ === 'block'];
+                $lk = [];
+                if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $am_, PREG_SET_ORDER)) {
+                    foreach ($am_ as $a_) {
+                        $u_ = html_entity_decode($a_[2]);
+                        if (!preg_match('#^https?://(?:[a-z0-9-]+\.)*(?:amazon\.[a-z.]{2,6}|amzn\.(?:to|eu)|a\.co|link\.amazon)(?:[/?\#]|$)#i', $u_)) { continue; }
+                        $uu = self::umbau_url($a_[2]);
+                        $lk[] = ['url' => $u_, 'text' => trim(html_entity_decode(strip_tags($a_[3]))), 'asin' => $uu ? (string) $uu[1] : '', 'kurz' => (bool) preg_match('#amzn\.|a\.co/|link\.amazon#i', $u_)];
+                    }
+                }
+                $out[$id] = ['links' => $lk, 'ok' => ((array) get_option('sab_widget_ok', []))[$id] ?? '' , 'id' => $id, 'opt' => $opt, 'nr' => $nr, 'feld' => $feld, 'inhalt' => $c, 'leiste' => $leiste, 'asins' => array_map('strval', array_keys($asins)), 'fertig' => !$hat_alt, 'treffer' => $hat_alt ? trim((string) $tm[0], " \"'\t\r\n#") : '', 'block' => $typ === 'block'];
             }
         }
         return $out;
@@ -7075,8 +7081,21 @@ JS;
 
     /** Formularverarbeitung: vorschau (nichts gespeichert), speichern (mit Sicherung), zurueck. */
     private static function widget_umbau_lauf(): string {
+        $m = self::widget_umbau_innen();
+        $id = preg_replace('/[^a-z_0-9-]/', '', (string) wp_unslash($_POST['sab_wid'] ?? ''));
+        if ($id !== '') { self::$wi_meldung[$id] = $m; }
+        return $m;
+    }
+
+    private static function widget_umbau_innen(): string {
         $id = preg_replace('/[^a-z_0-9-]/', '', (string) wp_unslash($_POST['sab_wid'] ?? '')); $akt = (string) ($_POST['sab_wakt'] ?? '');
         $alle = self::widgets_finden(); $bk = (array) get_option('sab_widget_backup', []);
+        if ($akt === 'ok' || $akt === 'ok_weg') {
+            $okl = (array) get_option('sab_widget_ok', []);
+            if ($akt === 'ok' && isset($alle[$id])) { $okl[$id] = md5((string) $alle[$id]['inhalt']); $m = 'Widget ' . $id . ' bleibt, wie es ist (wird nicht mehr als offen gezählt, solange sich der Inhalt nicht ändert).'; }
+            else { unset($okl[$id]); $m = 'Widget ' . $id . ' wird wieder als offen geführt.'; }
+            update_option('sab_widget_ok', $okl, false); self::$wi_meldung[$id] = $m; return $m;
+        }
         if ($akt === 'zurueck') {
             if (!isset($bk[$id])) { return 'Keine Sicherung für dieses Widget.'; }
             $ok = self::widget_speichern($id, (string) $bk[$id]['vorher']); unset($bk[$id]); update_option('sab_widget_backup', $bk, false);
@@ -7084,9 +7103,9 @@ JS;
         }
         if (!isset($alle[$id])) { return 'Widget nicht gefunden.'; }
         $f = []; foreach (['asin', 'marke', 'titel', 'text', 'knopf', 'alt_text', 'alt_url'] as $k) { $f[$k] = sanitize_text_field(wp_unslash($_POST['sab_w_' . $k] ?? '')); }
-        if (strlen(self::asin($f['asin'])) !== 10) { self::$wi_vorschau[$id] = $f; return 'Bitte eine gültige ASIN eintragen.'; }
+        if (strlen(self::asin($f['asin'])) !== 10) { self::$wi_vorschau[$id] = $f; self::$wi_meldung[$id] = 'Es fehlt eine gültige ASIN (10 Zeichen). Im Widget steht kein Link mit ASIN, vermutlich ein Kurzlink oder Bild. Bitte die ASIN des Produkts von Hand eintragen.'; return self::$wi_meldung[$id]; }
         self::$wi_vorschau[$id] = $f;
-        if ($akt !== 'speichern') { return 'Vorschau unten. Es wurde nichts gespeichert.'; }
+        if ($akt !== 'speichern') { self::$wi_meldung[$id] = 'Vorschau unten. Es wurde nichts gespeichert.'; return self::$wi_meldung[$id]; }
         if (!self::neues_produkt_vorladen(self::asin($f['asin']))) { return 'Amazon liefert zu ' . $f['asin'] . ' gerade kein Bild oder keine Daten. Nicht umgebaut.'; }
         $code = self::widget_code($f); if ($alle[$id]['block']) { $code = "<!-- wp:shortcode -->\n" . $code . "\n<!-- /wp:shortcode -->"; }
         $bk[$id] = ['ts' => time(), 'vorher' => $alle[$id]['inhalt']]; update_option('sab_widget_backup', $bk, false);
@@ -7098,16 +7117,23 @@ JS;
     private static function umbau_widgets_html(): string {
         $ws = self::widgets_finden(); if (!$ws) { return ''; }
         $bk = (array) get_option('sab_widget_backup', []);
-        $offen = array_filter($ws, fn($w) => !$w['fertig']);
+        $offen = array_filter($ws, fn($w) => !$w['fertig'] && !($w['ok'] !== '' && $w['ok'] === md5((string) $w['inhalt'])));
         $h = '<h3 style="margin-top:1.5em">Widgets in der Seitenleiste (' . count($offen) . ' mit alten Amazon-Links)</h3><p class="description" style="max-width:820px">Hier stehen Widgets (Block-, Text- und HTML-Widgets) mit Amazon- oder AAWP-Links. Die Buch-Karte unten ist vorbelegt; Felder ändern, „Vorschau“ ansehen und erst dann „Umbauen“. Vor dem Speichern wird der alte Inhalt gesichert, „Rückgängig“ stellt ihn wieder her.</p>';
         foreach ($ws as $id => $w) {
             $f = isset(self::$wi_vorschau[$id]) ? self::$wi_vorschau[$id] : self::widget_felder($w);
-            $h .= '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1000px"><strong>' . esc_html($id) . '</strong>' . ($w['leiste'] !== '' ? ' · Bereich <code>' . esc_html($w['leiste']) . '</code>' : '') . ' · ASIN: ' . ($w['asins'] ? esc_html(implode(', ', $w['asins'])) : '<em>keine gefunden</em>')
-                . ($w['fertig'] ? ' · <span style="color:#1a7f37;font-weight:700">schon umgebaut</span>' : ' · <span style="color:#a00;font-weight:700">alte Links</span>')
+            $ign = $w['ok'] !== '' && $w['ok'] === md5((string) $w['inhalt']);
+            $h .= '<div id="sab-w-' . esc_attr($id) . '" style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:10px 14px;margin:0 0 12px;max-width:1000px' . (isset(self::$wi_meldung[$id]) ? ';border-color:#2271b1;border-width:2px' : '') . '">' . (isset(self::$wi_meldung[$id]) ? '<p style="margin:0 0 8px;padding:6px 10px;background:#f0f6fc;border-left:4px solid #2271b1;font-weight:600">' . esc_html(self::$wi_meldung[$id]) . '</p>' : '') . '<strong>' . esc_html($id) . '</strong>' . ($w['leiste'] !== '' ? ' · Bereich <code>' . esc_html($w['leiste']) . '</code>' : '') . ' · ASIN: ' . ($w['asins'] ? esc_html(implode(', ', $w['asins'])) : '<em>keine gefunden</em>')
+                . ($w['fertig'] ? ' · <span style="color:#1a7f37;font-weight:700">schon umgebaut</span>' : ($ign ? ' · <span style="color:#50575e;font-weight:700">bleibt so (von dir bestätigt)</span>' : ' · <span style="color:#a00;font-weight:700">alte Links</span>'))
                 . ' · <a href="' . esc_url(admin_url('widgets.php')) . '" target="_blank" rel="noopener">Widgets bearbeiten ↗</a> · <a href="' . esc_url(add_query_arg('sab_widget', $id, self::widget_testseite())) . '" target="_blank" rel="noopener">Im Frontend ansehen (Widget wird markiert) ↗</a>' . ($w['treffer'] !== '' ? '<br><small>Erkannt wegen: <code>' . esc_html(mb_substr((string) $w['treffer'], 0, 80)) . '</code></small>' : '');
+            if (!$w['fertig'] && $w['links']) {
+                $h .= '<ul style="margin:6px 0 0 16px;list-style:disc">';
+                foreach ($w['links'] as $lk_) { $h .= '<li><a href="' . esc_url($lk_['url']) . '" target="_blank" rel="noopener">' . esc_html(mb_substr($lk_['url'], 0, 90)) . '</a> „' . esc_html(mb_substr($lk_['text'], 0, 40)) . '“ · ' . ($lk_['asin'] !== '' ? 'ASIN <code>' . esc_html($lk_['asin']) . '</code>' : ($lk_['kurz'] ? '<span style="color:#b36b00">Kurzlink: ASIN nicht erkennbar, bitte von Hand eintragen</span>' : '<span style="color:#b36b00">keine ASIN erkennbar</span>')) . '</li>'; }
+                $h .= '</ul>';
+            }
             if (!$w['fertig']) {
+                $h .= '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="' . ($ign ? 'ok_weg' : 'ok') . '">' . ($ign ? 'wieder als offen führen' : 'Ist okay so (nicht umbauen)') . '</button></form>';
                 $h .= '<details style="margin-top:6px"><summary>Alter Inhalt</summary><pre style="white-space:pre-wrap;max-height:160px;overflow:auto;background:#f6f7f7;padding:6px;font-size:12px">' . esc_html(mb_substr((string) $w['inhalt'], 0, 1500)) . '</pre></details>'
-                    . '<form method="post" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '">'
+                    . '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '">'
                     . '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">';
                 foreach (['asin' => 'ASIN des Buchs', 'marke' => 'Etikett (z. B. Buchtipp)', 'titel' => 'Titel', 'text' => 'Kurztext', 'knopf' => 'Knopftext (leer = Standard)', 'alt_text' => 'zweiter Link: Text (z. B. Thalia)', 'alt_url' => 'zweiter Link: Adresse'] as $k => $l) {
                     $h .= '<label>' . esc_html($l) . '<br><input type="text" name="sab_w_' . esc_attr($k) . '" value="' . esc_attr((string) ($f[$k] ?? '')) . '" style="width:100%"></label>';
@@ -7115,7 +7141,7 @@ JS;
                 $h .= '</div><p><button class="button" name="sab_wakt" value="vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="speichern" onclick="return confirm(\'Dieses Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Umbauen</button></p></form>';
                 if (isset(self::$wi_vorschau[$id]) && strlen(self::asin((string) ($f['asin'] ?? ''))) === 10) { $h .= '<div style="background:#f1f3ee;padding:14px;border-radius:8px"><div style="width:300px">' . do_shortcode(self::widget_code($f)) . '</div></div>'; }
             }
-            if (isset($bk[$id])) { $h .= '<form method="post" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="zurueck">Rückgängig (alter Inhalt von ' . esc_html(wp_date('d.m.Y H:i', (int) $bk[$id]['ts'])) . ')</button></form>'; }
+            if (isset($bk[$id])) { $h .= '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:8px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="zurueck">Rückgängig (alter Inhalt von ' . esc_html(wp_date('d.m.Y H:i', (int) $bk[$id]['ts'])) . ')</button></form>'; }
             $h .= '</div>';
         }
         return $h;

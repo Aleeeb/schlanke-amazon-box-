@@ -1575,7 +1575,7 @@ ok(SAB::alarm_fall(['2026-10-20' => 70, '2026-10-21' => 72, '2026-10-22' => 68, 
 ok(SAB::alarm_fall(['2026-10-20' => 70, '2026-10-21' => 72, '2026-10-27' => 60]) === null && SAB::alarm_fall(['2026-10-26' => 70, '2026-10-27' => 10]) === null, 'Kein Alarm bei kleinem Rückgang oder zu wenig Verlauf');
 $GLOBALS['opt']['sab_alarm'] = ['B0ALARM001' => ['seit' => 1, 'grund' => 'nicht mehr lieferbar', 'ersatz' => ['B0ERSATZ01']]];
 $_GET['page'] = 'sab-austausch'; $adm0 = $GLOBALS['admin']; $GLOBALS['admin'] = true; ob_start(); SAB::alarm_hinweis(); $ah = ob_get_clean(); unset($_GET['page']); $GLOBALS['admin'] = $adm0;
-ok(strpos($ah, 'B0ALARM001') !== false && strpos($ah, 'Ersatz bereit') !== false, 'Alarm-Hinweis zeigt Produkt und Ersatz');
+ok(strpos($ah, 'nicht mehr kennt') !== false && strpos($ah, 'notice-error') === false && strpos($ah, 'page=sab-austausch') !== false, 'Alarm-Hinweis: kleine graue Zeile mit Link zum Austausch, nicht rot');
 unset($GLOBALS['opt']['sab_alarm']);
 // 0.89.29: Lernen
 $f1 = ['titel' => 0.9, 'art' => 1.0, 'preis' => 0.5, 'score' => 0.8, 'prov' => 0.5, 'liefer' => 0.5]; $f2 = ['titel' => 0.2, 'art' => 1.0, 'preis' => 0.5, 'score' => 0.9, 'prov' => 0.5, 'liefer' => 0.5];
@@ -1785,4 +1785,11 @@ unset($GLOBALS['opt']['widget_block']);
 $mUl = new ReflectionMethod('SAB', 'umbau_links_html'); $mUl->setAccessible(true);
 $ul = (string) $mUl->invoke(null, 7);
 ok(strpos($ul, 'Kurzlink') !== false && strpos($ul, 'fester Link') !== false && strpos($ul, 'sab_zeige=B0BBBBBBB1') !== false && strpos($ul, 'action=edit') !== false, 'Umbau: Kurzlinks und feste Links je Artikel mit Sprung ins Frontend und in den Editor');
+$GLOBALS['opt']['widget_block'] = [22 => ['content' => '<p><a href="https://amzn.to/3AbCdEf">Buch</a> <a href="https://www.ebay.de/itm/1">eBay</a></p>']];
+$wf3 = $mWf->invoke(null);
+ok(isset($wf3['block-22']) && count($wf3['block-22']['links']) === 1 && $wf3['block-22']['links'][0]['kurz'] === true && $wf3['block-22']['links'][0]['asin'] === '', 'Widgets: Kurzlink wird mit URL aufgelistet, eBay-Link nicht');
+$_POST = ['sab_wid' => 'block-22', 'sab_wakt' => 'vorschau', 'sab_w_asin' => ''];
+$mWl = new ReflectionMethod('SAB', 'widget_umbau_lauf'); $mWl->setAccessible(true); $wm = (string) $mWl->invoke(null); $_POST = [];
+ok(strpos($wm, 'gültige ASIN') !== false && strpos((string) $mWh->invoke(null), 'amzn.to/3AbCdEf') !== false && strpos((string) $mWh->invoke(null), 'Es fehlt eine gültige ASIN') !== false, 'Widgets: fehlende ASIN gibt sichtbare Meldung im Widget-Kasten, Link klickbar');
+unset($GLOBALS['opt']['widget_block']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
