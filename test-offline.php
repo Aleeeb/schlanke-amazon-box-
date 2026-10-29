@@ -2064,4 +2064,16 @@ $_POST = ['sab_stil' => 'knopftext', 'sab_stil_an' => '1']; $mSt2 = new Reflecti
 $GLOBALS['loggedin'] = false; $GLOBALS['admin'] = false; ob_start(); SAB::stil_skript(); $kt = ob_get_clean();
 ok(strpos($kt, 'b3e60002') !== false && strpos($kt, '.sab-karte-btn') !== false && strpos($kt, 'Angebot bei Amazon') !== false && strpos($kt, 'Preis bei Amazon pr') !== false, 'Knopftext-Experiment: ein Text je Seite für alle Kartenknöpfe, Varianten im Fußskript');
 $GLOBALS['opt']['sab_ab'] = [];
+// 0.93.3: Beliebte Artikel
+function url_to_postid($u) { $m = ['https://example.test/a/' => 11, 'https://example.test/b/' => 12, 'https://example.test/c/' => 13, 'https://example.test/impressum/' => 14]; return $m[rtrim($u, '/') . '/'] ?? 0; }
+function get_post_status($i) { return 'publish'; } function get_post_type($i) { return 'post'; }
+function is_singular() { return true; }
+if (!function_exists('home_url')) { function home_url($p = '') { return 'https://x.test' . $p; } }
+$wpdb_b = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class { public $prefix = 'wp_'; function prepare($q, ...$a) { return $q; } function get_results($q, $o = null) { return [['pfad' => '/', 's' => 90], ['pfad' => '/impressum/', 's' => 80], ['pfad' => '/a/', 's' => 40], ['pfad' => '/b/', 's' => 20], ['pfad' => '/c/', 's' => 10], ['pfad' => '/unbekannt/', 's' => 9]]; } };
+$GLOBALS['opt']['sab_widget_farbe'] = '#336699'; $GLOBALS['tr'] = [];
+$bl = SAB::sc_widget(['typ' => 'beliebt', 'ohne' => 'c', 'land' => 'de']);
+ok(strpos($bl, 'Beliebte Artikel diese Woche') !== false && substr_count($bl, '<li>') === 2 && strpos($bl, '/impressum/') === false && substr_count($bl, 'x.test/p') === 2 && strpos($bl, '--sabc:#336699') !== false && !preg_match('/>\s*\d+\s*(Klicks|Aufrufe)/', $bl), 'Beliebt-Widget: ohne Impressum/Startseite/Ausschluss, ohne Zahlen, Seitenfarbe (' . $bl . ')');
+ok(get_option('sab_beliebt_an') === '1', 'Beliebt-Widget schaltet die Aufrufzählung ein');
+$GLOBALS['wpdb'] = $wpdb_b;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
