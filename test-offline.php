@@ -2146,6 +2146,7 @@ $pe = '<p>[amz_bild asin="B0PAAR0005"]<a href="x"><img src="a.jpg"></a>[/amz_bil
 $pf = "<!-- wp:image -->\n<figure class=\"wp-block-image\">[amz_bild asin=\"B0PAAR0007\" land=\"es\"]<a href=\"x\"><img src=\"a.jpg\"></a>[/amz_bild]</figure>\n<!-- /wp:image -->\n\n<!-- wp:paragraph -->\n<p>[amz_link asin=\"B0PAAR0007\" land=\"es\"]Zum Angebot[/amz_link]</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>Weiter.</p>\n<!-- /wp:paragraph -->";
 [$pf1, $pn6] = SAB::paare_zu_einzelkarten($pf);
 ok($pn6 === 1 && strpos($pf1, "<!-- wp:shortcode -->\n[amz_karten][amz_karte asin=\"B0PAAR0007\" land=\"es\" stil=\"einzel\"][/amz_karten]\n<!-- /wp:shortcode -->") === 0 && strpos($pf1, 'wp:image') === false && substr_count($pf1, 'wp:paragraph') === 2, 'Paare: Block-Editor-Hüllen werden mitgenommen (' . $pf1 . ')');
+ok(SAB::EINZEL_TEXT['de'] === ['Klick auf das Bild führt zum', 'Angebot bei Amazon'], 'Einzelkarte: doppeldeutiger Satz „Klick auf das Bild führt zum Angebot bei Amazon“ bleibt so');
 // 0.92.33: H4 vor Produktblöcken zu fettem Text
 [$h4a, $h4n] = SAB::h4_zu_fett('<p>Text</p><h4>Schneckenzaun Set</h4>[amz_karten][amz_karte asin="B0TABLE001"][/amz_karten]<h4>Mitten im Text</h4><p>weiter</p>');
 ok($h4n === 1 && strpos($h4a, '<p class="sab-vortitel">Schneckenzaun Set</p>') !== false && strpos($h4a, '<h4>Mitten im Text</h4>') !== false, 'H4: vor Kartenblock zu fettem Text, H4 im Text bleibt (' . $h4a . ')');

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.36
+ * Version: 0.92.37
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.36';
+    const VERSION = '0.92.37';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2292,7 +2292,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     }
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
-    const EINZEL_TEXT = ['de' => ['Klick auf das Bild zum', 'Angebot bei Amazon'], 'es' => ['Haz clic en la imagen para ver la', 'oferta en Amazon'], 'fr' => ["Cliquez sur l'image pour voir l'", 'offre sur Amazon'], 'it' => ["Clicca sull'immagine per vedere l'", 'offerta su Amazon'], 'co.uk' => ['Click the image to see the', 'offer on Amazon'], 'com' => ['Click the image to see the', 'offer on Amazon']];
+    const EINZEL_TEXT = ['de' => ['Klick auf das Bild führt zum', 'Angebot bei Amazon'], 'es' => ['Haz clic en la imagen para ver la', 'oferta en Amazon'], 'fr' => ["Cliquez sur l'image pour voir l'", 'offre sur Amazon'], 'it' => ["Clicca sull'immagine per vedere l'", 'offerta su Amazon'], 'co.uk' => ['Click the image to see the', 'offer on Amazon'], 'com' => ['Click the image to see the', 'offer on Amazon']];
     const KARTE_CSS = '.sab-vortitel{text-align:center;font-weight:600;font-size:1.08em;line-height:1.35;color:#2d3b2d;margin:1.6em 0 .5em}.sab-karte{position:relative}.sab-kr{position:absolute;top:8px;left:8px;z-index:3;min-width:34px;height:34px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui,sans-serif;color:#fff;background:#8a8f8a;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:help}.sab-kr-gr{background:#2e8b57}.sab-kr-y{background:#d4a017}.sab-kr-r{background:#c0392b}.sab-karte-einzel{max-width:460px;margin-left:auto;margin-right:auto;box-shadow:0 1px 4px rgba(0,0,0,.06)}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.05em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel a.sab-bild{gap:6px}.sab-karte-einzel .sab-bild img{height:320px!important}.sab-karte-cta{display:block;font-size:.88em;line-height:1.35;color:#555}.sab-karte-cta-l{color:#1a6b3c;font-weight:700;text-decoration:underline}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px!important;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-karte .sab-bild img{height:160px!important}.sab-karte-einzel .sab-bild img{height:250px!important}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte-einzel .sab-karte-cta{text-align:left;align-self:flex-start;padding-left:6px}.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
 
     public static function sc_karten($a, $inhalt = ''): string {
@@ -6574,7 +6574,7 @@ JS;
 
     /**
      * Bild und Textlink desselben Produkts, die getrennt im Artikel stehen ([amz_bild] und kurz danach [amz_link]), werden EINE Einzelkarte
-     * (Titel, Bild, „Klick auf das Bild zum Angebot bei Amazon“ als ein Link). Nur wenn der Textlink in einem eigenen kurzen Absatz steht.
+     * (Titel, Bild, „Klick auf das Bild führt zum Angebot bei Amazon“ als ein Link). Nur wenn der Textlink in einem eigenen kurzen Absatz steht.
      * @return array{0:string,1:int}
      */
     public static function paare_zu_einzelkarten(string $c): array {
