@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.40
+ * Version: 0.92.41
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.40';
+    const VERSION = '0.92.41';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6247,10 +6247,20 @@ JS;
         return is_array($alt) && !empty($alt['weg']);   // beim Anzeigen als „nicht mehr bekannt“ erkannt
     }
 
+    /** Rezensionslink (auch als Kurzlink, wenn aufgelöst werden darf): [Land, ASIN] oder null. */
+    private static function rezension_ziel(string $url, bool $aufloesen = false): ?array {
+        $url = html_entity_decode(trim($url));
+        if ($aufloesen && preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $url)) { $url = self::kurzlink_aufloesen($url); if ($url === '') { return null; } }
+        if (self::seite_art($url) !== 'rezension') { return null; }
+        if (!preg_match('#^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com|ca|com\.au)/(?:product-reviews|dp)/([A-Za-z0-9]{10})#i', $url, $m)) { return null; }
+        return [strtolower($m[1]), strtoupper($m[2])];
+    }
+
     private static function umbau_url(string $url, bool $aufloesen = false): ?array {
         $url = html_entity_decode($url);
         if (preg_match('#^https?://link\.amazon/(?:[^?\#]*/)?(?:dp/|gp/product/|asin=)?\??(B0[A-Z0-9]{8})(?![A-Za-z0-9])#', $url, $lk) || preg_match('#^https?://link\.amazon/[^\#]*[?&]asin=([A-Z0-9]{10})(?![A-Za-z0-9])#i', $url, $lk)) { return [self::land(''), strtoupper($lk[1])]; }   // neues link.amazon-Format mit ASIN in der Adresse: Land der Webseite
         if ($aufloesen && preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $url)) { $url = self::kurzlink_aufloesen($url); if ($url === '') { return null; } }
+        if (self::seite_art($url) === 'rezension') { return null; }   // Rezensionslinks (/product-reviews/ASIN, #customerReviews) bleiben Rezensionslinks, nie ein Produktlink
         if (!preg_match('#^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com)/(?:[^?\#]*/)?(?:dp|gp/product|gp/aw/d)/([A-Za-z0-9]{10})#i', $url, $u) && !preg_match('#^https?://(?:www\.)?amazon\.(es|de|fr|it|co\.uk|com)/[^\#]*[?&]asin=([A-Z0-9]{10})(?![A-Za-z0-9])#i', $url, $u)) { return null; }
         return [strtolower($u[1]), strtoupper($u[2])];
     }
@@ -6595,6 +6605,10 @@ JS;
         if ($nur === '') { [$c_s, $n_s] = self::seitenlinks_ergaenzen($c); $c = $c_s; $n += $n_s; }   // Startseiten- und Rezensionslinks: Partner-ID des Landes und rel ergänzen
         $c = preg_replace_callback('#<a\b([^>]*)>(.*?)</a>#is', function ($m) use (&$n, &$skip, $nur) {
             if (!preg_match('#href=(["\'])(.*?)\1#is', $m[1], $h)) { return $m[0]; }
+            if ($nur === '' && ($rz = self::rezension_ziel($h[2], true)) && self::tag($rz[0]) && strpos($m[2], '[') === false && stripos($m[2], '<img') === false && trim(strip_tags($m[2])) !== '') {   // Rezensionslink: Baustein statt fester Adresse
+                $cr = preg_match('#class=(["\'])(.*?)\1#is', $m[1], $clr) ? trim(preg_replace('/[^A-Za-z0-9 _-]/', '', $clr[2])) : '';
+                $n++; return '[amz_rezension asin="' . $rz[1] . '" land="' . $rz[0] . '"' . ($cr !== '' ? ' class="' . $cr . '"' : '') . ']' . trim(html_entity_decode(strip_tags($m[2]))) . '[/amz_rezension]';
+            }
             $u = self::umbau_url($h[2], true);
             if (!$u) { return $m[0]; }
             [$land, $asin] = $u;
@@ -6845,7 +6859,7 @@ JS;
             if (preg_match_all('/\[(?:aawp|amazon)\b[^\]]*\b(?:box|link|fields)=/i', $c, $mm)) { $fest += count($mm[0]); }   // AAWP- und [amazon]-Platzhalter zählen als umzubauen
             if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1#is', $c, $m)) {
                 foreach ($m[2] as $url) {
-                    if (self::umbau_url($url)) { $fest++; } elseif (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', html_entity_decode($url)) && !self::kurz_ok($url)) { $kurz++; }
+                    if (self::umbau_url($url) || (self::rezension_ziel($url) && self::tag(self::rezension_ziel($url)[0]))) { $fest++; } elseif (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', html_entity_decode($url)) && !self::kurz_ok($url)) { $kurz++; }
                 }
             }
             $gesichert = get_post_meta((int) $r['ID'], '_sab_umbau_backup', true) !== '';
@@ -6865,6 +6879,7 @@ JS;
             foreach ($m as $x) {
                 $url = html_entity_decode($x[2]); $txt = trim(html_entity_decode(strip_tags($x[3]))); if ($txt === '') { $txt = '(Bild)'; }
                 if (($u = self::umbau_url($x[2])) !== null) { $items[] = ['fest', $txt, $url, (string) $u[1]]; }
+                elseif (($rz = self::rezension_ziel($x[2])) !== null) { $items[] = ['rez', $txt, $url, (string) $rz[1]]; }
                 elseif (preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/([A-Za-z0-9]+)#i', $url, $km) && !self::kurz_ok($x[2])) { $items[] = ['kurz', $txt, $url, (string) $km[1]]; }
             }
         }
@@ -6875,7 +6890,7 @@ JS;
             $k = preg_replace('/[^A-Za-z0-9]/', '', $k); $kennung_n[$k] = ($kennung_n[$k] ?? 0) + 1;
             $fe = add_query_arg(['sab_zeige' => $k, 'sab_nr' => $kennung_n[$k]], (string) get_permalink($pid));
             $be = admin_url('post.php?post=' . $pid . '&action=edit&sab_zeige=' . rawurlencode($k) . '&sab_nr=' . $kennung_n[$k]);
-            $li .= '<li><strong>' . esc_html(['fest' => 'fester Link', 'kurz' => 'Kurzlink', 'aawp' => 'AAWP'][$art]) . '</strong> „' . esc_html(mb_substr($txt, 0, 40)) . '“ <code>' . esc_html($k) . '</code> <a href="' . esc_url($fe) . '" target="_blank" rel="noopener">Frontend ↗</a> · <a href="' . esc_url($be) . '" target="_blank" rel="noopener">Editor ↗</a></li>';
+            $li .= '<li><strong>' . esc_html(['fest' => 'fester Link', 'rez' => 'Rezensionslink', 'kurz' => 'Kurzlink', 'aawp' => 'AAWP'][$art]) . '</strong> „' . esc_html(mb_substr($txt, 0, 40)) . '“ <code>' . esc_html($k) . '</code> <a href="' . esc_url($fe) . '" target="_blank" rel="noopener">Frontend ↗</a> · <a href="' . esc_url($be) . '" target="_blank" rel="noopener">Editor ↗</a></li>';
         }
         return '<details style="margin-top:4px"><summary><small>Links dieses Artikels (' . count($items) . ')</small></summary><ul style="margin:4px 0 0 16px;list-style:disc">' . $li . '</ul></details>';
     }
