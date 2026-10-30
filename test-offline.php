@@ -2100,4 +2100,8 @@ $GLOBALS['opt']['sab_eigenbilder'] = "B0TABLE001 | https://example.test/liste.jp
 ok(strpos(SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es']), 'liste.jpg') !== false, 'Karte: eigenes Bild aus der Liste in den Einstellungen');
 unset($GLOBALS['opt']['sab_eigenbilder']);
 ok(SAB::eigenbild_url('javascript:alert(1)') === '', 'Eigenbild: nur http(s)-Adressen');
+// 0.92.32: Symbol in der oberen Leiste
+$bar = new class { public $n = []; public function add_node($a) { $this->n[] = $a; } };
+$GLOBALS['admin'] = true; SAB::leisten_symbol($bar);
+ok(count($bar->n) === 1 && $bar->n[0]['id'] === 'sab-leiste' && strpos($bar->n[0]['href'], 'page=sab') !== false && strpos(strip_tags($bar->n[0]['title']), 'ab-icon') === false, 'Obere Leiste: ein Symbol, führt zu den Einstellungen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

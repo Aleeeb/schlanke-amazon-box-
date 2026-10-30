@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.31
+ * Version: 0.92.32
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.31';
+    const VERSION = '0.92.32';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -116,6 +116,8 @@ final class SAB {
         add_action('wp_footer',            [__CLASS__, 'stellen_skript'], 97);
         add_action('wp_footer',            [__CLASS__, 'widget_zeige_skript'], 100);
         add_action('wp_footer',            [__CLASS__, 'geo_skript'], 98);
+        add_action('admin_bar_menu', [__CLASS__, 'leisten_symbol'], 90);
+        add_action('admin_head', [__CLASS__, 'leisten_css']); add_action('wp_head', [__CLASS__, 'leisten_css']);
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_ab_schalten',    [__CLASS__, 'ajax_ab_schalten']);
         add_action('wp_ajax_sab_ab_einzel',      [__CLASS__, 'ajax_ab_einzel']);
@@ -2343,6 +2345,17 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
             return '<div class="sab-karte' . $kc . '">' . $mb[1] . $mb[2] . $tt . $ex . '<span class="sab-karte-btn">' . $mt[1] . '</span></a>' . $ebay . '</div>';
         }
         return '<div class="sab-karte' . $kc . '">' . $bild . $tt . $ex . $btn . $ebay . '</div>';
+    }
+
+    /** Obere Leiste (Backend und angemeldet im Frontend): Einkaufswagen-Symbol ohne Text, führt direkt zu den Einstellungen des Plugins. */
+    public static function leisten_symbol($bar): void {
+        if (!is_object($bar) || !current_user_can('manage_options')) { return; }
+        $bar->add_node(['id' => 'sab-leiste', 'title' => '<span class="ab-icon" aria-hidden="true"></span><span class="screen-reader-text">' . esc_html(self::NAME) . '</span>', 'href' => admin_url('admin.php?page=sab'), 'meta' => ['title' => self::NAME . ' – Einstellungen']]);
+    }
+
+    public static function leisten_css(): void {
+        if (!function_exists('is_admin_bar_showing') || !is_admin_bar_showing()) { return; }
+        echo '<style id="sab-leiste-css">#wpadminbar #wp-admin-bar-sab-leiste .ab-icon:before{font-family:dashicons!important;content:"\f174";top:2px}#wpadminbar #wp-admin-bar-sab-leiste .ab-item{padding:0 8px}#wpadminbar #wp-admin-bar-snippets{display:none}</style>';
     }
 
     /** Eigene Produktbilder: Zeilen „ASIN | Mediathek-ID oder Bildadresse“ => [ASIN => Wert]. */
