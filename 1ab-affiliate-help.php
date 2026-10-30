@@ -8560,8 +8560,9 @@ JS;
     private static function widget_felder(array $w): array {
         $c = (string) $w['inhalt'];
         $titel = ''; $text = ''; $alt_u = ''; $alt_t = '';
-        if (preg_match('#<(?:h[1-6]|strong|b)\b[^>]*>(.*?)</(?:h[1-6]|strong|b)>#is', $c, $m)) { $titel = trim(html_entity_decode(strip_tags($m[1]))); }
-        if (preg_match_all('#<p\b[^>]*>(.*?)</p>#is', $c, $pm)) { foreach ($pm[1] as $p_) { $t = trim(html_entity_decode(strip_tags($p_))); if (mb_strlen($t) >= 25 && $t !== $titel) { $text = $t; break; } } }
+        $roh = static fn(string $h): string => trim(preg_replace('/\s+/u', ' ', preg_replace('#\[/?[A-Za-z_][^\]]*\]#', ' ', html_entity_decode(strip_tags($h)))));   // Shortcode-Reste ([amazon …], [aawp …]) sind nie Text
+        if (preg_match('#<(?:h[1-6]|strong|b)\b[^>]*>(.*?)</(?:h[1-6]|strong|b)>#is', $c, $m)) { $titel = $roh($m[1]); }
+        if (preg_match_all('#<p\b[^>]*>(.*?)</p>#is', $c, $pm)) { foreach ($pm[1] as $p_) { $t = $roh($p_); if (mb_strlen($t) >= 25 && $t !== $titel) { $text = $t; break; } } }
         if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $am, PREG_SET_ORDER)) {
             foreach ($am as $a_) { if (!preg_match('#amazon\.|amzn\.|aawp|/dp/#i', $a_[2]) && ($t = trim(html_entity_decode(strip_tags($a_[3])))) !== '' && mb_strlen($t) <= 60) { $alt_u = html_entity_decode($a_[2]); $alt_t = $t; break; } }
         }
