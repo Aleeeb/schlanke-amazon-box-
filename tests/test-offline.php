@@ -1,12 +1,13 @@
 <?php
 // Offline-Test ohne WordPress: php test-offline.php  (Stubs für die benötigten WP-Funktionen)
-define('SAB_SYNC', 1); define('ABSPATH', __DIR__ . '/');
+define('SAB_SYNC', 1); define('ABSPATH', dirname(__DIR__) . '/');
 if (!function_exists('get_post_status')) { function get_post_status($i) { return 'publish'; } }
+if (!function_exists('apply_filters')) { function apply_filters($t, $v) { return $v; } }
 if (!function_exists('get_post_field')) { function get_post_field($f, $i) { $a = []; foreach ((array) ($GLOBALS['opt']['sab_bildfehler'] ?? []) as $e) { if (!in_array($e['asin'], (array) ($GLOBALS['absent'] ?? []), true)) { $a[] = '[amz_bild asin="' . $e['asin'] . '"]'; } } return '<p>' . implode(' ', $a) . '</p>'; } }
 const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
 $GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
-function add_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return 'schlanke-amazon-box/schlanke-amazon-box.php'; } function wp_next_scheduled($x) { return true; }
+function add_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return '1ab-affiliate-help/1ab-affiliate-help.php'; } function wp_next_scheduled($x) { return true; }
 function date_i18n($f, $t = null) { return date($f, $t ?? time()); }
 function get_option($k, $d = false) { return $GLOBALS['opt'][$k] ?? $d; }
 function update_option($k, $v, $a = null) { $GLOBALS['opt'][$k] = $v; return true; }
@@ -29,7 +30,7 @@ function wp_remote_post($u, $a) {
     return ['code' => 200, 'body' => json_encode($antwort)];
 }
 function wp_remote_get($u, $a) {
-    if (strpos($u, 'update.json') !== false) return ['code' => 200, 'body' => json_encode($GLOBALS['upd'] ?? [])]; return ['code' => 200, 'body' => 'JPG', 'ct' => 'image/jpeg']; }
+    if (strpos($u, 'update-1ab-affiliate-help.json') !== false) return ['code' => 200, 'body' => json_encode($GLOBALS['upd'] ?? [])]; return ['code' => 200, 'body' => 'JPG', 'ct' => 'image/jpeg']; }
 function wp_remote_retrieve_response_code($r) { return $r['code']; }
 if (!function_exists('wp_nonce_url')) { function wp_nonce_url($u, $a = '') { return $u . '&_wpnonce=x'; } }
 if (!function_exists('wp_verify_nonce')) { function wp_verify_nonce($n, $a = '') { return true; } }
@@ -46,7 +47,7 @@ function get_the_ID() { return $GLOBALS['pid'] ?? 0; }
 function sanitize_key($k) { return strtolower(preg_replace('/[^a-z0-9_-]/i', '', (string) $k)); }
 function get_permalink($i = 0) { return 'https://x.test/p'; }
 function wp_date($f, $t) { return date($f, $t); }
-require __DIR__ . '/schlanke-amazon-box.php';
+require dirname(__DIR__) . '/1ab-affiliate-help.php';
 
 
 if (!function_exists("home_url")) { function home_url($p = "") { return "https://example.test" . $p; } }
@@ -282,11 +283,11 @@ $o = $GLOBALS['sc']['amz_produkt'](['slot' => 'karte', 'land' => 'es'], 'R');
 ok(strpos($o, 'sab-fav') === false, 'ohne Favorit kein Band');
 
 // ---- 0.14.0: Selbst-Aktualisierung ----
-$zipok = 'https://github.com/Aleeeb/schlanke-amazon-box-/raw/main/schlanke-amazon-box.zip';
+$zipok = 'https://github.com/Aleeeb/schlanke-amazon-box-/raw/main/1ab-affiliate-help.zip';
 $t0 = (object) ['checked' => ['x' => 1], 'response' => []];
 $GLOBALS['upd'] = ['version' => '99.0.0', 'zip' => $zipok]; $GLOBALS['tr'] = [];
 $t = SAB::update_pruefen(clone $t0);
-ok(($t->response['schlanke-amazon-box/schlanke-amazon-box.php']->new_version ?? '') === '99.0.0', 'Update: neuere Version wird gemeldet');
+ok(($t->response['1ab-affiliate-help/1ab-affiliate-help.php']->new_version ?? '') === '99.0.0', 'Update: neuere Version wird gemeldet');
 $GLOBALS['upd'] = ['version' => SAB::VERSION, 'zip' => $zipok]; $GLOBALS['tr'] = [];
 ok(empty(SAB::update_pruefen(clone $t0)->response), 'Update: gleiche Version wird nicht gemeldet');
 $GLOBALS['upd'] = ['version' => '99.0.0', 'zip' => 'https://evil.example/x.zip']; $GLOBALS['tr'] = [];
@@ -475,7 +476,7 @@ $vh = $mV->invoke(null, 7);
 ok(strpos($vh, 'amz_link') !== false && strpos($vh, 'amz_bild') !== false, 'Umbau-Vorschau zeigt Platzhalter nachher');
 
 $mTh = new ReflectionMethod('SAB', 'tabellenhilfe'); $mTh->setAccessible(true);
-file_put_contents(__DIR__ . '/th_out.html', $mTh->invoke(null));
+file_put_contents(sys_get_temp_dir() . '/th_out.html', $mTh->invoke(null));
 ok(strpos($mTh->invoke(null), 'position:sticky') !== false, 'Tabellenhilfe: Kopfzeile fixiert');
 
 // ---- 0.36.0: Produktname beim Austausch ----
@@ -1178,9 +1179,9 @@ $GLOBALS['opt']['sab_upd_stat'] = ['neu' => time() - 30 * 86400]; $iv4 = SAB::up
 ok($iv1 === 60 && $iv2 === 600 && $iv3 === 7200 && $iv4 === 86400, 'Update-Prüfung: Abstand wächst von Minuten auf einmal am Tag, je länger kein Update kam');
 $GLOBALS['upd'] = ['version' => '99.1.0', 'zip' => $zipok]; $GLOBALS['tr'] = []; $GLOBALS['str'] = []; unset($GLOBALS['opt']['sab_upd_naechste']); $GLOBALS['opt']['sab_upd_stat'] = ['neu' => time() - 30 * 86400, 'inst' => SAB::VERSION, 'json' => '99.0.0'];
 $nv = SAB::update_nachsehen(true);
-ok($nv === '99.1.0' && isset($GLOBALS['str']['update_plugins']->response['schlanke-amazon-box/schlanke-amazon-box.php']) && (int) get_option('sab_upd_naechste') >= time() + 55 && time() - (int) $GLOBALS['opt']['sab_upd_stat']['neu'] < 5, 'Update-Prüfung: „Jetzt suchen“ trägt die neue Version sofort bei WordPress ein, merkt die Neuerung und verkürzt den Abstand');
+ok($nv === '99.1.0' && isset($GLOBALS['str']['update_plugins']->response['1ab-affiliate-help/1ab-affiliate-help.php']) && (int) get_option('sab_upd_naechste') >= time() + 55 && time() - (int) $GLOBALS['opt']['sab_upd_stat']['neu'] < 5, 'Update-Prüfung: „Jetzt suchen“ trägt die neue Version sofort bei WordPress ein, merkt die Neuerung und verkürzt den Abstand');
 $GLOBALS['upd'] = ['version' => '99.2.0', 'zip' => $zipok]; $GLOBALS['tr'] = [];
-ok(SAB::update_nachsehen(false) === '' && ($GLOBALS['str']['update_plugins']->response['schlanke-amazon-box/schlanke-amazon-box.php']->new_version ?? '') === '99.1.0', 'Update-Prüfung: vor Ablauf des Abstands wird nicht erneut bei GitHub gefragt');
+ok(SAB::update_nachsehen(false) === '' && ($GLOBALS['str']['update_plugins']->response['1ab-affiliate-help/1ab-affiliate-help.php']->new_version ?? '') === '99.1.0', 'Update-Prüfung: vor Ablauf des Abstands wird nicht erneut bei GitHub gefragt');
 unset($GLOBALS['opt']['sab_upd_stat'], $GLOBALS['opt']['sab_upd_naechste'], $GLOBALS['upd'], $GLOBALS['str']);
 
 // ---- 0.75.43: Abruffehler und leere Antworten gelten nie als „Amazon kennt das Produkt nicht“ ----
@@ -1426,7 +1427,7 @@ ok(strpos($lz, 'freigegeben') !== false && strpos($lz, 'Nach UK-Titel suchen') !
 unset($GLOBALS['opt']['sab_laender_map']);
 $GLOBALS['opt']['sab_geo'] = '1'; $GLOBALS['opt']['sab_tags'] = "co.uk=uk-21\ncom=us-20"; ob_start(); SAB::geo_skript(); $g3 = ob_get_clean(); unset($GLOBALS['opt']['sab_geo'], $GLOBALS['opt']['sab_tags']);
 ok(strpos($g3, "data-sab-z") !== false, 'Länder-Umschaltung markiert umgeleitete Links für die Statistik');
-ok(strpos(file_get_contents(__DIR__ . '/schlanke-amazon-box.php'), 'z:a.getAttribute("data-sab-z")') !== false, 'Klickmessung sendet das Umschalt-Ziel mit (ohne IP)');
+ok(strpos(file_get_contents(dirname(__DIR__) . '/1ab-affiliate-help.php'), 'z:a.getAttribute("data-sab-z")') !== false, 'Klickmessung sendet das Umschalt-Ziel mit (ohne IP)');
 // 0.89.3: Zweier-Tabelle, Titel zwischen Bildlink und Textlink (Stelle = Textlink bzw. Bildlink)
 $e6 = '<table><tr><td><a href="https://www.amazon.de/dp/B0A1234567"><img src="a.jpg"></a><br>Echter Titel Erstes<br><a href="https://www.amazon.de/dp/B0A1234567">Angebot bei Amazon</a></td><td><a href="https://www.amazon.de/dp/B0B1234567"><img src="b.jpg"></a><br>Echter Titel Zweites<br><a href="https://www.amazon.de/dp/B0B1234567">Angebot bei Amazon</a></td></tr></table>';
 $pt6 = strpos($e6, '>Angebot bei Amazon', strpos($e6, 'Zweites')) ; $pt6 = strrpos(substr($e6, 0, $pt6), '<a '); $pb6 = strpos($e6, '<a href="https://www.amazon.de/dp/B0B1234567"');
@@ -1621,7 +1622,7 @@ ok($grc3 === 0 && strpos($o3, 's?k=dp') === false && strpos($o3, '"https://www.a
 ok(strpos($o3, 'Mein%20Zaun%20Set') !== false || strpos($o3, 'Zaun%20Akku') !== false, 'Länder-Umschaltung: Titel aus Attribut oder Pfad wird gesucht');
 // 0.89.32: Länder-Umschaltung sucht nie nach „dp“
 $gjs = new ReflectionMethod('SAB', 'geo_skript'); 
-$srcf = file_get_contents(__DIR__ . '/schlanke-amazon-box.php');
+$srcf = file_get_contents(dirname(__DIR__) . '/1ab-affiliate-help.php');
 ok(strpos($srcf, "u.pathname.split('/')[1]||'').replace(/-/g,' ')}\n") === false && strpos($srcf, "(dp|gp|product|s|exec|d|o|ref|stores|hz|b)") !== false, 'Geo-Skript: Pfadteil „dp“ wird nie Suchbegriff');
 // 0.89.33: alle_asins erfasst auch [amz_karte]/[amz_titel] und einfache Anführungszeichen
 $wpdb_vor = $GLOBALS['wpdb'];
@@ -1653,7 +1654,7 @@ $rz = $GLOBALS['sc']['amz_rezension'](['asin' => 'B0ABCDEFGH', 'land' => 'co.uk'
 ok(strpos($rz, 'amazon.co.uk/product-reviews/B0ABCDEFGH?tag=uk-21') !== false && strpos($rz, 'sponsored') !== false, 'Baustein [amz_rezension]');
 unset($GLOBALS['opt']['sab_tags']);
 // 0.89.39: Knopf „Jetzt tauschen“ direkt unter dem Bild jedes Vorschlags
-ok(preg_match('#sab_einzeln" value="\' \. esc_attr\(\$alt\) \. \'" onclick="this\.closest#', file_get_contents(__DIR__ . '/schlanke-amazon-box.php')) === 1, 'Austausch: Tausch-Knopf unter dem Bild jeder Karte');
+ok(preg_match('#sab_einzeln" value="\' \. esc_attr\(\$alt\) \. \'" onclick="this\.closest#', file_get_contents(dirname(__DIR__) . '/1ab-affiliate-help.php')) === 1, 'Austausch: Tausch-Knopf unter dem Bild jeder Karte');
 // 0.89.40: Textlink ohne Plugin-Bild ist kein Austauschgrund
 [$bm1, $ba1] = SAB::bild_bedarf_text('<p>Video</p><p><a href="https://www.amazon.de/dp/B0TEXTONLY">Gartennetz ansehen</a></p>[amz_bild asin="B0MITBILD1"][/amz_bild]<a href="https://www.amazon.de/dp/B0LNKBILD1"><img src="x.jpg"></a>[amz_link asin="B0LNKTEXT1"]Hier[/amz_link]');
 ok(isset($ba1['B0TEXTONLY']) && !isset($bm1['B0TEXTONLY']) && isset($bm1['B0MITBILD1']) && isset($bm1['B0LNKBILD1']) && !isset($bm1['B0LNKTEXT1']) && isset($ba1['B0LNKTEXT1']), 'Bildbedarf: Textlink braucht kein Bild, Bild-/Bildlink schon');
