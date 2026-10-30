@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.30
+ * Version: 0.92.31
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.30';
+    const VERSION = '0.92.31';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2290,7 +2290,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
     const EINZEL_TEXT = ['de' => ['Klick auf das Bild zum', 'Angebot bei Amazon'], 'es' => ['Haz clic en la imagen para ver la', 'oferta en Amazon'], 'fr' => ["Cliquez sur l'image pour voir l'", 'offre sur Amazon'], 'it' => ["Clicca sull'immagine per vedere l'", 'offerta su Amazon'], 'co.uk' => ['Click the image to see the', 'offer on Amazon'], 'com' => ['Click the image to see the', 'offer on Amazon']];
-    const KARTE_CSS = '.sab-karte-einzel{max-width:340px;margin-left:auto;margin-right:auto;box-shadow:0 1px 4px rgba(0,0,0,.06)}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.05em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel a.sab-bild{gap:6px}.sab-karte-cta{display:block;font-size:.88em;line-height:1.35;color:#555}.sab-karte-cta-l{color:#1a6b3c;font-weight:700;text-decoration:underline}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-karte .sab-bild img{height:160px}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
+    const KARTE_CSS = '.sab-karte-einzel{max-width:340px;margin-left:auto;margin-right:auto;box-shadow:0 1px 4px rgba(0,0,0,.06)}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.05em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel a.sab-bild{gap:6px}.sab-karte-cta{display:block;font-size:.88em;line-height:1.35;color:#555}.sab-karte-cta-l{color:#1a6b3c;font-weight:700;text-decoration:underline}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px!important;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-karte .sab-bild img{height:160px!important}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
@@ -2308,7 +2308,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
     public static function sc_karte($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => '', 'eigenbild' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
         if (strlen($asin) !== 10) { return ''; }
         self::$genutzt = true; self::$karten = true;
@@ -2317,7 +2317,13 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         // dein Titel aus dem Artikel bleibt stehen; nach einem Austausch kommt der Kurzname des neuen Produkts
         $titel = ($asin === $orig && trim((string) $a['titel']) !== '') ? esc_html(trim((string) $a['titel'])) : self::sc_titel(['asin' => $asin, 'land' => $land, 'kurz' => 70], '');
         if ($asin === $orig && trim((string) $a['titel']) === '' && !isset(self::produkte()[$asin])) { $tk = self::kurztitel(html_entity_decode($titel, ENT_QUOTES, 'UTF-8')); if ($tk !== '') { $titel = esc_html($tk); } }   // nie der lange Amazon-Titel
+        $eb = self::eigenbild_url(trim((string) $a['eigenbild']) !== '' ? (string) $a['eigenbild'] : (string) (self::eigenbilder()[$asin] ?? ''));
+        if ($eb !== '') {   // eigenes Produktbild (Mediathek-ID, Adresse oder Liste „ASIN | Adresse“ in den Einstellungen) statt Amazon-Bild; der Link bleibt der Amazon-Affiliate-Link
+            $lk0 = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-bild', 'tag' => $a['tag']], 'x');
+            $bild = preg_match('#^(<a\b[^>]*>).*</a>$#s', $lk0, $ob) ? $ob[1] . '<img src="' . esc_url($eb) . '" alt="' . esc_attr(strip_tags(html_entity_decode($titel, ENT_QUOTES, 'UTF-8'))) . '" loading="lazy" decoding="async" style="height:auto"></a>' : self::bild_fehlt($asin, 'Karte');
+        } else {
         $bild = self::brauchbar($p) ? self::sc_bild(['asin' => $asin, 'land' => $land, 'tag' => $a['tag']], '') : self::bild_fehlt($asin, 'Karte');   // nie still ohne Bild: Platzhalter, für Redakteure rot, und Eintrag in der Warnliste
+        }
         $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn', 'tag' => $a['tag']], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
         $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
         if ($ebay !== '') { $ebay = str_replace('<a ', '<a class="sab-karte-ebay" ', $ebay); }
@@ -2337,6 +2343,23 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
             return '<div class="sab-karte' . $kc . '">' . $mb[1] . $mb[2] . $tt . $ex . '<span class="sab-karte-btn">' . $mt[1] . '</span></a>' . $ebay . '</div>';
         }
         return '<div class="sab-karte' . $kc . '">' . $bild . $tt . $ex . $btn . $ebay . '</div>';
+    }
+
+    /** Eigene Produktbilder: Zeilen „ASIN | Mediathek-ID oder Bildadresse“ => [ASIN => Wert]. */
+    private static function eigenbilder(): array {
+        $out = [];
+        foreach (preg_split('/\R/', (string) get_option('sab_eigenbilder', '')) as $z) {
+            $t = array_map('trim', explode('|', $z, 2));
+            if (($t[0] ?? '') !== '' && self::asin($t[0]) && ($t[1] ?? '') !== '') { $out[self::asin($t[0])] = $t[1]; }
+        }
+        return $out;
+    }
+
+    /** Mediathek-ID oder Adresse zur Bildadresse; nur http(s)-Bilder. */
+    public static function eigenbild_url(string $v): string {
+        $v = trim($v); if ($v === '') { return ''; }
+        if (preg_match('/^\d+$/', $v)) { $u = function_exists('wp_get_attachment_image_url') ? wp_get_attachment_image_url((int) $v, 'large') : ''; return $u ? (string) $u : ''; }
+        return preg_match('#^https?://[^\s"<>]+$#i', $v) ? $v : '';
     }
 
     /** [amz_ebay asin="…" host="www.ebay.es" campid="…" suche="…"]Text[/amz_ebay]: eBay-Suchlink; nach einem Austausch sucht er mit dem Namen des neuen Produkts. */
@@ -8889,6 +8912,7 @@ JS;
                 update_option('sab_geo', !empty($_POST['sab_geo']) ? '1' : '0', false);
                 update_option('sab_hinweis_auto', !empty($_POST['sab_hinweis_auto']) ? '1' : '0', false);
                 update_option('sab_karten_css', !empty($_POST['sab_karten_css']) ? '1' : '0', false);
+                if (isset($_POST['sab_eigenbilder'])) { update_option('sab_eigenbilder', sanitize_textarea_field(wp_unslash($_POST['sab_eigenbilder'])), false); }
                 update_option('sab_heimat_liste', sanitize_textarea_field(wp_unslash($_POST['sab_heimat_liste'] ?? '')), false);
                 update_option('sab_generische_linktexte', sanitize_textarea_field(wp_unslash($_POST['sab_generische_linktexte'] ?? '')), false);
                 update_option('sab_weg_umbauen', !empty($_POST['sab_weg_umbauen']) ? '1' : '0', false);
@@ -9377,6 +9401,7 @@ JS;
                . '<tr><th>Allgemeine Linktexte</th><td><textarea name="sab_generische_linktexte" rows="3" cols="40" placeholder="Offer on Amazon&#10;Zum Shop vor Ort">' . esc_textarea((string) get_option('sab_generische_linktexte', '')) . '</textarea><p class="description">Ein Linktext je Zeile, der nie als Produkttitel gilt (Standard: Angebot/Offer/Click/Hier … bei Amazon, mehrsprachig). Der Titel kommt dann aus dem Satz vor dem Link.</p></td></tr>'
                . '<tr><th>Karten-Design</th><td><label><input type="checkbox" name="sab_karten_css" value="1"' . (get_option('sab_karten_css') !== '0' ? ' checked' : '')
                . '> kleines Karten-Design für <code>[amz_produkt]</code> laden (weißer Kasten, grüner Button)</label></td></tr>'
+               . '<tr><th>Eigene Produktbilder</th><td><textarea name="sab_eigenbilder" rows="3" class="large-text code" placeholder="B0ABCDEFGH | 1234">' . esc_textarea((string) get_option('sab_eigenbilder', '')) . '</textarea><p class="description">Eine Zeile pro Produkt: <code>ASIN | Mediathek-ID oder Bildadresse</code>. Karten dieses Produkts zeigen dann dein Bild statt des Amazon-Bilds (der Link bleibt der Amazon-Link). Einzeln geht auch im Artikel: <code>[amz_karte asin="…" eigenbild="1234"]</code>.</p></td></tr>'
                . '<tr><th>Umbau bei unbekannten Produkten</th><td><label><input type="checkbox" name="sab_weg_umbauen" value="1"' . (get_option('sab_weg_umbauen', '1') === '1' ? ' checked' : '')
                . '> Produkte, die Amazon nicht mehr kennt, trotzdem umbauen: Die Stelle zeigt „Momentan nicht verfügbar“, getauscht wird später mit Vorrang im Reiter Austausch</label></td></tr>'
                . '<tr><th>Nicht verfügbar</th><td><label><input type="checkbox" name="sab_strikt" value="1"' . (get_option('sab_strikt') === '1' ? ' checked' : '')

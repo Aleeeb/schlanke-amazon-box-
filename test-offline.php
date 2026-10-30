@@ -2093,4 +2093,11 @@ $tags_vorher = $GLOBALS['opt']['sab_tags'] ?? null; $GLOBALS['opt']['sab_tags'] 
 ok($tk !== null && strpos($tk, '[amz_karten]') === 0 && substr_count($tk, '[amz_karte ') === 2 && strpos($tk, 'titel="Komplettset 14-teilig"') !== false && strpos($tk, 'amz_link') === false && strpos($tk, '<') === false, 'Zweierblock: Bild, Titel und Textlink werden je Spalte zu EINER Karte (' . $tk . ')');
 ok(SAB::tabelle_zu_karten_platzhalter(str_replace('B0TABLE002', 'B0TABLE001', $tb)) === null, 'Zweierblock: dasselbe Produkt in beiden Spalten wird nicht umgebaut');
 if ($tags_vorher === null) { unset($GLOBALS['opt']['sab_tags']); } else { $GLOBALS['opt']['sab_tags'] = $tags_vorher; }
+// 0.92.31: Karte mit eigenem Produktbild
+$ek2 = SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Mein Produkt', 'eigenbild' => 'https://example.test/eigen.jpg']);
+ok(strpos($ek2, 'src="https://example.test/eigen.jpg"') !== false && strpos($ek2, 'es-B0TABLE001.jpg') === false && strpos($ek2, 'amazon.es/dp/B0TABLE001') !== false && substr_count($ek2, '<a ') === 1, 'Karte: eigenes Bild statt Amazon-Bild, ein Link zu Amazon (' . $ek2 . ')');
+$GLOBALS['opt']['sab_eigenbilder'] = "B0TABLE001 | https://example.test/liste.jpg";
+ok(strpos(SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es']), 'liste.jpg') !== false, 'Karte: eigenes Bild aus der Liste in den Einstellungen');
+unset($GLOBALS['opt']['sab_eigenbilder']);
+ok(SAB::eigenbild_url('javascript:alert(1)') === '', 'Eigenbild: nur http(s)-Adressen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
