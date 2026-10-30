@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.42
+ * Version: 0.92.43
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.42';
+    const VERSION = '0.92.43';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -108,6 +108,7 @@ final class SAB {
         add_action('wp_footer',      [__CLASS__, 'messskript']);
         add_action('wp_footer',      [__CLASS__, 'zeige_skript'], 99);
         add_action('admin_footer-post.php', [__CLASS__, 'zeige_editor_skript']);
+        add_action('admin_footer', [__CLASS__, 'balken_admin']);
         add_filter('pre_do_shortcode_tag', [__CLASS__, 'ord_pre'], 10, 4);
         add_filter('do_shortcode_tag',     [__CLASS__, 'ord_post'], 10, 4);
         add_filter('the_content',          [__CLASS__, 'ord_reset'], 9);
@@ -3120,12 +3121,28 @@ JS;
         wp_send_json_success(['alt' => $l['alt'] ?? '', 'neu' => $l['neu'] ?? '', 'weiter' => admin_url('admin.php?page=sab-austausch')]);
     }
 
+    /** Kleiner Fortschrittsbalken mit Sekundenzähler, damit man bei langen Abläufen sieht, dass nichts hängt. JS-Funktion sabBalken(text) liefert die Funktion zum Entfernen. */
+    private static function balken_js(): string {
+        return <<<'JS'
+function sabBalken(txt){var s=document.getElementById("sab-bal-css");if(!s){s=document.createElement("style");s.id="sab-bal-css";s.textContent="@keyframes sabbal{from{background-position:0 0}to{background-position:40px 0}}#sab-bal{position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:100001;background:#fff;color:#222;border:1px solid #c3c4c7;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.25);padding:10px 14px;font:600 13px/1.3 sans-serif;min-width:240px;max-width:90vw}#sab-bal i{display:block;height:6px;margin-top:8px;border-radius:4px;background:repeating-linear-gradient(45deg,#2271b1 0 10px,#72aee6 10px 20px);background-size:40px 100%;animation:sabbal .8s linear infinite}";document.head.appendChild(s)}var o=document.getElementById("sab-bal");if(o){o.remove()}var b=document.createElement("div");b.id="sab-bal";var l=document.createElement("span");b.appendChild(l);b.appendChild(document.createElement("i"));document.body.appendChild(b);var t0=Date.now();function u(){l.textContent=txt+" … "+Math.round((Date.now()-t0)/1000)+" s. Es läuft, bitte warten."}u();var iv=setInterval(u,500);return function(){clearInterval(iv);b.remove()}}
+JS;
+    }
+
+    /** Auf der Plugin-Seite im Verwaltungsbereich: Zeigt nach dem Absenden eines Formulars (Tauschen, Umbauen, …) nach kurzem Warten den Fortschrittsbalken, bis die Seite neu geladen ist. */
+    public static function balken_admin(): void {
+        if ((string) ($_GET['page'] ?? '') !== 'sab' || !current_user_can('manage_options')) { return; }
+        echo '<script>(function(){' . self::balken_js()
+           . 'document.addEventListener("submit",function(e){var f=e.target;if(!f||String(f.method).toLowerCase()!=="post"||f.target==="_blank"||f.hasAttribute("data-sab-kein")){return}'
+           . 'var b=e.submitter,t=(b&&(b.textContent||b.value)||"").replace(/\s+/g," ").trim();t=t?t.replace(/[.…]+$/,""):"Arbeitet";'
+           . 'setTimeout(function(){sabBalken(t)},400)})})();</script>';
+    }
+
     public static function stellen_skript(): void {
         if (!function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts') || !is_singular()) { return; }
         $pid_ = (int) get_queried_object_id();
         $cfg = wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $pid_, 'e' => $pid_ && current_user_can('edit_post', $pid_) ? admin_url('post.php?post=' . $pid_ . '&action=edit&sab_zeige=') : '', 'ko' => array_values(array_slice((array) get_option('sab_kurz_ok', []), -200))]);
-        echo '<script>(function(){var C=' . $cfg . ';var seen={};var cur={nth:0,txt:""};'
-           . 'function post(a,d,f){var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);fd.append("kurz",cur.kurz||"");for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){f({success:false,data:"Verbindungsfehler"})})}'
+        echo '<script>(function(){' . self::balken_js() . 'var C=' . $cfg . ';var seen={};var cur={nth:0,txt:""};'
+           . 'function post(a,d,f){var X=sabBalken(a==="sab_stelle_tausch"?"Tausche":"Arbeitet");var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);fd.append("kurz",cur.kurz||"");for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){X();f(r)}).catch(function(){X();f({success:false,data:"Verbindungsfehler"})})}'
            . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
            . 'function oeffne(o,asin){var ov=el("div","position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto");'
            . 'var bx=el("div","background:#fff;color:#222;max-width:640px;width:100%;border-radius:10px;padding:18px;font:14px/1.4 sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)");ov.appendChild(bx);'
@@ -3340,7 +3357,7 @@ JS;
         $ed = $eid && current_user_can('edit_post', $eid) ? admin_url('post.php?post=' . $eid . '&action=edit&sab_zeige=' . rawurlencode($a)) : '';
         $nr = max(1, (int) ($_GET['sab_nr'] ?? 1));
         $kc = $eid && current_user_can('edit_post', $eid) && self::kontrolle_stellen_ids($eid, strtoupper($a)) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'a' => strtoupper($a), 'w' => admin_url('admin.php?page=sab-austausch'), 'v' => self::kontrolle_code($eid, strtoupper($a)), 't' => self::kontrolle_tab_id($eid, strtoupper($a)) !== '']) : 'null';   // gerade im Frontend getauscht und noch nicht bestätigt
-        echo '<script>(function(){var OKX=' . ($eid && current_user_can('edit_post', $eid) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'w' => admin_url('admin.php?page=sab-austausch')]) : 'null') . ',KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
+        echo '<script>(function(){' . self::balken_js() . 'var OKX=' . ($eid && current_user_can('edit_post', $eid) ? wp_json_encode(['u' => admin_url('admin-ajax.php'), 'n' => wp_create_nonce('sab_stelle'), 'p' => $eid, 'w' => admin_url('admin.php?page=sab-austausch')]) : 'null') . ',KC=' . $kc . ',ed=' . wp_json_encode($ed) . ',a=' . wp_json_encode($a) . ',idx=' . ($nr - 1) . ',s=document.querySelectorAll("[data-sab-weg=\\""+a+"\\"],[data-sab-asin=\\""+a+"\\"],.entry-content a[href*=\\""+a+"\\"]");'
            . 's=(function(l){var o=[],bk="p,div,td,li,figure,h1,h2,h3,h4,h5,h6,section",ck="td,li,.sab-karte,.sab-produkt,.wp-block-column",last=null,lc=null;for(var i=0;i<l.length;i++){var b=l[i].closest(bk)||l[i].parentNode,c=l[i].closest(ck);if(last&&(b===last||(c&&c===lc))){continue}last=b;lc=c;o.push(l[i])}return o})(Array.prototype.slice.call(s));'
            . 'var b=document.createElement("div");b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:99999;background:#d63638;color:#fff;padding:8px 16px;font:600 14px/1.4 sans-serif;text-align:center;display:flex;flex-wrap:wrap;gap:8px 10px;justify-content:center;align-items:center;max-height:45vh;overflow:auto;box-sizing:border-box";'
            . 'var t=document.createElement("span");t.style.cssText="flex:1 1 100%";b.appendChild(t);document.body.appendChild(b);'
@@ -3352,7 +3369,7 @@ JS;
            . 'for(var i=0;i<s.length;i++){s[i].style.outlineColor=i===idx?"#000":"#d63638"}s[idx].scrollIntoView({block:"center"});if(le){le.href=ed+"&sab_nr="+(idx+1)}}'
            . 'if(s.length>1){btn("◀ vorige",function(){zeige(idx-1)});btn("nächste ▶",function(){zeige(idx+1)})}'
            . 'btn("⇄ Hier tauschen",function(){var o=s[idx].closest("[data-sab-ord]"),q=o?document.querySelector("button.sab-tb[data-o=\""+o.getAttribute("data-sab-ord")+"\"]"):null;if(!q){var bx=s[idx].closest(".sab-karte,.sab-produkt,td")||s[idx].parentNode;q=bx&&bx.querySelector("button.sab-tb")}if(q){q.scrollIntoView({block:"center"});q.click()}else{t.textContent="Hier gibt es keinen Tauschen-Knopf (feste Stelle im Text): bitte im Editor bearbeiten."}});'
-           . 'function kpost(act,f){var fd=new FormData();fd.append("action",act);fd.append("n",KC.n);fd.append("post",KC.p);fd.append("neu",KC.a);fetch(KC.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(f).catch(function(){t.textContent="Verbindungsfehler"})}'
+           . 'function kpost(act,f){var X=sabBalken("Arbeitet");var fd=new FormData();fd.append("action",act);fd.append("n",KC.n);fd.append("post",KC.p);fd.append("neu",KC.a);fetch(KC.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){X();f(r)}).catch(function(){X();t.textContent="Verbindungsfehler"})}'
            . 'if(OKX&&/^[A-Z0-9]{10}$/.test(a)){var ob=btn("✓ Ist okay so, kann bleiben",function(){var fd=new FormData();fd.append("action","sab_stelle_belassen");fd.append("n",OKX.n);fd.append("post",OKX.p);fd.append("neu",a);fetch(OKX.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){if(r.success){t.textContent="Gemerkt: "+a+" bleibt, bis sich Score oder Lieferbarkeit deutlich ändern. Zurück: Reiter Austausch, Abschnitt „Als okay belassen“.";ob.style.display="none"}else{t.textContent=r.data}}).catch(function(){t.textContent="Verbindungsfehler"})});ob.title="Nimmt das Produkt aus der Austausch-Liste, solange sich Score und Lieferbarkeit nicht stark ändern (rückgängig im Reiter Austausch)"}'
            . 'if(KC&&KC.v&&KC.v.nachher){btn("Code anzeigen",function(e){var d=document.getElementById("sab-code");if(d){d.remove();return}d=document.createElement("textarea");d.id="sab-code";d.readOnly=true;d.style.cssText="position:fixed;left:8px;right:8px;top:56px;height:42vh;z-index:99998;font:12px monospace;padding:8px";d.value="VORHER:\n"+KC.v.vorher+"\n\nNACHHER:\n"+KC.v.nachher;document.body.appendChild(d);d.select()})}'
            . 'if(KC){var ok=btn("✓ Kontrolliert, passt",function(){kpost("sab_stelle_ok",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});ok.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2";var rg=btn("✗ Passt nicht, rückgängig"+(KC.t?" (alle Artikel dieses Tauschs)":""),function(){kpost("sab_stelle_zurueck",function(r){if(r.success){location.href=r.data.weiter}else{t.textContent=r.data}})});rg.style.cssText+=";font-weight:700;font-size:16px;padding:8px 18px;order:-2"}'

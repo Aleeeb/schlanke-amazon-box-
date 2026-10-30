@@ -2160,6 +2160,13 @@ ok($mr->invoke(null, 'https://www.amazon.es/product-reviews/B0ABCDEFGH/') === ['
 // 0.92.41: Buch-Widget: Kurztext nie aus Shortcode-Resten
 $wfx = $mWe->invoke(null, ['inhalt' => "<!-- wp:paragraph {\"align\":\"center\"} -->\n<p class=\"has-text-align-center\">[amazon fields=\"1952692008\" value=\"thumb\" image_size=\"large\" image_width=\"300\" image_height=\"300\"]</p>\n<!-- /wp:paragraph -->", 'asins' => ['1952692008']]);
 ok($wfx['text'] === '' && $wfx['titel'] === '' && $wfx['asin'] === '1952692008' && strpos(json_encode($wfx), 'amazon') === false, 'Buch-Widget: Vorbelegung ohne Shortcode-Reste (' . json_encode($wfx) . ')');
+
+// 0.92.43: Fortschrittsbalken beim Tauschen und Umwandeln
+$mbj = new ReflectionMethod('SAB', 'balken_js'); $mbj->setAccessible(true); $bj = $mbj->invoke(null);
+$_GET['page'] = 'sab'; $GLOBALS['admin'] = true; ob_start(); SAB::balken_admin(); $ba = ob_get_clean(); unset($_GET['page']); $GLOBALS['admin'] = false;
+file_put_contents(sys_get_temp_dir() . '/sab_balken.js', preg_replace('#</?script>#', '', $ba));
+ok(strpos($bj, 'function sabBalken') !== false && strpos($ba, 'sabBalken(t)') !== false && strpos($ba, '"submit"') !== false, 'Fortschrittsbalken: Verwaltungsseite zeigt ihn nach dem Absenden eines Formulars');
+$_GET['page'] = 'andere'; ob_start(); SAB::balken_admin(); $bb = ob_get_clean(); unset($_GET['page']); ok($bb === '', 'Fortschrittsbalken: nur auf der Plugin-Seite');
 // 0.92.33: H4 vor Produktblöcken zu fettem Text
 [$h4a, $h4n] = SAB::h4_zu_fett('<p>Text</p><h4>Schneckenzaun Set</h4>[amz_karten][amz_karte asin="B0TABLE001"][/amz_karten]<h4>Mitten im Text</h4><p>weiter</p>');
 ok($h4n === 1 && strpos($h4a, '<p class="sab-vortitel">Schneckenzaun Set</p>') !== false && strpos($h4a, '<h4>Mitten im Text</h4>') !== false, 'H4: vor Kartenblock zu fettem Text, H4 im Text bleibt (' . $h4a . ')');
