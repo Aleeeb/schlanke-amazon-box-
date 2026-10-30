@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.93.5
+ * Version: 0.93.6
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.93.5';
+    const VERSION = '0.93.6';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -73,6 +73,7 @@ final class SAB {
 
     public static function init(): void {
         add_shortcode('amz_produkt', [__CLASS__, 'sc_produkt']);
+        add_shortcode('amz_ab_kopf', [__CLASS__, 'sc_ab_kopf']);
         add_shortcode('amz_bild',    [__CLASS__, 'sc_bild']);
         add_shortcode('amz_link',    [__CLASS__, 'sc_link']);
         add_shortcode('amz_titel',   [__CLASS__, 'sc_titel']);
@@ -3204,6 +3205,13 @@ JS;
                 if (preg_match('#^(?:\s|<p[^>]*>|</p>|<br\s*/?>|&nbsp;|<!--.*?-->)*$#is', $gap)) {
                     $f = self::ab_einheit($b['s'], $bl[$i + 1]['e'], $b['k'], $bl[$i + 1]['k']);
                     if ($f) { $i++; }
+                } elseif (preg_match('#^(?:\s|<br\s*/?>|&nbsp;|<!--.*?-->)*(' . self::AB_KOPF . ')(?:\s|<br\s*/?>|&nbsp;|<!--.*?-->)*$#is', $gap, $g2)) {
+                    // Jeder Zweier-Block hat eine eigene Überschrift (fetter Absatz oder H2 bis H6): sie gehört zur Variante und wechselt mit
+                    $vor = substr($c, max(0, $b['s'] - 900), min(900, $b['s'])); $off = max(0, $b['s'] - 900);
+                    if (preg_match('#(' . self::AB_KOPF . ')(?:\s|<br\s*/?>|&nbsp;|<!--.*?-->)*$#is', $vor, $g1, PREG_OFFSET_CAPTURE)) {
+                        $f = self::ab_einheit($off + $g1[1][1], $bl[$i + 1]['e'], $b['k'], $bl[$i + 1]['k'], [$g1[1][0], $g2[1]]);
+                        if ($f) { $i++; }
+                    }
                 }
             }
             if ($f) { $out[] = $f; }
@@ -3211,14 +3219,17 @@ JS;
         return $out;
     }
 
-    private static function ab_einheit(int $s, int $e, array $ka, array $kb): ?array {
+    /** Überschrift vor einem Zweier-Block: H2 bis H6 oder ein Absatz, der nur aus fettem Text besteht. */
+    const AB_KOPF = '<h[2-6]\b[^>]*>(?:(?!</h[2-6]>).)*</h[2-6]>|<p\b[^>]*>\s*<(?:strong|b)\b[^>]*>(?:(?!</(?:strong|b)>|</p>).)*</(?:strong|b)>[^<]{0,40}</p>';
+
+    private static function ab_einheit(int $s, int $e, array $ka, array $kb, array $kopf = []): ?array {
         $a = self::ab_karten_asins($ka); $b = self::ab_karten_asins($kb);
         if (count($a) !== 2 || count($b) !== 2 || count(array_unique($a)) !== 2 || count(array_unique($b)) !== 2 || array_intersect($a, $b)) { return null; }
         $sa = $a; sort($sa); $sb = $b; sort($sb);
         $ka_ = implode(',', $sa); $kb_ = implode(',', $sb);
         $tausch = strcmp($ka_, $kb_) > 0;
         return ['s' => $s, 'e' => $e, 'id' => substr(md5($tausch ? $kb_ . '|' . $ka_ : $ka_ . '|' . $kb_), 0, 8),
-                'p' => [['v' => $tausch ? 'B' : 'A', 'k' => $ka, 'asins' => $a], ['v' => $tausch ? 'A' : 'B', 'k' => $kb, 'asins' => $b]]];
+                'p' => [['v' => $tausch ? 'B' : 'A', 'k' => $ka, 'asins' => $a, 'h' => (string) ($kopf[0] ?? '')], ['v' => $tausch ? 'A' : 'B', 'k' => $kb, 'asins' => $b, 'h' => (string) ($kopf[1] ?? '')]]];
     }
 
     /** the_content (vor den Platzhaltern): Kartenblöcke eines laufenden Tests bekommen die Test-Kennung; Inhalt und Datenbank bleiben unverändert. */
@@ -3234,7 +3245,7 @@ JS;
                 continue;
             }
             $o = ++self::$ab_n;
-            foreach ($f['p'] as $i => $p) { $neu .= '[amz_karten ab="' . $f['id'] . '" abv="' . $p['v'] . '" abo="' . $o . '" abi="' . ($i + 1) . '"' . ($ed ? ' abx="' . $f['id'] . '"' : '') . ']' . implode('', $p['k']) . '[/amz_karten]'; }
+            foreach ($f['p'] as $i => $p) { $neu .= ($p['h'] !== '' ? '[amz_ab_kopf abo="' . $o . '" abi="' . ($i + 1) . '" k="' . base64_encode($p['h']) . '"]' : '') . '[amz_karten ab="' . $f['id'] . '" abv="' . $p['v'] . '" abo="' . $o . '" abi="' . ($i + 1) . '"' . ($ed ? ' abx="' . $f['id'] . '"' : '') . ']' . implode('', $p['k']) . '[/amz_karten]'; }
         }
         return $pos ? $neu . substr($c, $pos) : $c;
     }
@@ -3245,14 +3256,23 @@ JS;
         return ['id' => (string) $a['ab'], 'v' => (string) $a['abv'], 'o' => max(1, (int) ($a['abo'] ?? 1)), 'i' => ((int) ($a['abi'] ?? 1)) === 2 ? 2 : 1];
     }
 
+    /** Überschrift einer A/B-Variante (Zweier-Block): wird wie der Block gezeigt oder versteckt. */
+    public static function sc_ab_kopf($a): string {
+        $a = (array) $a; $h = base64_decode((string) ($a['k'] ?? ''), true);
+        if ($h === false || $h === '') { return ''; }
+        $i = ((int) ($a['abi'] ?? 1)) === 2 ? 2 : 1;
+        return '<div class="sab-ab-kopf" data-sab-abo="' . (int) ($a['abo'] ?? 1) . '" data-sab-abi="' . $i . '">' . $h . '</div>';
+    }
+
     private static function ab_skript(array $ab): string {
         $css = '';
-        if (!self::$ab_gesehen) { $css = '<style>.sab-karten[data-sab-abi="2"]{display:none}</style><noscript><style>.sab-karten[data-sab-abi="2"]{display:grid!important}</style></noscript>'; }
+        if (!self::$ab_gesehen) { $css = '<style>.sab-karten[data-sab-abi="2"],.sab-ab-kopf[data-sab-abi="2"]{display:none}</style><noscript><style>.sab-karten[data-sab-abi="2"]{display:grid!important}.sab-ab-kopf[data-sab-abi="2"]{display:block!important}</style></noscript>'; }
         self::$ab_gesehen[$ab['id']] = 1;
         $ed = self::ab_editor() ? 'true' : 'false';
         return $css . '<script>(function(o,id,ed){var p=document.querySelectorAll(\'.sab-karten[data-sab-abo="\'+o+\'"]\');if(p.length!==2)return;'
             . 'var f=(location.search.match(/[?&]sab_ab=([AB])/)||[])[1],i=f?(p[0].getAttribute("data-sab-abv")===f?0:1):(ed?0:(Math.random()<.5?0:1));'
             . 'p[1-i].style.setProperty("display","none","important");p[i].style.setProperty("display","grid","important");'
+            . 'var q=document.querySelectorAll(\'.sab-ab-kopf[data-sab-abo="\'+o+\'"]\');for(var k=0;k<q.length;k++){q[k].style.setProperty("display",q[k].getAttribute("data-sab-abi")===String(p[i].getAttribute("data-sab-abi"))?"block":"none","important")}'
             . 'if(!f&&!ed){(window.sabAB=window.sabAB||[]).push({b:id,v:p[i].getAttribute("data-sab-abv")})}})(' . (int) $ab['o'] . ',' . wp_json_encode($ab['id']) . ',' . $ed . ');</script>';
     }
 

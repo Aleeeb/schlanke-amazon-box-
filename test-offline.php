@@ -2087,4 +2087,15 @@ unset($GLOBALS['tr']['sab_alle_asins']);
 $pab = SAB::sc_widget(['typ' => 'produkt', 'asin' => 'B0PROD0001', 'land' => 'es', 'marke' => 'Tipp', 'titel' => 'Prod A', 'text' => 'Text A']);
 ok(substr_count($pab, 'class="sab-wtag">Tipp<') === 3 && strpos($pab, 'B0PROD0002') !== false && strpos($pab, 'B0PROD0003') !== false, 'Produkt-Widget: A/B/C über drei Produkte');
 $GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['opt']['sab_widget_tiere']);
+// 0.93.6: Überschriften gehören zur Variante
+$mitK = '<p><strong>Kupferband</strong></p>' . $zwei . '<h4>Elektrozaun</h4>' . $zwei2 . '<p>Ende</p>';
+$fk = SAB::ab_finde('Vor ' . $mitK);
+ok(count($fk) === 1 && strpos($fk[0]['p'][0]['h'], 'Kupferband') !== false && strpos($fk[0]['p'][1]['h'], 'Elektrozaun') !== false && $fk[0]['id'] === $f2[0]['id'], 'A/B: Überschrift vor jedem Zweier-Block wird erkannt und gehört zur Variante');
+ok(count(SAB::ab_finde('<h3>Gemeinsam</h3>' . $zwei . $zwei2)) === 1 && SAB::ab_finde('<h3>Gemeinsam</h3>' . $zwei . $zwei2)[0]['p'][0]['h'] === '', 'A/B: gemeinsame Überschrift vor dem Viererblock bleibt außerhalb');
+$GLOBALS['opt']['sab_ab'] = [$f2[0]['id'] => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d')]];
+$tk = SAB::ab_inhalt('Vor ' . $mitK);
+ok(substr_count($tk, '[amz_ab_kopf') === 2 && strpos($tk, '<h4>') === false && substr($tk, -11) === '<p>Ende</p>', 'A/B: Überschriften werden in die Varianten übernommen');
+preg_match_all('#\[amz_ab_kopf[^\]]*\]#', $tk, $kmm); $kh = SAB::sc_ab_kopf(['abo' => '1', 'abi' => '2', 'k' => base64_encode('<h4>Elektrozaun</h4>')]);
+ok(strpos($kh, '<h4>Elektrozaun</h4>') !== false && strpos($kh, 'data-sab-abi="2"') !== false, 'A/B: Überschrift der Variante wird ausgegeben');
+$GLOBALS['opt']['sab_ab'] = [];
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
