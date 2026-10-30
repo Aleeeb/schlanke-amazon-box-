@@ -11,4 +11,4 @@ WordPress-Plugin für Amazon-Partnerlinks (Ersatz für AAWP).
 Die alte Linie `schlanke-amazon-box.*` und `update.json` bleiben nur für Seiten, die noch nicht umgestellt sind.
 
 ## Datenschutz und Aufbewahrung
-Klick-, Seiten-, A/B- und Heatmap-Daten enthalten keine IP und kein Cookie. Sie werden täglich nach `sab_aufbewahrung_tage` Tagen gelöscht (Standard 400, 0 = nie). Obergrenze der Messungen: `sab_messungen_je_minute` (Filter, Standard 600).
+Klick-, Seiten-, A/B- und Heatmap-Daten enthalten keine IP und kein Cookie. Standardmäßig wird nichts gelöscht. Wer will, setzt `sab_aufbewahrung_tage` auf eine Tageszahl, dann werden ältere Zeilen täglich entfernt. Obergrenze der Messungen: `sab_messungen_je_minute` (Filter, Standard 600).

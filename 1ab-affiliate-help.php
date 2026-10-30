@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.41
+ * Version: 0.92.42
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.41';
+    const VERSION = '0.92.42';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1709,10 +1709,10 @@ final class SAB {
     }
 
     /** Täglicher Lauf: alle bekannten Produkte frisch holen, Ausfälle eintragen oder löschen. */
-    /** Löscht Messdaten, die älter sind als die Aufbewahrungszeit (Einstellung sab_aufbewahrung_tage, Standard 400, 0 = nie). */
+    /** Löscht Messdaten, die älter sind als die Aufbewahrungszeit (Einstellung sab_aufbewahrung_tage, Standard 0 = nie löschen). */
     public static function messdaten_aufraeumen(): void {
         global $wpdb;
-        $tage = (int) apply_filters('sab_aufbewahrung_tage', (int) get_option('sab_aufbewahrung_tage', 400));
+        $tage = (int) apply_filters('sab_aufbewahrung_tage', (int) get_option('sab_aufbewahrung_tage', 0));
         if (!isset($wpdb) || $tage < 1) { return; }
         $grenze = gmdate('Y-m-d', time() - $tage * DAY_IN_SECONDS);
         $wpdb->query($wpdb->prepare('DELETE FROM ' . self::klicktabelle() . ' WHERE ts < %s', $grenze . ' 00:00:00'));
