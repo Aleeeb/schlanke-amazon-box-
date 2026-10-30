@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.32
+ * Version: 0.92.33
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.32';
+    const VERSION = '0.92.33';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6238,6 +6238,23 @@ JS;
         return '[amz_karten]' . implode('', $karten) . '[/amz_karten]';
     }
 
+    /**
+     * H4-Überschriften unmittelbar vor einem Produkt-Kartenblock oder einer Produkttabelle werden zu fettem Text (<p><strong>…</strong></p>):
+     * eine Überschrift pro Produkt ist für SEO nicht sinnvoll, besonders wenn es davor keine H3 gibt. H4 mitten im Text sowie H2/H3 bleiben unberührt.
+     * @return array{0:string,1:int} [neuer Text, Anzahl]
+     */
+    public static function h4_zu_fett(string $c): array {
+        if (stripos($c, '<h4') === false) { return [$c, 0]; }
+        $n = 0;
+        $neu = preg_replace_callback('#(<!--\s*wp:heading\s*\{[^}]*"level"\s*:\s*4[^}]*\}\s*-->\s*)?<h4\b[^>]*>((?:(?!</h4>).)*?)</h4>(\s*<!--\s*/wp:heading\s*-->)?(\s*)(?=(?:<!--\s*wp:(?:shortcode|html|table)[^>]*-->\s*)?(?:<figure\b[^>]*>\s*)?(?:<table\b|\[amz_(?:karten|produkt|karte)\b))#is', function ($m) use (&$n) {
+            $in = trim($m[2]); if (trim(strip_tags($in)) === '') { return $m[0]; }
+            $n++;
+            $p = '<p>' . (preg_match('#^<(?:strong|b)\b#i', $in) ? $in : '<strong>' . $in . '</strong>') . '</p>';
+            return ($m[1] !== '' ? "<!-- wp:paragraph -->\n" . $p . "\n<!-- /wp:paragraph -->" : $p) . ($m[4] !== '' ? $m[4] : "\n\n");
+        }, $c);
+        return $neu === null ? [$c, 0] : [$neu, $n];
+    }
+
     /** Titel, die der Umbau in [amz_titel] verwandelt hat: ASIN => ursprünglicher Text (wird als Kurzname gespeichert). */
     public static array $neue_namen = [];
     private static bool $karten = false;
@@ -6370,7 +6387,8 @@ JS;
             $n++;
             return '[amz_link' . $attr . ']' . str_replace(['[', ']'], '', $text) . '[/amz_link]';
         }, $c);
-        return [self::attr_reparieren(strtr($c, $fest)), $n + self::$karten_n, $skip];
+        $h4n = 0; if ($nur === '') { [$c, $h4n] = self::h4_zu_fett($c); }
+        return [self::attr_reparieren(strtr($c, $fest)), $n + self::$karten_n + $h4n, $skip];
     }
 
     /** Analyse (nur Lesen): je ASIN Anzahl Stellen und Artikel, und was bereits im Plugin läuft. */
