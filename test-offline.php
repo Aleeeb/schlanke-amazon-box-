@@ -2155,6 +2155,10 @@ SAB::$umbau_abw = []; [$rz1, $rzn] = SAB::umbau_text('<p>Lies die <a href="https
 ok(strpos($rz1, '[amz_rezension asin="B0ABCDEFGH" land="es"]Rezensionen[/amz_rezension]') !== false && strpos($rz1, '[amz_rezension asin="B0ABCDEFGH" land="es"]Bewertungen[/amz_rezension]') !== false && strpos($rz1, "[amz_link") === false && $rzn >= 2, 'Umbau: Rezensionslinks (auch #customerReviews) werden zu [amz_rezension], nicht zum Produktlink (' . $rz1 . ')');
 $mr = new ReflectionMethod('SAB', 'rezension_ziel'); $mr->setAccessible(true);
 ok($mr->invoke(null, 'https://www.amazon.es/product-reviews/B0ABCDEFGH/') === ['es', 'B0ABCDEFGH'] && $mr->invoke(null, 'https://www.amazon.es/dp/B0ABCDEFGH') === null, 'Rezensionslink: Erkennung nur für Rezensionsseiten');
+
+// 0.92.41: Buch-Widget: Kurztext nie aus Shortcode-Resten
+$wfx = $mWe->invoke(null, ['inhalt' => "<!-- wp:paragraph {\"align\":\"center\"} -->\n<p class=\"has-text-align-center\">[amazon fields=\"1952692008\" value=\"thumb\" image_size=\"large\" image_width=\"300\" image_height=\"300\"]</p>\n<!-- /wp:paragraph -->", 'asins' => ['1952692008']]);
+ok($wfx['text'] === '' && $wfx['titel'] === '' && $wfx['asin'] === '1952692008' && strpos(json_encode($wfx), 'amazon') === false, 'Buch-Widget: Vorbelegung ohne Shortcode-Reste (' . json_encode($wfx) . ')');
 // 0.92.33: H4 vor Produktblöcken zu fettem Text
 [$h4a, $h4n] = SAB::h4_zu_fett('<p>Text</p><h4>Schneckenzaun Set</h4>[amz_karten][amz_karte asin="B0TABLE001"][/amz_karten]<h4>Mitten im Text</h4><p>weiter</p>');
 ok($h4n === 1 && strpos($h4a, '<p class="sab-vortitel">Schneckenzaun Set</p>') !== false && strpos($h4a, '<h4>Mitten im Text</h4>') !== false, 'H4: vor Kartenblock zu fettem Text, H4 im Text bleibt (' . $h4a . ')');

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.40
+ * Version: 0.92.41
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.40';
+    const VERSION = '0.92.41';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -8476,8 +8476,9 @@ JS;
     private static function widget_felder(array $w): array {
         $c = (string) $w['inhalt'];
         $titel = ''; $text = ''; $alt_u = ''; $alt_t = '';
-        if (preg_match('#<(?:h[1-6]|strong|b)\b[^>]*>(.*?)</(?:h[1-6]|strong|b)>#is', $c, $m)) { $titel = trim(html_entity_decode(strip_tags($m[1]))); }
-        if (preg_match_all('#<p\b[^>]*>(.*?)</p>#is', $c, $pm)) { foreach ($pm[1] as $p_) { $t = trim(html_entity_decode(strip_tags($p_))); if (mb_strlen($t) >= 25 && $t !== $titel) { $text = $t; break; } } }
+        $roh = static fn(string $h): string => trim(preg_replace('/\s+/u', ' ', preg_replace('#\[/?[A-Za-z_][^\]]*\]#', ' ', html_entity_decode(strip_tags($h)))));   // Shortcode-Reste ([amazon …], [aawp …]) sind nie Text
+        if (preg_match('#<(?:h[1-6]|strong|b)\b[^>]*>(.*?)</(?:h[1-6]|strong|b)>#is', $c, $m)) { $titel = $roh($m[1]); }
+        if (preg_match_all('#<p\b[^>]*>(.*?)</p>#is', $c, $pm)) { foreach ($pm[1] as $p_) { $t = $roh($p_); if (mb_strlen($t) >= 25 && $t !== $titel) { $text = $t; break; } } }
         if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $c, $am, PREG_SET_ORDER)) {
             foreach ($am as $a_) { if (!preg_match('#amazon\.|amzn\.|aawp|/dp/#i', $a_[2]) && ($t = trim(html_entity_decode(strip_tags($a_[3])))) !== '' && mb_strlen($t) <= 60) { $alt_u = html_entity_decode($a_[2]); $alt_t = $t; break; } }
         }
