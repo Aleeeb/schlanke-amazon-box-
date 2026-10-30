@@ -1,6 +1,6 @@
 <?php
 // Offline-Test ohne WordPress: php test-offline.php  (Stubs für die benötigten WP-Funktionen)
-define('ABSPATH', __DIR__ . '/');
+define('ABSPATH', dirname(__DIR__) . '/');
 const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
 $GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
@@ -36,7 +36,7 @@ $GLOBALS['sched'] = [];
 function wp_next_scheduled($h, $a = []) { if ($h === "sab_pruefen" || $h === "sab_auffrischen") return true; foreach ($GLOBALS['sched'] as $s) { if ($s === [$h, $a]) return 1; } return false; }
 function wp_schedule_single_event($t, $h, $a = []) { $GLOBALS['sched'][] = [$h, $a]; return true; }
 function spawn_cron() {}
-require __DIR__ . '/schlanke-amazon-box.php';
+require dirname(__DIR__) . '/1ab-affiliate-help.php';
 $fail = 0;
 function ok($c, $n) { global $fail; echo ($c ? 'OK   ' : 'FEHLER ') . $n . "\n"; if (!$c) $fail++; }
 function item($asin) { return ['asin' => $asin, 'detailPageURL' => "https://www.amazon.es/dp/$asin?tag=t-21", 'itemInfo' => ['title' => ['displayValue' => "T$asin"]],

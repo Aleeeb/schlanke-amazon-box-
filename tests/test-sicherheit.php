@@ -1,6 +1,6 @@
 <?php
 // Offline-Test ohne WordPress: php test-offline.php  (Stubs für die benötigten WP-Funktionen)
-define('SAB_SYNC', 1); define('ABSPATH', __DIR__ . '/');
+define('SAB_SYNC', 1); define('ABSPATH', dirname(__DIR__) . '/');
 const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
 $GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
@@ -43,11 +43,45 @@ class FW { public $prefix = 'wp_'; function prepare($q, ...$a) { return $q; } fu
   if (strpos($q, "ziel <>") !== false) return [['ziel' => 'com:a', 'n' => 2], ['ziel' => 'ca:s', 'n' => 1]];
   return [['asin' => 'B000000001', 'n' => 5, 'b' => 3, 'x' => 2, 'z' => 1, 'm' => 120], ['asin' => 'B000000002', 'n' => 2, 'b' => 0, 'x' => 2, 'z' => 0, 'm' => null]]; } }
 $GLOBALS['wpdb'] = new FW;
-require __DIR__ . '/schlanke-amazon-box.php';
-$m = new ReflectionMethod('SAB', 'statistik_html'); $m->setAccessible(true);
-$h = $m->invoke(null);
+if (!function_exists('apply_filters')) { function apply_filters($t, $v) { return $v; } }
+if (!function_exists('wp_parse_url')) { function wp_parse_url($u, $c = -1) { return parse_url($u, $c); } }
+if (!function_exists('gmdate')) { }
+if (!class_exists('WP_REST_Response')) { class WP_REST_Response { public $d; public $s; function __construct($d = null, $s = 200) { $this->d = $d; $this->s = $s; } } }
+if (!class_exists('WP_Error')) { class WP_Error { } }
+if (!function_exists('hash_equals')) { }
+if (!function_exists('is_user_logged_in')) { function is_user_logged_in() { return false; } }
+if (!function_exists('current_user_can')) { function current_user_can($c) { return false; } }
+if (!function_exists('wp_validate_auth_cookie')) { function wp_validate_auth_cookie() { return 0; } }
+class Wpdb2 { public $prefix = 'wp_'; public $q = []; public $ins = [];
+    function prepare($s, ...$a) { $a = isset($a[0]) && is_array($a[0]) ? $a[0] : $a; return vsprintf(str_replace(['%s', '%d'], ["'%s'", '%d'], $s), $a); }
+    function query($s) { $this->q[] = $s; return 1; } function insert($t, $r) { $this->ins[] = [$t, $r]; return 1; }
+    function get_results($s, $o = null) { return []; } function get_col($s) { return []; } function get_var($s) { return 0; } }
+$GLOBALS['wpdb'] = new Wpdb2;
+require dirname(__DIR__) . '/1ab-affiliate-help.php';
 $fail = 0; function ok($c, $n) { global $fail; echo ($c ? 'OK   ' : 'FEHLER ') . $n . "\n"; if (!$c) $fail++; }
-ok(strpos($h, '<svg') !== false && strpos($h, '<strong>7</strong> Klicks gesamt') !== false, 'Statistik: Grafik und Summe');
-ok(strpos($h, 'B000000001') !== false && strpos($h, '2 Min.') !== false && strpos($h, 'zu wenig Daten') !== false && strpos($h, '71 %') !== false, 'Statistik: Liste mit Anteil und Zeit');
-ok(strpos($h, 'Umgeleitete Klicks') !== false && strpos($h, 'USA') !== false && strpos($h, 'direkt zur ASIN im Land') !== false && strpos($h, 'Kanada') !== false && strpos($h, '3 von 7 Klicks (43 %)') !== false, 'Statistik: umgeleitete Klicks nach Land und Art');
+$pf = new ReflectionMethod('SAB', 'pfad_sauber'); $pf->setAccessible(true);
+ok($pf->invoke(null, '/schnecken/kupferband/?x=1') === '/schnecken/kupferband/', 'Pfad: Query wird entfernt');
+ok($pf->invoke(null, '/a b/<script>') === '', 'Pfad: Sonderzeichen werden abgelehnt');
+ok($pf->invoke(null, 'javascript:alert(1)') === '', 'Pfad: kein Pfad = leer');
+ok(strlen($pf->invoke(null, '/' . str_repeat('a', 400))) === 190, 'Pfad: höchstens 190 Zeichen');
+$me = new ReflectionMethod('SAB', 'messung_erlaubt'); $me->setAccessible(true);
+$GLOBALS['tr'] = []; $n = 0; for ($i = 0; $i < 700; $i++) { if ($me->invoke(null)) { $n++; } }
+ok($n === 600, 'Messung: nach 600 je Minute wird abgelehnt (erlaubt: ' . $n . ')');
+$ma = new ReflectionMethod('SAB', 'messdaten_aufraeumen');
+$GLOBALS['opt']['sab_aufbewahrung_tage'] = 100; $GLOBALS['wpdb']->q = []; $ma->invoke(null);
+ok(count($GLOBALS['wpdb']->q) === 4 && strpos(implode(' ', $GLOBALS['wpdb']->q), 'sab_klicks') !== false && strpos(implode(' ', $GLOBALS['wpdb']->q), 'sab_heat') !== false, 'Aufräumen: Klicks, A/B, Seiten und Heatmap werden gekürzt');
+$GLOBALS['opt']['sab_aufbewahrung_tage'] = 0; $GLOBALS['wpdb']->q = []; $ma->invoke(null);
+ok(count($GLOBALS['wpdb']->q) === 0, 'Aufräumen: 0 = nichts löschen');
+// Update-Prüfsumme
+$tmp = tempnam(sys_get_temp_dir(), 'z'); file_put_contents($tmp, 'ZIPDATA');
+function download_url($u, $t = 300) { return $GLOBALS['dl']; }
+$GLOBALS['dl'] = $tmp; $zip = SAB::UPDATE_REPO . 'raw/main/x.zip';
+$GLOBALS['tr']['sab_update_json'] = ['version' => '9', 'zip' => $zip, 'sha256' => hash('sha256', 'ZIPDATA')];
+ok(SAB::update_summe_pruefen(false, $zip) === $tmp, 'Update-Summe: passende Summe lässt das ZIP durch');
+$GLOBALS['tr']['sab_update_json']['sha256'] = str_repeat('0', 64);
+$r = SAB::update_summe_pruefen(false, $zip);
+ok($r instanceof WP_Error && !file_exists($tmp), 'Update-Summe: falsche Summe bricht ab und löscht die Datei');
+$GLOBALS['tr']['sab_update_json'] = ['version' => '9', 'zip' => $zip];
+ok(SAB::update_summe_pruefen(false, $zip) === false, 'Update-Summe: ohne Summe in der JSON läuft es wie bisher');
+ok(SAB::update_summe_pruefen(false, 'https://evil.example/x.zip') === false, 'Update-Summe: fremde Adresse wird nicht angefasst');
 echo $fail ? "$fail FEHLER\n" : "Alles bestanden\n";

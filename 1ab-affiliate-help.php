@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.39
+ * Version: 0.92.40
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.39';
+    const VERSION = '0.92.40';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -134,6 +134,7 @@ final class SAB {
         add_action('wp_footer',      [__CLASS__, 'fuss'], 5);
         add_action('wp_footer',      [__CLASS__, 'widget_css_fuss'], 6);
         add_filter('pre_set_site_transient_update_plugins', [__CLASS__, 'update_pruefen']);
+        add_filter('upgrader_pre_download', [__CLASS__, 'update_summe_pruefen'], 10, 2);
         add_action('sab_update_check', [__CLASS__, 'update_cron']);
         add_action('admin_init',     [__CLASS__, 'update_admin']);
         add_action('admin_init',     [__CLASS__, 'tabelle']);
@@ -258,9 +259,17 @@ final class SAB {
     }
 
     /** Zeilen "ASIN | Kurzname" => [ASIN => Kurzname]; der Kurzname darf selbst einen Strich enthalten ("Wühlmauskorb | 8 Stück"). */
+    /** Wird je Aufruf nur einmal zerlegt: gleiche Einstellung = gleiches Ergebnis (spart Rechenzeit bei jeder Karte). */
     private static function produkte(): array {
+        static $k = null, $m = [];
+        $raw = (string) get_option('sab_produkte', '');
+        if ($k !== $raw) { $m = self::produkte_lesen($raw); $k = $raw; }
+        return $m;
+    }
+
+    private static function produkte_lesen(string $raw): array {
         $out = [];
-        foreach (preg_split('/\R/', (string) get_option('sab_produkte', '')) as $z) {
+        foreach (preg_split('/\R/', $raw) as $z) {
             $t = array_map('trim', explode('|', $z, 2));   // alles nach dem ersten Strich ist der Name: „ASIN | Wühlmauskorb | 8 Stück“ behält den Strich im Namen
             if ($t[0] !== '' && self::asin($t[0])) { $out[self::asin($t[0])] = preg_replace('/ {3,}/', ' | ', $t[1] ?? ''); }   // drei Leerzeichen waren früher der Ersatz für den Strich: wird als „ | “ angezeigt
         }
@@ -269,9 +278,17 @@ final class SAB {
 
     /** Zeilen "slot: ASIN1, ASIN2" => [slot => [ASIN1, ASIN2]]. Erste ASIN = bevorzugt, Rest = Ersatz in dieser Reihenfolge. */
     /** Produktgruppen: Zeilen „Name: ASIN1, ASIN2, …“ (ähnliche Produkte, z. B. alle Kupferbänder). */
+    /** Wird je Aufruf nur einmal zerlegt: gleiche Einstellung = gleiches Ergebnis (spart Rechenzeit bei jeder Karte). */
     private static function gruppen(): array {
+        static $k = null, $m = [];
+        $raw = (string) get_option('sab_gruppen', '');
+        if ($k !== $raw) { $m = self::gruppen_lesen($raw); $k = $raw; }
+        return $m;
+    }
+
+    private static function gruppen_lesen(string $raw): array {
         $out = [];
-        foreach (preg_split('/\R/', (string) get_option('sab_gruppen', '')) as $z) {
+        foreach (preg_split('/\R/', $raw) as $z) {
             if (strpos($z, ':') === false) { continue; }
             [$name, $liste] = array_map('trim', explode(':', $z, 2));
             $asins = array_values(array_unique(array_filter(array_map([__CLASS__, 'asin'], explode(',', $liste)))));
@@ -650,9 +667,17 @@ final class SAB {
         return $out;
     }
 
+    /** Wird je Aufruf nur einmal zerlegt: gleiche Einstellung = gleiches Ergebnis (spart Rechenzeit bei jeder Karte). */
     private static function slots(): array {
+        static $k = null, $m = [];
+        $raw = (string) get_option('sab_slots', '');
+        if ($k !== $raw) { $m = self::slots_lesen($raw); $k = $raw; }
+        return $m;
+    }
+
+    private static function slots_lesen(string $raw): array {
         $out = [];
-        foreach (preg_split('/\R/', (string) get_option('sab_slots', '')) as $z) {
+        foreach (preg_split('/\R/', $raw) as $z) {
             if (strpos($z, ':') === false) { continue; }
             [$name, $liste] = array_map('trim', explode(':', $z, 2));
             $asins = array_values(array_filter(array_map([__CLASS__, 'asin'], explode(',', $liste))));
@@ -662,9 +687,17 @@ final class SAB {
     }
 
     /** Zeilen "ALT => NEU" => [ALT => NEU]: seitenweiter Produkttausch */
+    /** Wird je Aufruf nur einmal zerlegt: gleiche Einstellung = gleiches Ergebnis (spart Rechenzeit bei jeder Karte). */
     private static function tausch_regeln(): array {
+        static $k = null, $m = [];
+        $raw = (string) get_option('sab_tausch', '');
+        if ($k !== $raw) { $m = self::tausch_regeln_lesen($raw); $k = $raw; }
+        return $m;
+    }
+
+    private static function tausch_regeln_lesen(string $raw): array {
         $out = [];
-        foreach (preg_split('/\R/', (string) get_option('sab_tausch', '')) as $z) {
+        foreach (preg_split('/\R/', $raw) as $z) {
             if (strpos($z, '=>') === false) { continue; }
             [$a, $b] = array_map('trim', explode('=>', $z, 2));
             $a = self::asin($a); $b = self::asin(explode('|', $b)[0]);
@@ -692,9 +725,17 @@ final class SAB {
     }
 
     /** Zeilen "slot: ASIN-A | ASIN-B" => [slot => [ASIN-A, ASIN-B]] (2 bis 4 Varianten) */
+    /** Wird je Aufruf nur einmal zerlegt: gleiche Einstellung = gleiches Ergebnis (spart Rechenzeit bei jeder Karte). */
     private static function tests(): array {
+        static $k = null, $m = [];
+        $raw = (string) get_option('sab_tests', '');
+        if ($k !== $raw) { $m = self::tests_lesen($raw); $k = $raw; }
+        return $m;
+    }
+
+    private static function tests_lesen(string $raw): array {
         $out = [];
-        foreach (preg_split('/\R/', (string) get_option('sab_tests', '')) as $z) {
+        foreach (preg_split('/\R/', $raw) as $z) {
             if (strpos($z, ':') === false) { continue; }
             [$name, $liste] = array_map('trim', explode(':', $z, 2));
             $asins = array_values(array_filter(array_map([__CLASS__, 'asin'], explode('|', $liste))));
@@ -1668,8 +1709,35 @@ final class SAB {
     }
 
     /** Täglicher Lauf: alle bekannten Produkte frisch holen, Ausfälle eintragen oder löschen. */
+    /** Löscht Messdaten, die älter sind als die Aufbewahrungszeit (Einstellung sab_aufbewahrung_tage, Standard 400, 0 = nie). */
+    public static function messdaten_aufraeumen(): void {
+        global $wpdb;
+        $tage = (int) apply_filters('sab_aufbewahrung_tage', (int) get_option('sab_aufbewahrung_tage', 400));
+        if (!isset($wpdb) || $tage < 1) { return; }
+        $grenze = gmdate('Y-m-d', time() - $tage * DAY_IN_SECONDS);
+        $wpdb->query($wpdb->prepare('DELETE FROM ' . self::klicktabelle() . ' WHERE ts < %s', $grenze . ' 00:00:00'));
+        foreach ([self::ab_tabelle(), self::seiten_tabelle(), self::heattabelle()] as $tab) { $wpdb->query($wpdb->prepare("DELETE FROM $tab WHERE tag < %s", $grenze)); }
+    }
+
+    /** Pfad aus einer Messung: nur der Pfadteil, nur übliche URL-Zeichen, höchstens 190 Zeichen; sonst leer (verhindert Zufallspfade als Datenmüll). */
+    private static function pfad_sauber(string $url): string {
+        $p = (string) wp_parse_url($url, PHP_URL_PATH);
+        return preg_match('#^/[A-Za-z0-9/_.,~%+@:-]*$#', $p) ? substr($p, 0, 190) : '';
+    }
+
+    /** Obergrenze für Messungen je Minute (für die ganze Seite, ohne IP): schützt die Datenbank vor Überflutung. */
+    private static function messung_erlaubt(): bool {
+        $max = (int) apply_filters('sab_messungen_je_minute', 600);
+        if ($max < 1) { return true; }
+        $k = 'sab_rate_' . gmdate('YmdHi'); $n = (int) get_transient($k);
+        if ($n >= $max) { return false; }
+        set_transient($k, $n + 1, 2 * MINUTE_IN_SECONDS);
+        return true;
+    }
+
     public static function pruefen(): void {
         self::alte_bilder_loeschen();
+        self::messdaten_aufraeumen();
         $land = self::land('');
         self::uebersicht_holen($land);   // hält den täglichen Score-Verlauf fest
         try { self::lern_abruf(); } catch (\Throwable $e) { /* optional */ }
@@ -2088,6 +2156,19 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
             add_filter('auto_update_plugin', $nur, 99999, 2); wp_maybe_auto_update(); remove_filter('auto_update_plugin', $nur, 99999);
         }
         wp_schedule_single_event(time() + max(60, self::update_intervall()), 'sab_update_check');
+    }
+
+    /** Steht in der update-JSON eine SHA-256-Summe, wird das ZIP vor dem Einspielen damit geprüft; bei Abweichung wird nichts installiert. */
+    public static function update_summe_pruefen($reply, $package) {
+        if ($reply !== false || !is_string($package) || strpos($package, self::UPDATE_REPO) !== 0) { return $reply; }
+        $m = get_transient('sab_update_json');
+        $h = is_array($m) ? strtolower((string) ($m['sha256'] ?? '')) : '';
+        if (!preg_match('/^[a-f0-9]{64}$/', $h)) { return $reply; }   // ohne Summe wie bisher
+        if (!function_exists('download_url')) { require_once ABSPATH . 'wp-admin/includes/file.php'; }
+        $file = download_url($package, 300);
+        if (is_wp_error($file)) { return $file; }
+        if (!hash_equals($h, (string) hash_file('sha256', $file))) { @unlink($file); return new WP_Error('sab_summe', 'Prüfsumme des Updates stimmt nicht. Es wurde nichts installiert.'); }
+        return $file;
     }
 
     /** Meldet WordPress eine neuere Version aus update.json im GitHub-Repo; das ZIP muss aus diesem Repo stammen. */
@@ -3369,9 +3450,12 @@ JS;
     private static function ab_editor(): bool { return function_exists('is_user_logged_in') && is_user_logged_in() && current_user_can('edit_posts'); }
 
     private static function ab_aktiv(): array {
+        static $k = null, $m = [];
+        $opt = self::ab_optionen();
+        if ($k === $opt) { return $m; }
         $out = [];
-        foreach (self::ab_optionen() as $id => $o) { if (!empty($o['an']) && preg_match('/^[a-f0-9]{8}$/', (string) $id)) { $out[(string) $id] = $o; } }
-        return $out;
+        foreach ($opt as $id => $o) { if (!empty($o['an']) && preg_match('/^[a-f0-9]{8}$/', (string) $id)) { $out[(string) $id] = $o; } }
+        $k = $opt; return $m = $out;
     }
 
     private static function seiten_tabelle(): string { global $wpdb; return $wpdb->prefix . 'sab_seiten'; }
@@ -4133,7 +4217,7 @@ JS;
     private static function ab_ansichten_zaehlen(array $liste, string $pfad): void {
         global $wpdb;
         $akt = self::ab_aktiv(); if (!$akt) { return; }
-        $t = self::ab_tabelle(); $pf = substr((string) wp_parse_url($pfad, PHP_URL_PATH), 0, 190); $tag = gmdate('Y-m-d'); $gesehen = [];
+        $t = self::ab_tabelle(); $pf = self::pfad_sauber($pfad); $tag = gmdate('Y-m-d'); $gesehen = [];
         $zeilen = [];
         foreach (array_slice($liste, 0, 8) as $e) {
             $b = (string) ($e['b'] ?? ''); $v = (string) ($e['v'] ?? '');
@@ -4235,14 +4319,14 @@ JS;
         $ua = (string) ($_SERVER['HTTP_USER_AGENT'] ?? '');
         if (!isset($wpdb) || $ua === '' || preg_match('/bot|crawl|spider|slurp|headless/i', $ua)) { return new WP_REST_Response(null, 204); }
         $d = json_decode((string) $req->get_body(), true);
-        if (!is_array($d) || !preg_match('/^[a-z0-9]{6,8}$/', (string) ($d['id'] ?? ''))) { return new WP_REST_Response(null, 204); }
+        if (!is_array($d) || !preg_match('/^[a-z0-9]{6,8}$/', (string) ($d['id'] ?? '')) || !self::messung_erlaubt()) { return new WP_REST_Response(null, 204); }
         $t = self::klicktabelle();
         if (isset($d['ab']) && is_array($d['ab'])) {
             self::ab_ansichten_zaehlen($d['ab'], (string) ($d['pfad'] ?? ''));
         }
         if (isset($d['hm'])) { self::heat_speichern($d); return new WP_REST_Response(null, 204); }
         if (isset($d['pv'])) {   // Seitenaufruf mit Produkten: nur Summe je Seite und Tag, ohne Besucherkennung
-            $wpdb->query($wpdb->prepare("INSERT INTO " . self::seiten_tabelle() . " (tag, pfad, n) VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1", gmdate('Y-m-d'), substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190)));
+            $wpdb->query($wpdb->prepare("INSERT INTO " . self::seiten_tabelle() . " (tag, pfad, n) VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1", gmdate('Y-m-d'), self::pfad_sauber((string) ($d['pfad'] ?? ''))));
         } elseif (isset($d['s'])) {
             $sek = (int) $d['s'];
             if ($sek > 0 && $sek <= 3 * HOUR_IN_SECONDS) {
@@ -4256,7 +4340,7 @@ JS;
                     'ts' => gmdate('Y-m-d H:i:s'), 'kid' => $d['id'], 'asin' => $asin,
                     'slot' => substr(preg_replace('/[^A-Za-z0-9_-]/', '', (string) ($d['slot'] ?? '')), 0, 40),
                     'var' => substr(preg_replace('/[^A-D]/', '', (string) ($d['var'] ?? '')), 0, 1),
-                    'typ' => $typ, 'pfad' => substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190),
+                    'typ' => $typ, 'pfad' => self::pfad_sauber((string) ($d['pfad'] ?? '')),
                     'anker' => substr(preg_replace('/[^A-Za-z0-9_.:-]/', '', (string) ($d['anker'] ?? '')), 0, 80),
                     'herkunft' => preg_match('/^[A-Z]{2}$/', (string) ($d['h'] ?? '')) ? (string) $d['h'] : '',   // Land des Besuchers, nur aus Zeitzone/Browsersprache (keine IP, kein Cookie)
                     'ziel_land' => preg_match('/^(?:de|es|fr|it|co\.uk|com|ca|com\.au)$/', (string) ($d['zl'] ?? '')) ? (string) $d['zl'] : '',   // Amazon-Land, in das der Klick wirklich ging
@@ -4272,7 +4356,7 @@ JS;
     public static function heat_speichern(array $d): void {
         global $wpdb;
         if (!isset($wpdb) || get_option('sab_heat', '1') === '0') { return; }
-        $pfad = substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190);
+        $pfad = self::pfad_sauber((string) ($d['pfad'] ?? ''));
         if ($pfad === '') { return; }
         $dev = ($d['dev'] ?? '') === 'm' ? 'm' : 'd'; $tag = gmdate('Y-m-d'); $z = [];
         if (!empty($d['f'])) {
