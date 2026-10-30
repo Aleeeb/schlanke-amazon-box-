@@ -787,7 +787,9 @@ $GLOBALS['wpdb'] = $wpdb_alt2; unset($GLOBALS['opt']['sab_uebersicht_stand_es'])
 $GLOBALS['opt']['sab_tags'] = "es=ayuba09-21"; $GLOBALS['opt']['sab_default_land'] = 'es'; unset($GLOBALS['opt']['sab_tausch'], $GLOBALS['opt']['sab_tausch_log'], $GLOBALS['opt']['sab_uebersicht_stand_es']);
 $ek = '<hr /><p><strong>Kupferband</strong></p><p>[amz_bild asin="B0KUPFER01" land="es"][/amz_bild]</p><p>Klick auf die <a href="https://link.amazon/B0d8rrpd3" target="_blank">oferta de Amazon</a>.</p><hr />';
 SAB::$umbau_abw = []; [$ec, $en] = SAB::umbau_text($ek);
-ok(strpos($ec, '[amz_link asin="B0KUPFER01" land="es"]oferta de Amazon[/amz_link]') !== false && strpos($ec, 'link.amazon') === false, 'Umbau: nicht auflösbarer link.amazon-Link unter einem Einzelprodukt wird zu [amz_link] dieses Produkts');
+$GLOBALS['opt']['sab_paare_umbauen'] = '0'; [$ec0] = SAB::umbau_text($ek); unset($GLOBALS['opt']['sab_paare_umbauen']);
+ok(strpos($ec0, '[amz_link asin="B0KUPFER01" land="es"]oferta de Amazon[/amz_link]') !== false && strpos($ec0, 'link.amazon') === false, 'Umbau: nicht auflösbarer link.amazon-Link unter einem Einzelprodukt wird zu [amz_link] dieses Produkts');
+ok(strpos($ec, '[amz_karte asin="B0KUPFER01" land="es" stil="einzel"]') !== false && strpos($ec, 'link.amazon') === false && strpos($ec, 'Klick auf die') === false && strpos($ec, '<p><strong>Kupferband</strong></p>') !== false, 'Umbau: Bild + link.amazon-Textlink darunter wird gleich eine Einzelkarte (' . $ec . ')');
 $zwei = '<hr /><p>[amz_bild asin="B0KUPFER01" land="es"][/amz_bild] [amz_bild asin="B0KUPFER02" land="es"][/amz_bild]</p><p><a href="https://link.amazon/B0d8rrpd3">oferta</a></p>';
 SAB::$umbau_abw = []; [$zc] = SAB::umbau_text($zwei);
 ok(strpos($zc, 'link.amazon') !== false, 'Umbau: bei zwei Produkten im Abschnitt wird nichts geraten');
@@ -2125,6 +2127,25 @@ file_put_contents(sys_get_temp_dir() . '/sab_heat.js', preg_replace('#</?script>
 ok(strpos(str_replace('\\/', '/', $ho), 'sab/v1/heat') !== false, 'Heatmap: Ansicht für angemeldete Redaktion mit ?sab_heat=1');
 $GLOBALS['loggedin'] = false; ob_start(); $_GET['sab_heat'] = '1'; SAB::heat_overlay(); $ho2 = ob_get_clean(); unset($_GET['sab_heat']); ok($ho2 === '', 'Heatmap: Besucher bekommen keine Ansicht');
 $GLOBALS['admin'] = false;
+
+// 0.92.36: getrenntes Bild + Textlink => eine Einzelkarte
+SAB::$umbau_info = []; SAB::$umbau_abw = [];
+$pa = '<p>Vorher.</p><p>[amz_bild asin="B0PAAR0001" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0PAAR0001" land="es"]Schneckenzaun Pro[/amz_link]</p><p>Danach.</p>';
+[$pa1, $pn1] = SAB::paare_zu_einzelkarten($pa);
+ok($pn1 === 1 && $pa1 === '<p>Vorher.</p>[amz_karten][amz_karte asin="B0PAAR0001" land="es" stil="einzel"][/amz_karten]<p>Danach.</p>', 'Paare: Bild- und Textlink-Absatz werden eine Einzelkarte (' . $pa1 . ')');
+$pb = "<!-- wp:html -->\n<p>[amz_bild asin=\"B0PAAR0002\"]<a href=\"x\"><img src=\"a.jpg\"></a>[/amz_bild]<br>[amz_link asin=\"B0PAAR0002\"]Zum Angebot[/amz_link]</p>\n<!-- /wp:html -->";
+[$pb1, $pn2] = SAB::paare_zu_einzelkarten($pb);
+ok($pn2 === 1 && strpos($pb1, '[amz_karte asin="B0PAAR0002" stil="einzel"]') !== false && strpos($pb1, '[amz_link') === false && strpos($pb1, '[amz_bild') === false, 'Paare: Bild und Textlink im selben Absatz (' . $pb1 . ')');
+$pc = '<p>[amz_bild asin="B0PAAR0003"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Dieses lange Zaunsystem hat uns im Test gut gefallen, weil es stabil ist: [amz_link asin="B0PAAR0003"]Zaun[/amz_link] und viel mehr Text drumherum.</p>';
+SAB::$umbau_abw = []; [$pc1, $pn3] = SAB::paare_zu_einzelkarten($pc);
+ok($pn3 === 0 && $pc1 === $pc && count(SAB::$umbau_abw) === 1, 'Paare: Textlink im langen Satz bleibt, mit Hinweis');
+$pd = '<p>[amz_bild asin="B0PAAR0004"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><hr><p>[amz_link asin="B0PAAR0004"]Anderer Abschnitt[/amz_link]</p>';
+[$pd1, $pn4] = SAB::paare_zu_einzelkarten($pd); ok($pn4 === 0 && $pd1 === $pd, 'Paare: über eine Trennlinie hinweg wird nichts zusammengeführt');
+$pe = '<p>[amz_bild asin="B0PAAR0005"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>[amz_link asin="B0PAAR0006"]Anderes Produkt[/amz_link]</p>';
+[$pe1, $pn5] = SAB::paare_zu_einzelkarten($pe); ok($pn5 === 0 && $pe1 === $pe, 'Paare: anderes Produkt wird nie verbunden');
+$pf = "<!-- wp:image -->\n<figure class=\"wp-block-image\">[amz_bild asin=\"B0PAAR0007\" land=\"es\"]<a href=\"x\"><img src=\"a.jpg\"></a>[/amz_bild]</figure>\n<!-- /wp:image -->\n\n<!-- wp:paragraph -->\n<p>[amz_link asin=\"B0PAAR0007\" land=\"es\"]Zum Angebot[/amz_link]</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>Weiter.</p>\n<!-- /wp:paragraph -->";
+[$pf1, $pn6] = SAB::paare_zu_einzelkarten($pf);
+ok($pn6 === 1 && strpos($pf1, "<!-- wp:shortcode -->\n[amz_karten][amz_karte asin=\"B0PAAR0007\" land=\"es\" stil=\"einzel\"][/amz_karten]\n<!-- /wp:shortcode -->") === 0 && strpos($pf1, 'wp:image') === false && substr_count($pf1, 'wp:paragraph') === 2, 'Paare: Block-Editor-Hüllen werden mitgenommen (' . $pf1 . ')');
 // 0.92.33: H4 vor Produktblöcken zu fettem Text
 [$h4a, $h4n] = SAB::h4_zu_fett('<p>Text</p><h4>Schneckenzaun Set</h4>[amz_karten][amz_karte asin="B0TABLE001"][/amz_karten]<h4>Mitten im Text</h4><p>weiter</p>');
 ok($h4n === 1 && strpos($h4a, '<p class="sab-vortitel">Schneckenzaun Set</p>') !== false && strpos($h4a, '<h4>Mitten im Text</h4>') !== false, 'H4: vor Kartenblock zu fettem Text, H4 im Text bleibt (' . $h4a . ')');

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.35
+ * Version: 0.92.36
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.35';
+    const VERSION = '0.92.36';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2293,7 +2293,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
     const EINZEL_TEXT = ['de' => ['Klick auf das Bild zum', 'Angebot bei Amazon'], 'es' => ['Haz clic en la imagen para ver la', 'oferta en Amazon'], 'fr' => ["Cliquez sur l'image pour voir l'", 'offre sur Amazon'], 'it' => ["Clicca sull'immagine per vedere l'", 'offerta su Amazon'], 'co.uk' => ['Click the image to see the', 'offer on Amazon'], 'com' => ['Click the image to see the', 'offer on Amazon']];
-    const KARTE_CSS = '.sab-vortitel{text-align:center;font-weight:600;font-size:1.08em;line-height:1.35;color:#2d3b2d;margin:1.6em 0 .5em}.sab-karte{position:relative}.sab-kr{position:absolute;top:8px;left:8px;z-index:3;min-width:34px;height:34px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui,sans-serif;color:#fff;background:#8a8f8a;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:help}.sab-kr-gr{background:#2e8b57}.sab-kr-y{background:#d4a017}.sab-kr-r{background:#c0392b}.sab-karte-einzel{max-width:340px;margin-left:auto;margin-right:auto;box-shadow:0 1px 4px rgba(0,0,0,.06)}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.05em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel a.sab-bild{gap:6px}.sab-karte-cta{display:block;font-size:.88em;line-height:1.35;color:#555}.sab-karte-cta-l{color:#1a6b3c;font-weight:700;text-decoration:underline}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px!important;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-karte .sab-bild img{height:160px!important}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
+    const KARTE_CSS = '.sab-vortitel{text-align:center;font-weight:600;font-size:1.08em;line-height:1.35;color:#2d3b2d;margin:1.6em 0 .5em}.sab-karte{position:relative}.sab-kr{position:absolute;top:8px;left:8px;z-index:3;min-width:34px;height:34px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui,sans-serif;color:#fff;background:#8a8f8a;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:help}.sab-kr-gr{background:#2e8b57}.sab-kr-y{background:#d4a017}.sab-kr-r{background:#c0392b}.sab-karte-einzel{max-width:460px;margin-left:auto;margin-right:auto;box-shadow:0 1px 4px rgba(0,0,0,.06)}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.05em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel a.sab-bild{gap:6px}.sab-karte-einzel .sab-bild img{height:320px!important}.sab-karte-cta{display:block;font-size:.88em;line-height:1.35;color:#555}.sab-karte-cta-l{color:#1a6b3c;font-weight:700;text-decoration:underline}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px!important;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-karte .sab-bild img{height:160px!important}.sab-karte-einzel .sab-bild img{height:250px!important}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte-einzel .sab-karte-cta{text-align:left;align-self:flex-start;padding-left:6px}.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
@@ -6532,7 +6532,90 @@ JS;
             return '[amz_link' . $attr . ']' . str_replace(['[', ']'], '', $text) . '[/amz_link]';
         }, $c);
         $h4n = 0; if ($nur === '') { [$c, $h4n] = self::h4_zu_fett($c); }
-        return [self::attr_reparieren(strtr($c, $fest)), $n + self::$karten_n + $h4n, $skip];
+        $c = self::attr_reparieren(strtr($c, $fest));
+        $pn = 0; if ($nur === '') { [$c, $pn] = self::paare_zu_einzelkarten($c); }   // getrenntes Bild + Textlink => eine Einzelkarte
+        return [$c, $n + self::$karten_n + $h4n + $pn, $skip];
+    }
+
+    /** Gehört der Bereich [von, bis) allein zu einem Block (nur Absatz-/Bild-Hüllen drumherum)? @return ?array{0:int,1:int,2:bool} [Start, Ende, mit Block-Kommentaren] */
+    private static function paar_huelle(string $c, int $von, int $bis): ?array {
+        $fenster = max(0, $von - 400); $vor = substr($c, $fenster, $von - $fenster); $nach = substr($c, $bis, 400);
+        $s = $von; $e = $bis; $ko = 0; $kc = 0; $tags = []; $zu = [];
+        if (preg_match('#(?:<!--\s*wp:[a-z/-]+[^>]*-->\s*|<(?:p|figure|div|center)\b[^>]*>\s*)+$#i', $vor, $m, PREG_OFFSET_CAPTURE)) {
+            $s = $fenster + $m[0][1];
+            preg_match_all('#<!--\s*wp:|<(p|figure|div|center)\b#i', $m[0][0], $mm); $ko = substr_count($m[0][0], '<!--'); $tags = array_map('strtolower', array_filter($mm[1]));
+        }
+        if (preg_match('#^(?:\s*<br\s*/?>)*(?:\s*</(?:p|figure|div|center)>|\s*<!--\s*/wp:[a-z-]+\s*-->)+#i', $nach, $m)) {
+            $e = $bis + strlen($m[0]);
+            preg_match_all('#</(p|figure|div|center)>#i', $m[0], $mm); $kc = substr_count($m[0], '<!--'); $zu = array_map('strtolower', $mm[1]);
+        } elseif (preg_match('#^(?:\s*<br\s*/?>)+#i', $nach, $m) && !$tags && !$ko) { $e = $bis; }
+        if (array_values(array_reverse($tags)) !== array_values($zu) || $ko !== $kc) { return null; }
+        return [$s, $e, $ko > 0];
+    }
+
+    /** Der ganze Absatz um einen Platzhalter, wenn daneben höchstens ein kurzer Restsatz steht (z. B. „Klick auf das Bild zum …“). @return ?array{0:int,1:int,2:bool} */
+    private static function paar_absatz(string $c, int $von, int $bis, array $weg = []): ?array {
+        $vor = substr($c, 0, $von);
+        $ps = null; $o = strrpos($vor, '<p');
+        while ($o !== false) { if (preg_match('#^<p(?:\s[^>]*)?>#i', substr($c, $o, 300))) { $ps = $o; break; } $o = $o > 0 ? strrpos($vor, '<p', $o - strlen($vor) - 1) : false; }
+        if ($ps === null || stripos(substr($c, $ps, $von - $ps), '</p>') !== false) { return null; }
+        $pe = stripos($c, '</p>', $bis);
+        if ($pe === false) { return null; }
+        $innen = substr($c, $ps, $pe - $ps);
+        if (preg_match('#<p\b#i', substr($innen, 2))) { return null; }
+        foreach ($weg as $w) { $innen = str_replace($w, '', $innen); }
+        $ohne = str_replace(substr($c, $von, $bis - $von), '', $innen);
+        $rest = trim(html_entity_decode(strip_tags($ohne)));
+        if (mb_strlen($rest) > 80 || strpos($ohne, '[amz_') !== false || stripos($ohne, '<a ') !== false) { return null; }
+        $e = $pe + 4; $s = $ps; $komm = false;
+        if (preg_match('#<!--\s*wp:paragraph[^>]*-->\s*$#i', substr($c, max(0, $ps - 120), min(120, $ps)), $m1) && preg_match('#^\s*<!--\s*/wp:paragraph\s*-->#i', substr($c, $e, 60), $m2)) { $s = $ps - strlen($m1[0]); $e += strlen($m2[0]); $komm = true; }
+        return [$s, $e, $komm];
+    }
+
+    /**
+     * Bild und Textlink desselben Produkts, die getrennt im Artikel stehen ([amz_bild] und kurz danach [amz_link]), werden EINE Einzelkarte
+     * (Titel, Bild, „Klick auf das Bild zum Angebot bei Amazon“ als ein Link). Nur wenn der Textlink in einem eigenen kurzen Absatz steht.
+     * @return array{0:string,1:int}
+     */
+    public static function paare_zu_einzelkarten(string $c): array {
+        if (get_option('sab_paare_umbauen', '1') === '0' || stripos($c, '[amz_link') === false || stripos($c, '[amz_bild') === false) { return [$c, 0]; }
+        $n = 0; $versucht = [];
+        for ($runde = 0; $runde < 60; $runde++) {
+            if (!preg_match_all('#\[amz_bild\b([^\]]*)\basin="([A-Za-z0-9]{10})"([^\]]*)\].*?\[/amz_bild\]#is', $c, $A, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { break; }
+            if (!preg_match_all('#\[amz_link\b[^\]]*\basin="([A-Za-z0-9]{10})"[^\]]*\](.*?)\[/amz_link\]#is', $c, $B, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { break; }
+            $getan = false;
+            foreach ($A as $a) {
+                $aoff = $a[0][1]; $aend = $aoff + strlen($a[0][0]); $asin = strtoupper($a[2][0]);
+                foreach ($B as $b) {
+                    $boff = $b[0][1];
+                    if ($boff < $aend || strtoupper($b[1][0]) !== $asin) { continue; }
+                    if ($boff - $aend > 1500 || preg_match('#<hr|<h[1-6]\b|\[amz_(?:karte|karten|produkt|bild)\b|\[/amz_karten#i', substr($c, $aend, $boff - $aend))) { break; }
+                    $sig = md5($a[0][0] . $b[0][0]);
+                    if (isset($versucht[$sig])) { break; }
+                    $versucht[$sig] = 1;
+                    $bend = $boff + strlen($b[0][0]);
+                    $text = mb_substr(trim(html_entity_decode(strip_tags($b[2][0]))), 0, 40);
+                    $as = self::paar_absatz($c, $aoff, $aend, [$b[0][0]]);   // Bild und Textlink im selben Absatz
+                    $same = $as !== null && $boff < $as[1];
+                    if ($same) { $as_ = $as; $bs = null; }
+                    else { $as_ = self::paar_huelle($c, $aoff, $aend); $bs = self::paar_absatz($c, $boff, $bend); }
+                    if ($as_ === null || (!$same && $bs === null)) {
+                        self::$umbau_abw[] = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ' stehen getrennt, lassen sich aber nicht sicher zu einer Karte zusammenführen (Textlink mitten in einem längeren Satz oder in einer Liste/Tabelle). Bitte dort den Karte-Knopf im Artikel nehmen.';
+                        break;
+                    }
+                    $land = preg_match('#\bland="([a-z.]+)"#i', $a[1][0] . ' ' . $a[3][0], $lm) ? ' land="' . strtolower($lm[1]) . '"' : '';
+                    $tag = preg_match('#\btag="([A-Za-z0-9\-]{3,40})"#', $a[1][0] . ' ' . $a[3][0], $tm) ? ' tag="' . $tm[1] . '"' : '';
+                    $karte = '[amz_karten][amz_karte asin="' . $asin . '"' . $land . $tag . ' stil="einzel"][/amz_karten]';
+                    if ($as_[2]) { $karte = "<!-- wp:shortcode -->\n" . $karte . "\n<!-- /wp:shortcode -->"; }
+                    if ($same) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1]); }
+                    else { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1], $bs[0] - $as_[1]) . substr($c, $bs[1]); }
+                    $n++; self::$umbau_info[] = 'Bild und Textlink' . ($text !== '' ? ' („' . $text . '“)' : '') . ' zu ' . $asin . ' zu einer Einzelkarte zusammengeführt';
+                    $getan = true; break 2;
+                }
+            }
+            if (!$getan) { break; }
+        }
+        return [$c, $n];
     }
 
     /** Analyse (nur Lesen): je ASIN Anzahl Stellen und Artikel, und was bereits im Plugin läuft. */
