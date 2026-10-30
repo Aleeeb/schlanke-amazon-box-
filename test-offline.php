@@ -2106,7 +2106,10 @@ $GLOBALS['admin'] = true; SAB::leisten_symbol($bar);
 ok(count($bar->n) === 1 && $bar->n[0]['id'] === 'sab-leiste' && strpos($bar->n[0]['href'], 'page=sab') !== false && strpos(strip_tags($bar->n[0]['title']), 'ab-icon') === false, 'Obere Leiste: ein Symbol, führt zu den Einstellungen');
 // 0.92.33: H4 vor Produktblöcken zu fettem Text
 [$h4a, $h4n] = SAB::h4_zu_fett('<p>Text</p><h4>Schneckenzaun Set</h4>[amz_karten][amz_karte asin="B0TABLE001"][/amz_karten]<h4>Mitten im Text</h4><p>weiter</p>');
-ok($h4n === 1 && strpos($h4a, '<p><strong>Schneckenzaun Set</strong></p>') !== false && strpos($h4a, '<h4>Mitten im Text</h4>') !== false, 'H4: vor Kartenblock zu fettem Text, H4 im Text bleibt (' . $h4a . ')');
+ok($h4n === 1 && strpos($h4a, '<p class="sab-vortitel">Schneckenzaun Set</p>') !== false && strpos($h4a, '<h4>Mitten im Text</h4>') !== false, 'H4: vor Kartenblock zu fettem Text, H4 im Text bleibt (' . $h4a . ')');
 [$h4b, $h4m] = SAB::h4_zu_fett("<!-- wp:heading {\"level\":4} -->\n<h4 class=\"wp-block-heading\">Kupferband</h4>\n<!-- /wp:heading -->\n\n<!-- wp:html -->\n<table><tr><td>x</td></tr></table>\n<!-- /wp:html -->");
 ok($h4m === 1 && strpos($h4b, 'wp:heading') === false && strpos($h4b, '<!-- wp:paragraph -->') !== false && strpos($h4b, '<table>') !== false, 'H4: Block-Editor-Überschrift vor Tabelle wird zu Absatzblock (' . $h4b . ')');
+// 0.92.34: Klickrate-Kreis nur für Redakteure
+$GLOBALS['admin'] = false;
+ok(SAB::klickrate_kreis('B0TABLE001') === '', 'Klickrate: Besucher bekommen keinen Kreis');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

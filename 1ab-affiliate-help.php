@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.33
+ * Version: 0.92.34
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.33';
+    const VERSION = '0.92.34';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2292,7 +2292,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
     const EINZEL_TEXT = ['de' => ['Klick auf das Bild zum', 'Angebot bei Amazon'], 'es' => ['Haz clic en la imagen para ver la', 'oferta en Amazon'], 'fr' => ["Cliquez sur l'image pour voir l'", 'offre sur Amazon'], 'it' => ["Clicca sull'immagine per vedere l'", 'offerta su Amazon'], 'co.uk' => ['Click the image to see the', 'offer on Amazon'], 'com' => ['Click the image to see the', 'offer on Amazon']];
-    const KARTE_CSS = '.sab-karte-einzel{max-width:340px;margin-left:auto;margin-right:auto;box-shadow:0 1px 4px rgba(0,0,0,.06)}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.05em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel a.sab-bild{gap:6px}.sab-karte-cta{display:block;font-size:.88em;line-height:1.35;color:#555}.sab-karte-cta-l{color:#1a6b3c;font-weight:700;text-decoration:underline}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px!important;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-karte .sab-bild img{height:160px!important}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
+    const KARTE_CSS = '.sab-vortitel{text-align:center;font-weight:600;font-size:1.08em;line-height:1.35;color:#2d3b2d;margin:1.6em 0 .5em}.sab-karte{position:relative}.sab-kr{position:absolute;top:8px;left:8px;z-index:3;min-width:34px;height:34px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui,sans-serif;color:#fff;background:#8a8f8a;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:help}.sab-kr-gr{background:#2e8b57}.sab-kr-y{background:#d4a017}.sab-kr-r{background:#c0392b}.sab-karte-einzel{max-width:340px;margin-left:auto;margin-right:auto;box-shadow:0 1px 4px rgba(0,0,0,.06)}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.05em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel a.sab-bild{gap:6px}.sab-karte-cta{display:block;font-size:.88em;line-height:1.35;color:#555}.sab-karte-cta-l{color:#1a6b3c;font-weight:700;text-decoration:underline}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px!important;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-karte .sab-bild img{height:160px!important}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
@@ -2338,13 +2338,13 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         if ($a['stil'] === 'einzel' && preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb)) {   // Einzelprodukt-Karte: Titel über dem Bild, darunter „Klick auf das Bild zum Angebot bei Amazon“, alles EIN Link
             $et = self::EINZEL_TEXT[$land] ?? self::EINZEL_TEXT['de'];
             $cta = '<span class="sab-karte-cta">' . esc_html($et[0]) . ' <span class="sab-karte-cta-l">' . esc_html($a['text'] !== '' ? $a['text'] : $et[1]) . '</span></span>';
-            return '<div class="sab-karte sab-karte-einzel' . $kc . '">' . $mb[1] . $tt . $mb[2] . $ex . $cta . '</a>' . $ebay . '</div>';
+            return '<div class="sab-karte sab-karte-einzel' . $kc . '">' . $mb[1] . $tt . $mb[2] . $ex . $cta . '</a>' . $ebay . self::klickrate_kreis($asin) . '</div>';
         }
         // Bild, Titel und Button sind EIN Link (für Crawler zählt das als ein Affiliate-Link); data-sab-asin/-slot/-var bleiben für Statistik und Austausch am Link
         if (preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb) && preg_match('#^<a\b[^>]*>(.*)</a>$#s', $btn, $mt)) {
-            return '<div class="sab-karte' . $kc . '">' . $mb[1] . $mb[2] . $tt . $ex . '<span class="sab-karte-btn">' . $mt[1] . '</span></a>' . $ebay . '</div>';
+            return '<div class="sab-karte' . $kc . '">' . $mb[1] . $mb[2] . $tt . $ex . '<span class="sab-karte-btn">' . $mt[1] . '</span></a>' . $ebay . self::klickrate_kreis($asin) . '</div>';
         }
-        return '<div class="sab-karte' . $kc . '">' . $bild . $tt . $ex . $btn . $ebay . '</div>';
+        return '<div class="sab-karte' . $kc . '">' . $bild . $tt . $ex . $btn . $ebay . self::klickrate_kreis($asin) . '</div>';
     }
 
     /** Obere Leiste (Backend und angemeldet im Frontend): Einkaufswagen-Symbol ohne Text, führt direkt zu den Einstellungen des Plugins. */
@@ -2356,6 +2356,39 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     public static function leisten_css(): void {
         if (!function_exists('is_admin_bar_showing') || !is_admin_bar_showing()) { return; }
         echo '<style id="sab-leiste-css">#wpadminbar #wp-admin-bar-sab-leiste .ab-icon:before{font-family:dashicons!important;content:"\f174";top:2px}#wpadminbar #wp-admin-bar-sab-leiste .ab-item{padding:0 8px}#wpadminbar #wp-admin-bar-snippets{display:none}</style>';
+    }
+
+    /** Klickraten für angemeldete Redakteure: je Produkt auf dieser Seite und über alle Seiten, dazu der Schnitt aller Platzierungen. Nur eine zwischengespeicherte Abfrage, Besucher bekommen nichts. */
+    private static function klickraten(): array {
+        static $d = null; if ($d !== null) { return $d; }
+        $d = ['v' => 0, 'seite' => [], 'alle' => [], 'avg' => 0.0];
+        global $wpdb;
+        if (!function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts') || !isset($wpdb) || !method_exists($wpdb, 'get_results') || !method_exists($wpdb, 'prepare')) { return $d; }
+        $pfad = substr((string) wp_parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH), 0, 190);
+        $von = gmdate('Y-m-d', time() - 90 * DAY_IN_SECONDS); $tk = self::klicktabelle(); $ts = self::seiten_tabelle();
+        $g = get_transient('sab_kr_alle');
+        if (!is_array($g)) {
+            $g = ['alle' => [], 'avg' => 0.0]; $sc = 0; $sv = 0;
+            foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT a.asin, SUM(a.c) c, SUM(s.v) v FROM (SELECT asin, pfad, COUNT(*) c FROM $tk WHERE ts >= %s AND asin <> 'STARTSEITE' GROUP BY asin, pfad) a JOIN (SELECT pfad, SUM(n) v FROM $ts WHERE tag >= %s GROUP BY pfad) s ON s.pfad = a.pfad GROUP BY a.asin", $von, $von), ARRAY_A) as $r) {
+                $g['alle'][(string) $r['asin']] = (int) $r['v'] > 0 ? (int) $r['c'] / (int) $r['v'] : 0.0; $sc += (int) $r['c']; $sv += (int) $r['v'];
+            }
+            $g['avg'] = $sv > 0 ? $sc / $sv : 0.0; set_transient('sab_kr_alle', $g, HOUR_IN_SECONDS);
+        }
+        $d['alle'] = $g['alle']; $d['avg'] = (float) $g['avg'];
+        $d['v'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COALESCE(SUM(n),0) FROM $ts WHERE pfad = %s AND tag >= %s", $pfad, $von));
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT asin, COUNT(*) n, SUM(typ='bild') b FROM $tk WHERE pfad = %s AND ts >= %s GROUP BY asin", $pfad, $von), ARRAY_A) as $r) { $d['seite'][(string) $r['asin']] = [(int) $r['n'], (int) $r['b']]; }
+        return $d;
+    }
+
+    /** Kleiner runder Kreis mit der Klickrate dieser Karte auf dieser Seite (nur für Redakteure); grün über, gelb im, rot unter dem Schnitt, grau bei zu wenig Aufrufen. */
+    public static function klickrate_kreis(string $asin): string {
+        $k = self::klickraten(); if (!$k['v'] && !$k['seite'] && !$k['alle']) { return ''; }
+        $n = $k['seite'][$asin][0] ?? 0; $b = $k['seite'][$asin][1] ?? 0;
+        $rate = $k['v'] > 0 ? $n / $k['v'] : 0.0; $ref = $k['avg'];
+        $kl = $k['v'] < 30 ? 'g' : ($ref <= 0 ? 'g' : ($rate >= $ref * 1.25 ? 'gr' : ($rate <= $ref * 0.75 ? 'r' : 'y')));
+        $pz = fn(float $x): string => str_replace('.', ',', (string) round($x * 100, 1)) . ' %';
+        $tip = 'Klickrate dieser Karte auf dieser Seite: ' . $pz($rate) . ' (' . $n . ' Klicks bei ' . $k['v'] . ' Aufrufen in 90 Tagen; davon Bild/Titel ' . $b . ', Knopf/Text ' . ($n - $b) . '). Über alle Seiten: ' . (isset($k['alle'][$asin]) ? $pz((float) $k['alle'][$asin]) : 'noch keine Daten') . '. Schnitt aller Karten: ' . $pz($ref) . '.' . ($k['v'] < 30 ? ' Noch zu wenige Aufrufe für eine Aussage.' : '');
+        return '<span class="sab-kr sab-kr-' . $kl . '" title="' . esc_attr($tip) . '">' . esc_html($pz($rate)) . '</span>';
     }
 
     /** Eigene Produktbilder: Zeilen „ASIN | Mediathek-ID oder Bildadresse“ => [ASIN => Wert]. */
@@ -4195,7 +4228,7 @@ JS;
            . 'if(document.readyState==="complete"){W()}else{addEventListener("load",W)}'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
-           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
+           . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn,.sab-karte-titel,.sab-karte-cta"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
            . 'p={id:id,t:Date.now(),h:false}},true);'
            . 'document.addEventListener("visibilitychange",function(){if(!p)return;'
            . 'if(document.visibilityState==="hidden"){p.h=true;return}'
@@ -6249,7 +6282,7 @@ JS;
         $neu = preg_replace_callback('#(<!--\s*wp:heading\s*\{[^}]*"level"\s*:\s*4[^}]*\}\s*-->\s*)?<h4\b[^>]*>((?:(?!</h4>).)*?)</h4>(\s*<!--\s*/wp:heading\s*-->)?(\s*)(?=(?:<!--\s*wp:(?:shortcode|html|table)[^>]*-->\s*)?(?:<figure\b[^>]*>\s*)?(?:<table\b|\[amz_(?:karten|produkt|karte)\b))#is', function ($m) use (&$n) {
             $in = trim($m[2]); if (trim(strip_tags($in)) === '') { return $m[0]; }
             $n++;
-            $p = '<p>' . (preg_match('#^<(?:strong|b)\b#i', $in) ? $in : '<strong>' . $in . '</strong>') . '</p>';
+            $p = '<p class="sab-vortitel">' . preg_replace('#^<(strong|b)\b[^>]*>(.*)</\1>$#is', '$2', $in) . '</p>';
             return ($m[1] !== '' ? "<!-- wp:paragraph -->\n" . $p . "\n<!-- /wp:paragraph -->" : $p) . ($m[4] !== '' ? $m[4] : "\n\n");
         }, $c);
         return $neu === null ? [$c, 0] : [$neu, $n];
