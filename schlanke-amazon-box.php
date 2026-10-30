@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.93.6
+ * Version: 0.93.7
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.93.6';
+    const VERSION = '0.93.7';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3949,13 +3949,14 @@ JS;
            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="tests"><input type="hidden" name="sab_form" value="ab">';
         if (!$scan && !$opt) { $h .= '<p>Keine Viererblöcke gefunden. Sie entstehen im Reiter Umbau, wenn Tabellen zu Karten werden.</p>'; }
         $ids = array_values(array_filter(array_unique(array_merge(array_keys($scan), array_keys($opt))), fn($i) => empty($opt[$i]['s'])));
+        usort($ids, fn($x, $y) => count($scan[$y]['seiten'] ?? []) <=> count($scan[$x]['seiten'] ?? []));   // identische Blöcke, die in den meisten Artikeln stehen, zuerst
         $h .= '<table class="widefat striped" style="max-width:1100px"><thead><tr><th style="width:60px">Test</th><th>Paar A</th><th>Paar B</th><th>Seiten</th><th style="width:90px">Ziel</th></tr></thead><tbody>';
         foreach ($ids as $id) {
             $o = $opt[$id] ?? []; $asins = $scan[$id]['asins'] ?? ['A' => (array) ($o['a'] ?? []), 'B' => (array) ($o['b'] ?? [])];
             $h .= '<tr><td data-l="Test"><label><input type="checkbox" name="sab_ab_an[' . esc_attr($id) . ']" value="1"' . (!empty($o['an']) ? ' checked' : '') . '> <strong>an</strong></label><br><small><code>' . esc_html($id) . '</code></small>' . (!empty($o['e']) ? '<br><small>Einzelprodukt</small>' : '') . (!empty($o['w']) ? '<br><small>Widget</small>' : '') . (!empty($o['z']) ? '<br><small>Zweierblock</small>' : '') . '</td>';
             foreach (['A', 'B'] as $v) { $h .= '<td data-l="Paar ' . $v . '">'; foreach ($asins[$v] as $a) { $h .= self::ab_produkt_html((string) $a); } if ($v === 'B' && !empty($o['c'])) { $h .= '<p class="sab-ab-klein" style="margin:6px 0 2px"><strong>Variante C:</strong></p>'; foreach ((array) $o['c'] as $a) { $h .= self::ab_produkt_html((string) $a); } } $h .= '</td>'; }
             $s = $scan[$id]['seiten'] ?? [];
-            $h .= '<td data-l="Seiten">' . ($s ? self::bloecke_artikel_links($s, 6) : '<em>nicht mehr gefunden</em>') . '</td>'
+            $h .= '<td data-l="Seiten">' . ($s ? '<strong>' . count($s) . ' Artikel' . (count($s) > 1 ? ' mit demselben Block, Test und Zahlen gelten für alle zusammen' : '') . '</strong><br>' . self::bloecke_artikel_links($s, 6) : '<em>nicht mehr gefunden</em>') . '</td>'
                . '<td data-l="Ziel"><input type="number" min="100" step="100" name="sab_ab_ziel[' . esc_attr($id) . ']" value="' . (int) ($o['ziel'] ?? self::AB_ZIEL) . '" style="width:80px"></td></tr>';
         }
         $h .= '</tbody></table><p><button class="button button-primary">Speichern</button> <button class="button" name="sab_ab_null" value="1" onclick="return confirm(\'Zähler der angehakten Tests auf null setzen und neu starten?\')">Zähler der angehakten Tests neu starten</button></p></form>';
