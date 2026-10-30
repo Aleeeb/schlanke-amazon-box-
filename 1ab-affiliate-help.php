@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.34
+ * Version: 0.92.35
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.34';
+    const VERSION = '0.92.35';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -117,6 +117,7 @@ final class SAB {
         add_action('wp_footer',            [__CLASS__, 'widget_zeige_skript'], 100);
         add_action('wp_footer',            [__CLASS__, 'geo_skript'], 98);
         add_action('admin_bar_menu', [__CLASS__, 'leisten_symbol'], 90);
+        add_action('wp_footer', [__CLASS__, 'heat_overlay'], 101);
         add_action('admin_head', [__CLASS__, 'leisten_css']); add_action('wp_head', [__CLASS__, 'leisten_css']);
         add_action('wp_ajax_sab_stelle_kand',    [__CLASS__, 'ajax_stelle_kand']);
         add_action('wp_ajax_sab_ab_schalten',    [__CLASS__, 'ajax_ab_schalten']);
@@ -2351,11 +2352,46 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     public static function leisten_symbol($bar): void {
         if (!is_object($bar) || !current_user_can('manage_options')) { return; }
         $bar->add_node(['id' => 'sab-leiste', 'title' => '<span class="ab-icon" aria-hidden="true"></span><span class="screen-reader-text">' . esc_html(self::NAME) . '</span>', 'href' => admin_url('admin.php?page=sab'), 'meta' => ['title' => self::NAME . ' – Einstellungen']]);
+        if (self::statistik_symbol()) {
+            $bar->add_node(['id' => 'sab-statistik', 'title' => '<span class="ab-icon" aria-hidden="true"></span><span class="screen-reader-text">Statistik</span>', 'href' => admin_url('tools.php?page=mini-statistik'), 'meta' => ['title' => 'Statistik']]);
+        }
+        if (!is_admin() && get_option('sab_heat', '1') !== '0') {   // Heatmap der gerade offenen Seite ein-/ausblenden
+            $an = isset($_GET['sab_heat']);
+            $url = $an ? remove_query_arg('sab_heat') : add_query_arg('sab_heat', '1');
+            $bar->add_node(['id' => 'sab-heat', 'parent' => 'sab-leiste', 'title' => $an ? 'Heatmap ausblenden' : 'Heatmap dieser Seite zeigen', 'href' => $url]);
+        }
+    }
+
+    /** Statistik-Symbol in der oberen Leiste: Standard nur auf Schneckenhilfe, per Option sab_leiste_statistik (1 = an, 0 = aus) überschreibbar. */
+    private static function statistik_symbol(): bool {
+        $o = get_option('sab_leiste_statistik', '');
+        if ($o !== '' && $o !== false) { return (string) $o === '1'; }
+        return stripos((string) home_url(), 'schneckenhilfe') !== false;
+    }
+
+    /** Heatmap-Ansicht (nur Redaktion, nur mit ?sab_heat=1): färbt die Seite in 20 Streifen nach Verweildauer, setzt rote Punkte auf Klickstellen, Leiste mit Lesetiefe. */
+    public static function heat_overlay(): void {
+        if (!isset($_GET['sab_heat']) || !function_exists('is_user_logged_in') || !is_user_logged_in() || !current_user_can('edit_posts')) { return; }
+        $u = esc_url_raw(rest_url('sab/v1/heat')); $nonce = wp_create_nonce('wp_rest');
+        echo '<script>(function(){var U=' . wp_json_encode($u) . ',N=' . wp_json_encode($nonce) . ',P=location.pathname,dev="",box=null,pan=null;'
+           . 'function dh(){return Math.max(document.documentElement.scrollHeight,document.body.scrollHeight)}'
+           . 'function go(){fetch(U+"?pfad="+encodeURIComponent(P)+(dev?"&dev="+dev:""),{headers:{"X-WP-Nonce":N},credentials:"same-origin"}).then(function(r){return r.json()}).then(draw)}'
+           . 'function draw(d){if(box)box.remove();var H=dh(),W=document.documentElement.clientWidth,mx=Math.max.apply(null,d.z.concat([1]));'
+           . 'box=document.createElement("div");box.style.cssText="position:absolute;left:0;top:0;width:"+W+"px;height:"+H+"px;pointer-events:none;z-index:99990";'
+           . 'd.z.forEach(function(z,i){var t=z/mx,b=document.createElement("div");b.style.cssText="position:absolute;left:0;right:0;top:"+(i*5)+"%;height:5%;background:hsla("+Math.round(220-t*220)+",90%,50%,"+(0.12+t*0.3)+");border-top:1px dashed rgba(0,0,0,.15)";'
+           . 'b.innerHTML="<span style=\"position:absolute;right:6px;top:2px;background:rgba(0,0,0,.72);color:#fff;font:12px/1.3 sans-serif;padding:2px 6px;border-radius:3px\">"+Math.round((d.r[i]||0)*100)+" % erreichen · Ø "+z.toFixed(1).replace(".",",")+" s</span>";box.appendChild(b)});'
+           . 'var km=Math.max.apply(null,d.k.map(function(k){return k[2]}).concat([1]));'
+           . 'd.k.forEach(function(k){var s=10+Math.round(24*k[2]/km),c=document.createElement("div");c.style.cssText="position:absolute;border-radius:50%;background:rgba(220,0,0,.45);box-shadow:0 0 8px rgba(220,0,0,.6);width:"+s+"px;height:"+s+"px;left:calc("+(k[0]*5+2.5)+"% - "+s/2+"px);top:calc("+(k[1]*2+1)+"% - "+s/2+"px)";c.title=k[2]+" Klick(s)";box.appendChild(c)});'
+           . 'document.body.appendChild(box);'
+           . 'if(!pan){pan=document.createElement("div");pan.style.cssText="position:fixed;right:12px;bottom:12px;z-index:99991;background:#fff;color:#111;font:13px/1.4 sans-serif;padding:10px 12px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.3);max-width:260px";document.body.appendChild(pan)}'
+           . 'pan.innerHTML="<b>Heatmap</b> · "+d.v+" Aufrufe (90 Tage)<br>Streifen: blau = kurz, rot = lange gelesen. Punkte: Klicks.<br>"+["","d","m"].map(function(x,i){return "<a href=\"#\" data-d=\""+x+"\" style=\"margin-right:8px;"+(dev===x?"font-weight:700":"")+"\">"+["Alle","Desktop","Handy"][i]+"</a>"}).join("")+(d.v<30?"<br><i>Noch wenige Daten.</i>":"");'
+           . 'pan.querySelectorAll("a").forEach(function(a){a.onclick=function(e){e.preventDefault();dev=a.getAttribute("data-d");go()}})}'
+           . 'addEventListener("load",go);})();</script>';
     }
 
     public static function leisten_css(): void {
         if (!function_exists('is_admin_bar_showing') || !is_admin_bar_showing()) { return; }
-        echo '<style id="sab-leiste-css">#wpadminbar #wp-admin-bar-sab-leiste .ab-icon:before{font-family:dashicons!important;content:"\f174";top:2px}#wpadminbar #wp-admin-bar-sab-leiste .ab-item{padding:0 8px}#wpadminbar #wp-admin-bar-snippets{display:none}</style>';
+        echo '<style id="sab-leiste-css">#wpadminbar #wp-admin-bar-sab-leiste .ab-icon:before{font-family:dashicons!important;content:"\f174";top:2px}#wpadminbar #wp-admin-bar-sab-statistik .ab-icon:before{font-family:dashicons!important;content:"\\f185";top:2px}#wpadminbar #wp-admin-bar-sab-leiste .ab-item,#wpadminbar #wp-admin-bar-sab-statistik .ab-item{padding:0 8px}#wpadminbar #wp-admin-bar-snippets{display:none}</style>';
     }
 
     /** Klickraten für angemeldete Redakteure: je Produkt auf dieser Seite und über alle Seiten, dazu der Schnitt aller Platzierungen. Nur eine zwischengespeicherte Abfrage, Besucher bekommen nichts. */
@@ -4109,11 +4145,12 @@ JS;
 
     // ---------- Eigene Klickmessung (ohne Cookies, ohne IP, ohne Besucher-Kennung) ----------
 
+    private static function heattabelle(): string { global $wpdb; return $wpdb->prefix . 'sab_heat'; }
     private static function klicktabelle(): string { global $wpdb; return $wpdb->prefix . 'sab_klicks'; }
 
     public static function tabelle(): void {
         global $wpdb;
-        if (!isset($wpdb) || get_option('sab_db_version') === '7') { return; }
+        if (!isset($wpdb) || get_option('sab_db_version') === '8') { return; }
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $t = self::klicktabelle();
         dbDelta("CREATE TABLE $t (
@@ -4155,12 +4192,29 @@ JS;
             PRIMARY KEY (id),
             UNIQUE KEY zaehler (tag, pfad)
         ) {$wpdb->get_charset_collate()};");
-        update_option('sab_db_version', '7', false);
+        $th = self::heattabelle();
+        dbDelta("CREATE TABLE $th (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            tag DATE NOT NULL,
+            pfad VARCHAR(190) NOT NULL DEFAULT '',
+            dev CHAR(1) NOT NULL DEFAULT 'd',
+            typ CHAR(1) NOT NULL,
+            px TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            py TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            n INT UNSIGNED NOT NULL DEFAULT 0,
+            s INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            UNIQUE KEY zaehler (tag, pfad, dev, typ, px, py)
+        ) {$wpdb->get_charset_collate()};");
+        update_option('sab_db_version', '8', false);
     }
 
     public static function rest(): void {
         register_rest_route('sab/v1', '/m', [
             'methods' => 'POST', 'permission_callback' => '__return_true', 'callback' => [__CLASS__, 'messen'],
+        ]);
+        register_rest_route('sab/v1', '/heat', [
+            'methods' => 'GET', 'permission_callback' => fn() => current_user_can('edit_posts'), 'callback' => [__CLASS__, 'heat_lesen'],
         ]);
     }
 
@@ -4186,6 +4240,7 @@ JS;
         if (isset($d['ab']) && is_array($d['ab'])) {
             self::ab_ansichten_zaehlen($d['ab'], (string) ($d['pfad'] ?? ''));
         }
+        if (isset($d['hm'])) { self::heat_speichern($d); return new WP_REST_Response(null, 204); }
         if (isset($d['pv'])) {   // Seitenaufruf mit Produkten: nur Summe je Seite und Tag, ohne Besucherkennung
             $wpdb->query($wpdb->prepare("INSERT INTO " . self::seiten_tabelle() . " (tag, pfad, n) VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1", gmdate('Y-m-d'), substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190)));
         } elseif (isset($d['s'])) {
@@ -4213,6 +4268,55 @@ JS;
         return new WP_REST_Response(null, 204);
     }
 
+    /** Heatmap: speichert je Seite, Tag und Gerät nur Zähler (Lesetiefe, Verweilsekunden je Zwanzigstel der Seite, Klickpunkte im Raster). Keine Besucherkennung, keine IP. */
+    public static function heat_speichern(array $d): void {
+        global $wpdb;
+        if (!isset($wpdb) || get_option('sab_heat', '1') === '0') { return; }
+        $pfad = substr((string) wp_parse_url((string) ($d['pfad'] ?? ''), PHP_URL_PATH), 0, 190);
+        if ($pfad === '') { return; }
+        $dev = ($d['dev'] ?? '') === 'm' ? 'm' : 'd'; $tag = gmdate('Y-m-d'); $z = [];
+        if (!empty($d['f'])) {
+            $z[] = ['v', 0, 0, 1, 0];
+            for ($b = 0, $max = max(0, min(19, (int) ($d['r'] ?? 0))); $b <= $max; $b++) { $z[] = ['r', 0, $b, 1, 0]; }
+        }
+        $sum = 0;
+        foreach (array_slice((array) ($d['z'] ?? []), 0, 20, true) as $b => $sek) {
+            $b = (int) $b; $sek = min(900 - $sum, max(0, (int) $sek));
+            if ($b < 0 || $b > 19 || $sek < 1) { continue; }
+            $sum += $sek; $z[] = ['z', 0, $b, 1, $sek];
+        }
+        foreach (array_slice((array) ($d['k'] ?? []), 0, 20) as $k) {
+            if (is_array($k) && count($k) === 2) { $z[] = ['k', max(0, min(19, (int) $k[0])), max(0, min(49, (int) $k[1])), 1, 0]; }
+        }
+        if (!$z) { return; }
+        $t = self::heattabelle(); $teile = [];
+        foreach ($z as [$typ, $px, $py, $n, $sek]) { $teile[] = $wpdb->prepare('(%s,%s,%s,%s,%d,%d,%d,%d)', $tag, $pfad, $dev, $typ, $px, $py, $n, $sek); }
+        $wpdb->query("INSERT INTO $t (tag, pfad, dev, typ, px, py, n, s) VALUES " . implode(',', $teile) . ' ON DUPLICATE KEY UPDATE n = n + VALUES(n), s = s + VALUES(s)');
+        if (!get_transient('sab_heat_auf')) {   // einmal am Tag: Zähler älter als 90 Tage löschen
+            set_transient('sab_heat_auf', 1, DAY_IN_SECONDS);
+            $wpdb->query($wpdb->prepare("DELETE FROM $t WHERE tag < %s", gmdate('Y-m-d', time() - 90 * DAY_IN_SECONDS)));
+        }
+    }
+
+    /** Heatmap-Daten einer Seite (nur Redaktion): v = Aufrufe, r = Anteil, der das jeweilige Zwanzigstel erreicht, z = mittlere Sekunden je Aufruf, k = Klickpunkte [x, y, n]. */
+    public static function heat_lesen($req) {
+        global $wpdb;
+        $pfad = substr((string) wp_parse_url((string) $req->get_param('pfad'), PHP_URL_PATH), 0, 190);
+        $dev = (string) $req->get_param('dev'); $dev = in_array($dev, ['d', 'm'], true) ? $dev : '';
+        $t = self::heattabelle(); $von = gmdate('Y-m-d', time() - 90 * DAY_IN_SECONDS);
+        $out = ['v' => 0, 'r' => array_fill(0, 20, 0), 'z' => array_fill(0, 20, 0), 'k' => []];
+        if (!isset($wpdb) || $pfad === '') { return new WP_REST_Response($out, 200); }
+        $rows = (array) $wpdb->get_results($wpdb->prepare("SELECT typ, px, py, SUM(n) n, SUM(s) s FROM $t WHERE pfad = %s AND tag >= %s" . ($dev ? ' AND dev = %s' : '') . ' GROUP BY typ, px, py', ...($dev ? [$pfad, $von, $dev] : [$pfad, $von])), ARRAY_A);
+        foreach ($rows as $r) { if ($r['typ'] === 'v') { $out['v'] = (int) $r['n']; } }
+        foreach ($rows as $r) {
+            $n = (int) $r['n']; $px = (int) $r['px']; $py = (int) $r['py'];
+            if ($r['typ'] === 'r' && $py < 20 && $out['v'] > 0) { $out['r'][$py] = round($n / $out['v'], 3); }
+            elseif ($r['typ'] === 'z' && $py < 20 && $out['v'] > 0) { $out['z'][$py] = round((int) $r['s'] / $out['v'], 1); }
+            elseif ($r['typ'] === 'k') { $out['k'][] = [$px, $py, $n]; }
+        }
+        return new WP_REST_Response($out, 200);
+    }
+
     /** Kleines Skript, nur auf Seiten mit Produkten. Misst Klick und die Zeit bis zur Rückkehr in den Tab. */
     public static function messskript(): void {
         if (!self::$genutzt || (function_exists('is_user_logged_in') && is_user_logged_in() && current_user_can('edit_posts'))) { return; }   // angemeldete Redakteure werden nicht gemessen
@@ -4230,6 +4334,13 @@ JS;
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
            . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn,.sab-karte-titel,.sab-karte-cta"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
            . 'p={id:id,t:Date.now(),h:false}},true);'
+           . 'var D=document.documentElement,hz={},hk=[],hm=0,hs=0,hf=1,dv=innerWidth<768?"m":"d",hid=Math.random().toString(36).slice(2,10);'
+           . 'function dh(){return Math.max(D.scrollHeight,document.body?document.body.scrollHeight:0,1)}'
+           . 'function bd(y){return Math.max(0,Math.min(19,Math.floor(y/dh()*20)))}'
+           . 'setInterval(function(){if(document.visibilityState!=="visible"||hs>=900)return;hs++;var b=bd(scrollY+innerHeight/2);hz[b]=(hz[b]||0)+1;hm=Math.max(hm,bd(scrollY+innerHeight-1))},1000);'
+           . 'document.addEventListener("click",function(e){if(hk.length<20)hk.push([Math.min(19,Math.floor(e.pageX/Math.max(D.clientWidth,1)*20)),Math.min(49,Math.floor(e.pageY/dh()*50))])},true);'
+           . 'function HS(){if(!hs&&!hk.length)return;var o={id:hid,hm:1,pfad:location.pathname,dev:dv,z:hz,k:hk};if(hf){o.f=1;o.r=hm;hf=0}S(o);hz={};hk=[];hs=0}'
+           . 'addEventListener("pagehide",HS);document.addEventListener("visibilitychange",function(){if(document.visibilityState==="hidden")HS()});'
            . 'document.addEventListener("visibilitychange",function(){if(!p)return;'
            . 'if(document.visibilityState==="hidden"){p.h=true;return}'
            . 'if(p.h){S({id:p.id,s:Math.round((Date.now()-p.t)/1000)});p=null}});})();</script>';

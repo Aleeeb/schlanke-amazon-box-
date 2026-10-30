@@ -2103,7 +2103,28 @@ ok(SAB::eigenbild_url('javascript:alert(1)') === '', 'Eigenbild: nur http(s)-Adr
 // 0.92.32: Symbol in der oberen Leiste
 $bar = new class { public $n = []; public function add_node($a) { $this->n[] = $a; } };
 $GLOBALS['admin'] = true; SAB::leisten_symbol($bar);
-ok(count($bar->n) === 1 && $bar->n[0]['id'] === 'sab-leiste' && strpos($bar->n[0]['href'], 'page=sab') !== false && strpos(strip_tags($bar->n[0]['title']), 'ab-icon') === false, 'Obere Leiste: ein Symbol, führt zu den Einstellungen');
+ok($bar->n[0]['id'] === 'sab-leiste' && strpos($bar->n[0]['href'], 'page=sab') !== false && strpos(strip_tags($bar->n[0]['title']), 'ab-icon') === false, 'Obere Leiste: ein Symbol, führt zu den Einstellungen');
+
+// 0.92.35: Heatmap (anonyme Zähler) und Statistik-Symbol
+if (!function_exists('remove_query_arg')) { function remove_query_arg($k, $u = '') { return $u; } }
+ok(count($bar->n) === 2 && $bar->n[1]['id'] === 'sab-heat' && $bar->n[1]['parent'] === 'sab-leiste', 'Obere Leiste: auf Beispielseite nur Einkaufswagen und Heatmap-Eintrag, kein Statistik-Symbol');
+$GLOBALS['opt']['sab_leiste_statistik'] = '1'; $bar2 = new class { public $n = []; public function add_node($a) { $this->n[] = $a; } }; SAB::leisten_symbol($bar2);
+ok($bar2->n[1]['id'] === 'sab-statistik' && strpos($bar2->n[1]['href'], 'page=mini-statistik') !== false, 'Obere Leiste: Statistik-Symbol per Option');
+unset($GLOBALS['opt']['sab_leiste_statistik']);
+$hq = [];
+$wpdb_h = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class($hq) { public $prefix = 'wp_'; public $log = []; function __construct(&$l) { $this->log = &$l; } function prepare($q, ...$a) { foreach ($a as $x) { $q = preg_replace('/%[sd]/', is_int($x) ? (string) $x : "'" . $x . "'", $q, 1); } return $q; } function query($q) { $this->log[] = $q; return 1; } };
+SAB::heat_speichern(['hm' => 1, 'pfad' => '/zaun/?x=1', 'dev' => 'm', 'f' => 1, 'r' => 3, 'z' => [2 => 10, 5 => 4, 99 => 7], 'k' => [[4, 10], [99, 99], 'x']]);
+$hq1 = $hq[0] ?? '';
+ok(strpos($hq1, "'/zaun/'") !== false && strpos($hq1, "'v',0,0,1,0") !== false && strpos($hq1, "'r',0,3,1,0") !== false && strpos($hq1, "'z',0,2,1,10") !== false && strpos($hq1, "'k',4,10,1,0") !== false && strpos($hq1, "'k',19,49,1,0") !== false, 'Heatmap: Aufruf, Lesetiefe, Verweilzeit und Klicks werden als Zähler gespeichert (' . $hq1 . ')');
+ok(strpos($hq1, ",99,") === false && strpos($hq1, "'z',0,5,1,4") !== false, 'Heatmap: Werte außerhalb des Rasters werden verworfen');
+$hq = []; $GLOBALS['opt']['sab_heat'] = '0'; SAB::heat_speichern(['hm' => 1, 'pfad' => '/a/', 'f' => 1, 'r' => 1]); ok(!$hq, 'Heatmap: per Option abschaltbar'); unset($GLOBALS['opt']['sab_heat']);
+$GLOBALS['wpdb'] = $wpdb_h;
+$GLOBALS['loggedin'] = true; $GLOBALS['admin'] = true; $_GET['sab_heat'] = '1'; ob_start(); SAB::heat_overlay(); $ho = ob_get_clean(); unset($_GET['sab_heat']);
+file_put_contents(sys_get_temp_dir() . '/sab_heat.js', preg_replace('#</?script>#', '', $ho));
+ok(strpos(str_replace('\\/', '/', $ho), 'sab/v1/heat') !== false, 'Heatmap: Ansicht für angemeldete Redaktion mit ?sab_heat=1');
+$GLOBALS['loggedin'] = false; ob_start(); $_GET['sab_heat'] = '1'; SAB::heat_overlay(); $ho2 = ob_get_clean(); unset($_GET['sab_heat']); ok($ho2 === '', 'Heatmap: Besucher bekommen keine Ansicht');
+$GLOBALS['admin'] = false;
 // 0.92.33: H4 vor Produktblöcken zu fettem Text
 [$h4a, $h4n] = SAB::h4_zu_fett('<p>Text</p><h4>Schneckenzaun Set</h4>[amz_karten][amz_karte asin="B0TABLE001"][/amz_karten]<h4>Mitten im Text</h4><p>weiter</p>');
 ok($h4n === 1 && strpos($h4a, '<p class="sab-vortitel">Schneckenzaun Set</p>') !== false && strpos($h4a, '<h4>Mitten im Text</h4>') !== false, 'H4: vor Kartenblock zu fettem Text, H4 im Text bleibt (' . $h4a . ')');
