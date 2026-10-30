@@ -47,6 +47,7 @@ require dirname(__DIR__) . '/1ab-affiliate-help.php';
 $m = new ReflectionMethod('SAB', 'statistik_html'); $m->setAccessible(true);
 $h = $m->invoke(null);
 $fail = 0; function ok($c, $n) { global $fail; echo ($c ? 'OK   ' : 'FEHLER ') . $n . "\n"; if (!$c) $fail++; }
+ok(strpos($h, 'Aufrufe') !== false, 'Statistik: Produktzeile nennt die Aufrufe (oder dass sie unbekannt sind)');
 ok(strpos($h, '<svg') !== false && strpos($h, '<strong>7</strong> Klicks gesamt') !== false, 'Statistik: Grafik und Summe');
 ok(strpos($h, 'B000000001') !== false && strpos($h, '2 Min.') !== false && strpos($h, 'zu wenig Daten') !== false && strpos($h, '71 %') !== false, 'Statistik: Liste mit Anteil und Zeit');
 ok(strpos($h, 'Umgeleitete Klicks') !== false && strpos($h, 'USA') !== false && strpos($h, 'direkt zur ASIN im Land') !== false && strpos($h, 'Kanada') !== false && strpos($h, '3 von 7 Klicks (43 %)') !== false, 'Statistik: umgeleitete Klicks nach Land und Art');

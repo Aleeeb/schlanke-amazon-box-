@@ -2167,6 +2167,12 @@ $_GET['page'] = 'sab'; $GLOBALS['admin'] = true; ob_start(); SAB::balken_admin()
 file_put_contents(sys_get_temp_dir() . '/sab_balken.js', preg_replace('#</?script>#', '', $ba));
 ok(strpos($bj, 'function sabBalken') !== false && strpos($ba, 'sabBalken(t)') !== false && strpos($ba, '"submit"') !== false, 'Fortschrittsbalken: Verwaltungsseite zeigt ihn nach dem Absenden eines Formulars');
 $_GET['page'] = 'andere'; ob_start(); SAB::balken_admin(); $bb = ob_get_clean(); unset($_GET['page']); ok($bb === '', 'Fortschrittsbalken: nur auf der Plugin-Seite');
+
+// 0.92.44: Klickrate in der Statistik und Kreis an alten Bausteinen
+$mkt = new ReflectionMethod('SAB', 'klickrate_text'); $mkt->setAccessible(true);
+ok(strpos($mkt->invoke(null, 3, 120), 'bei 120 Aufrufen = 2,5 %') !== false && strpos($mkt->invoke(null, 3, 0), 'Aufrufe unbekannt') !== false, 'Statistik: Klicks mit Aufrufen und Prozent');
+$GLOBALS['loggedin'] = false; ok(SAB::kreis_post('<a>x</a>', 'amz_bild', ['asin' => 'B0KUPFER01'], []) === '<a>x</a>', 'Alte Bausteine: Besucher sehen keinen Kreis');
+ok(SAB::kreis_post('<a>x</a>', 'amz_link', ['asin' => 'B0KUPFER01'], []) === '<a>x</a>', 'Alte Bausteine: Textlink bleibt unverändert');
 // 0.92.33: H4 vor Produktblöcken zu fettem Text
 [$h4a, $h4n] = SAB::h4_zu_fett('<p>Text</p><h4>Schneckenzaun Set</h4>[amz_karten][amz_karte asin="B0TABLE001"][/amz_karten]<h4>Mitten im Text</h4><p>weiter</p>');
 ok($h4n === 1 && strpos($h4a, '<p class="sab-vortitel">Schneckenzaun Set</p>') !== false && strpos($h4a, '<h4>Mitten im Text</h4>') !== false, 'H4: vor Kartenblock zu fettem Text, H4 im Text bleibt (' . $h4a . ')');

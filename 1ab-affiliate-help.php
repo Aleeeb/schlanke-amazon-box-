@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.43
+ * Version: 0.92.44
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.43';
+    const VERSION = '0.92.44';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -111,6 +111,7 @@ final class SAB {
         add_action('admin_footer', [__CLASS__, 'balken_admin']);
         add_filter('pre_do_shortcode_tag', [__CLASS__, 'ord_pre'], 10, 4);
         add_filter('do_shortcode_tag',     [__CLASS__, 'ord_post'], 10, 4);
+        add_filter('do_shortcode_tag',     [__CLASS__, 'kreis_post'], 20, 4);
         add_filter('the_content',          [__CLASS__, 'ord_reset'], 9);
         add_filter('the_content',          [__CLASS__, 'attr_reparieren'], 8);
         add_filter('the_content',          [__CLASS__, 'ab_inhalt'], 7);
@@ -2604,6 +2605,15 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         return $r;
     }
 
+    /** Alte Einzelbausteine ([amz_bild], [amz_produkt]) bekommen für angemeldete Redakteure ebenfalls den Klickraten-Kreis (Karten haben ihn schon, dort wird nicht doppelt gesetzt, weil sie die Bausteine direkt aufrufen). */
+    public static function kreis_post($out, $tag, $attr, $m) {
+        if (($tag !== 'amz_bild' && $tag !== 'amz_produkt') || (string) $out === '' || !is_array($attr)) { return $out; }
+        $asin = self::getauscht(self::asin((string) ($attr['asin'] ?? '')));
+        if (strlen($asin) !== 10) { return $out; }
+        $k = self::klickrate_kreis($asin);
+        return $k === '' ? $out : '<span class="sab-kr-w" style="position:relative;display:' . ($tag === 'amz_bild' ? 'inline-block' : 'block') . ';max-width:100%">' . $out . $k . '</span>';
+    }
+
     public static function ord_post($out, $tag, $attr, $m) {
         if (!in_array($tag, self::ORD_TAGS, true) || self::$ord_aus || !self::$ord_stack) { return $out; }
         $n = array_pop(self::$ord_stack);
@@ -4759,6 +4769,38 @@ JS;
     }
 
     /** Rückkehr-Anteil ehrlich: unter MIN_RUECK Klicks ist eine Prozentzahl nur Zufall. */
+    /** Aufrufe (laut Seitenzähler) der Artikel, in denen ein Produkt steht, ab einem Datum: ASIN => Aufrufe. Eine Stunde zwischengespeichert. */
+    private static function aufrufe_je_asin(string $von): array {
+        global $wpdb;
+        $key = 'sab_aufr_' . md5($von . gmdate('YmdH'));
+        $c = get_transient($key);
+        if (is_array($c)) { return $c; }
+        $out = [];
+        if (!isset($wpdb)) { return $out; }
+        $ts = self::seiten_tabelle(); $views = [];
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT pfad, SUM(n) v FROM $ts WHERE tag >= %s GROUP BY pfad", $von), ARRAY_A) as $r) { $views[(string) ($r['pfad'] ?? '')] = (int) ($r['v'] ?? 0); }
+        $rows = (array) $wpdb->get_results("SELECT ID, post_content FROM " . ($wpdb->posts ?? $wpdb->prefix . 'posts') . " WHERE post_status='publish' AND post_type IN ('post','page') AND (post_content LIKE '%[amz\\_%' OR post_content LIKE '%[aawp%' OR post_content LIKE '%[amazon %' OR post_content LIKE '%amazon.%')", ARRAY_A);
+        foreach ($rows as $r) {
+            if (!isset($r['ID'], $r['post_content'])) { continue; }
+            $pf = (string) parse_url((string) get_permalink((int) $r['ID']), PHP_URL_PATH); $v = $views[$pf] ?? 0;
+            if ($v < 1) { continue; }
+            $cn = (string) $r['post_content']; $as = [];
+            if (preg_match_all('#\[amz_[a-z]+\b[^\]]*?\basin=["\']([A-Za-z0-9]{10})["\']#', $cn, $m)) { $as = array_merge($as, $m[1]); }
+            if (preg_match_all('#(?:dp|gp/product)/([A-Za-z0-9]{10})#', $cn, $m)) { $as = array_merge($as, $m[1]); }
+            if (preg_match_all('#\[(?:aawp|amazon)\b[^\]]*\b(?:box|link|fields)=["\']([A-Za-z0-9]{10})#i', $cn, $m)) { $as = array_merge($as, $m[1]); }
+            foreach (array_unique(array_map('strtoupper', $as)) as $a) { $out[$a] = ($out[$a] ?? 0) + $v; }
+        }
+        set_transient($key, $out, HOUR_IN_SECONDS);
+        return $out;
+    }
+
+    /** „bei 120 Aufrufen = 2,5 %“ für die Produktzeile der Statistik. */
+    private static function klickrate_text(int $klicks, int $aufrufe): string {
+        if ($aufrufe < 1) { return '<small title="Für die Seiten, auf denen das Produkt steht, gibt es in diesem Zeitraum keine Aufrufe im Seitenzähler.">Aufrufe unbekannt</small>'; }
+        $pz = str_replace('.', ',', (string) round(100 * $klicks / $aufrufe, 1)) . ' %';
+        return '<small title="Aufrufe der Artikel, in denen das Produkt steht, im gewählten Zeitraum. Klickrate = Klicks geteilt durch Aufrufe.">bei ' . $aufrufe . ' Aufrufen = ' . esc_html($pz) . '</small>';
+    }
+
     private static function rueck_text(int $n, int $z): string {
         if ($n < 10) { return '<span style="color:#787c82">zu wenig Daten (' . $z . ' von ' . $n . ')</span>'; }
         return round(100 * $z / $n) . ' % <span style="color:#787c82">(' . $z . ' von ' . $n . ')</span>';
@@ -4816,7 +4858,7 @@ JS;
         $lz = [];   // je Hauptprodukt: Besucherland, Zielland, ausgelieferte ASIN
         foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT asin, herkunft, ziel_land, ziel_asin, COUNT(*) n FROM $t WHERE ts >= %s AND (herkunft <> '' OR ziel_land <> '') GROUP BY asin, herkunft, ziel_land, ziel_asin ORDER BY n DESC", $ab), ARRAY_A) as $r) { $lz[$r['asin']][] = $r; }
 
-        $h = '<h2>Statistik</h2><style>.sab-st-k{display:flex;gap:10px;align-items:center;padding:10px;cursor:pointer;list-style:none}.sab-st-k::-webkit-details-marker{display:none}.sab-st-p{background:#fff;border:1px solid #dcdcde;border-radius:8px;margin:0 0 8px}.sab-st-p[open]{border-color:#2271b1}.sab-st-z{flex:1;min-width:0}.sab-st-z b{display:block;overflow-wrap:anywhere}.sab-st-z small{color:#50575e}.sab-st-n{font-size:20px;font-weight:700;text-align:right;min-width:48px}.sab-st-n small{display:block;font-size:11px;font-weight:400;color:#50575e}.sab-st-s{padding:0 10px 10px 10px;border-top:1px solid #f0f0f1}.sab-st-s li{margin:6px 0;overflow-wrap:anywhere}.sab-sc{display:inline-block;padding:1px 7px;border-radius:10px;background:#f0f6fc;color:#0a4b78;font-size:12px;font-weight:600}</style>'
+        $h = '<h2>Statistik</h2><style>.sab-st-k{display:flex;gap:10px;align-items:center;padding:10px;cursor:pointer;list-style:none}.sab-st-k::-webkit-details-marker{display:none}.sab-st-p{background:#fff;border:1px solid #dcdcde;border-radius:8px;margin:0 0 8px}.sab-st-p[open]{border-color:#2271b1}.sab-st-z{flex:1;min-width:0}.sab-st-z b{display:block;overflow-wrap:anywhere}.sab-st-z small{color:#50575e}.sab-st-n{font-size:20px;font-weight:700;text-align:right;min-width:128px}.sab-st-n small{display:block;font-size:11px;font-weight:400;color:#50575e}.sab-st-s{padding:0 10px 10px 10px;border-top:1px solid #f0f0f1}.sab-st-s li{margin:6px 0;overflow-wrap:anywhere}.sab-sc{display:inline-block;padding:1px 7px;border-radius:10px;background:#f0f6fc;color:#0a4b78;font-size:12px;font-weight:600}</style>'
           . '<p>Zeitraum: ';
         foreach ([7, 30, 90] as $z) { $h .= ($z === $tage ? '<strong>' . $z . ' Tage</strong>' : '<a href="' . esc_url(add_query_arg(['page' => 'sab-statistik', 'tage' => $z], admin_url('admin.php'))) . '">' . $z . ' Tage</a>') . ' · '; }
         $h .= '<strong>' . $summe . '</strong> Klicks gesamt. Gezählt werden Klicks auf Plugin-Links; Bots und angemeldete Redakteure werden ausgelassen.</p>' . $svg . $ziel_h
@@ -4826,6 +4868,7 @@ JS;
           . 'Darum ist die Zahl bei wenigen Klicks Zufall (1 von 1 = 100 %), erst ab 10 Klicks wird ein Prozentwert gezeigt. Insgesamt: ' . self::rueck_text($summe, $gz) . '.</p>';
         if (!$zeilen) { return $h . '<p>Noch keine Klicks in diesem Zeitraum.</p>'; }
         $home = untrailingslashit(home_url());
+        $aufr = self::aufrufe_je_asin(gmdate('Y-m-d', time() - ($tage - 1) * DAY_IN_SECONDS));
         foreach ($zeilen as $r) {
             $a = (string) $r['asin']; $n = (int) $r['n']; $z = (int) $r['z']; $x = $items[$a] ?? [];
             $name = ($namen[$a] ?? '') ?: mb_substr(trim((string) ($x['titel'] ?? '')), 0, 80);
@@ -4836,7 +4879,7 @@ JS;
             $h .= '<details class="sab-st-p"><summary class="sab-st-k">' . str_replace('width:64px;height:64px', 'width:44px;height:44px', $bild)
                 . '<span class="sab-st-z"><b>' . esc_html($name) . '</b><small><code>' . esc_html($a) . '</code>' . $score . '</small>'
                 . '<small style="display:block;margin-top:2px">Bild ' . (int) $r['b'] . ' · Text/Button ' . (int) $r['x'] . ' · Anteil ' . round(100 * $n / max($summe, 1)) . ' % · Zurück: ' . self::rueck_text($n, $z) . ($z ? ' · Ø ' . esc_html(self::dauer_text((float) $r['m'])) : '') . '</small></span>'
-                . '<span class="sab-st-n">' . $n . '<small>Klicks</small></span></summary><div class="sab-st-s"><p class="description" style="margin:8px 0 2px">Seiten, von denen die Klicks kamen:</p><ol style="margin:0 0 0 18px">';
+                . '<span class="sab-st-n">' . $n . '<small>Klicks</small>' . self::klickrate_text($n, (int) ($aufr[$a] ?? 0)) . '</span></summary><div class="sab-st-s"><p class="description" style="margin:8px 0 2px">Seiten, von denen die Klicks kamen:</p><ol style="margin:0 0 0 18px">';
             $k = 0;
             foreach ((array) ($seiten[$a] ?? []) as $sr) {
                 if (++$k > 15) { break; }
