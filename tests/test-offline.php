@@ -2194,4 +2194,6 @@ ok($h4m === 1 && strpos($h4b, 'wp:heading') === false && strpos($h4b, '<!-- wp:p
 // 0.92.34: Klickrate-Kreis nur für Redakteure
 $GLOBALS['admin'] = false;
 ok(SAB::klickrate_kreis('B0TABLE001') === '', 'Klickrate: Besucher bekommen keinen Kreis');
+// 0.92.47: Kreis-CSS auch ohne Karte auf der Seite
+ok(strpos(SAB::KR_CSS, "border-radius:999px") !== false && strpos(SAB::KR_CSS, "position:absolute") !== false, "Kreis: eigenes CSS fuer alte Bausteine vorhanden");
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
