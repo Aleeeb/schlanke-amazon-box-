@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.49
+ * Version: 0.92.50
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.49';
+    const VERSION = '0.92.50';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -114,6 +114,7 @@ final class SAB {
         add_filter('do_shortcode_tag',     [__CLASS__, 'kreis_post'], 20, 4);
         add_filter('the_content',          [__CLASS__, 'ord_reset'], 9);
         add_filter('the_content',          [__CLASS__, 'attr_reparieren'], 8);
+        add_filter('the_content',          [__CLASS__, 'karte_punkt'], 8);
         add_filter('the_content',          [__CLASS__, 'ab_inhalt'], 7);
         add_action('wp_footer',            [__CLASS__, 'stellen_skript'], 97);
         add_action('wp_footer',            [__CLASS__, 'widget_zeige_skript'], 100);
@@ -6617,6 +6618,13 @@ JS;
 
     /** Wandelt feste Amazon-Links eines Textes um. @return array{0:string,1:int,2:int} [neuer Text, umgewandelt, übersprungen] */
     /** Ein Platzhalter im src-Attribut eines Bildes wird von WordPress nicht ausgegeben (kaputtes Bild). Hier wird das ganze Bild-Element (samt umgebendem Link) durch den Platzhalter ersetzt, der Bild und Link selbst ausgibt. */
+    /** Ein Satzpunkt, der nach dem Umbau allein hinter einer Einzelkarte stehen blieb ([/amz_karten]. oder [/amz_karten]<br>.), wird nicht ausgegeben. */
+    public static function karte_punkt($c) {
+        if (!is_string($c) || strpos($c, '[/amz_karten]') === false) { return $c; }
+        $neu = preg_replace('#(\[amz_karte\b[^\]]*\bstil="einzel"[^\]]*\]\s*\[/amz_karten\])(?:\s*<br\s*/?>)*\s*[.!]+(?=\s*(?:</p>|<|$))#i', '$1', $c);
+        return $neu ?? $c;
+    }
+
     public static function attr_reparieren($c) {
         if (!is_string($c) || strpos($c, '[amz_') === false) { return $c; }
         $re = '#(?:<a\b[^>]*>\s*)?<img\b[^>]*?\bsrc=(["\'])(\[amz_bild\b[^\]]*\](?:\[/amz_bild\])?)\1[^>]*>(?:\s*</a>)?#is';
@@ -8774,12 +8782,12 @@ JS;
                 foreach (['asin' => 'ASIN des Buchs', 'marke' => 'Etikett (z. B. Buchtipp)', 'titel' => 'Titel', 'text' => 'Kurztext', 'knopf' => 'Knopftext (leer = Standard)', 'alt_text' => 'zweiter Link: Text (z. B. Thalia)', 'alt_url' => 'zweiter Link: Adresse'] as $k => $l) {
                     $h .= '<label>' . esc_html($l) . '<br><input type="text" name="sab_w_' . esc_attr($k) . '" value="' . esc_attr((string) ($f[$k] ?? '')) . '" style="width:100%"></label>';
                 }
-                $h .= '</div><p><button class="button" name="sab_wakt" value="vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="speichern" onclick="return confirm(\'Dieses Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Umbauen</button></p></form>';
+                $h .= '</div><p><button class="button" name="sab_wakt" value="vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="speichern">Umbauen</button></p></form>';
                 if (isset(self::$wi_vorschau[$id]) && strlen(self::asin((string) ($f['asin'] ?? ''))) === 10) { $h .= '<div style="background:#f1f3ee;padding:14px;border-radius:8px"><div style="width:300px">' . do_shortcode(self::widget_code($f)) . '</div></div>'; }
             }
             if (!empty($w['start'])) {
                 $h .= '<div style="margin-top:8px;padding:8px 10px;background:#f1f6ee;border:1px solid #cfe2c8;border-radius:6px"><strong>Link auf eine Amazon-Seite ohne Produkt (Startseite oder Rezensionen)</strong> (' . count($w['start']) . '): ' . esc_html(implode(', ', array_map(fn($x) => '„' . mb_substr($x['text'], 0, 30) . '“', $w['start']))) . '. Das ist kein Produktlink und zählt nicht als alter Link. Du kannst ihn durch den Link des Plugins ersetzen (Startseite oder Rezensionen, mit Partner-ID des Landes, Länder-Umschaltung, Klickstatistik).'
-                    . '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="start_vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="start" onclick="return confirm(\'Startseiten-Link in diesem Widget jetzt umbauen? Der alte Inhalt wird gesichert.\')">Link umbauen</button></form>';
+                    . '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-w-' . $id)) . '" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="widget_umbau"><input type="hidden" name="sab_wid" value="' . esc_attr($id) . '"><button class="button" name="sab_wakt" value="start_vorschau">Vorschau</button> <button class="button button-primary" name="sab_wakt" value="start">Link umbauen</button></form>';
                 if (isset(self::$wi_start[$id])) { $h .= '<p style="margin:8px 0 2px"><strong>Neuer Inhalt:</strong></p><pre style="white-space:pre-wrap;max-height:160px;overflow:auto;background:#fff;padding:6px;font-size:12px">' . esc_html(self::$wi_start[$id]) . '</pre><div style="background:#fff;padding:8px;border-radius:6px">' . do_shortcode(wp_kses_post(self::$wi_start[$id])) . '</div>'; }
                 $h .= '</div>';
             }

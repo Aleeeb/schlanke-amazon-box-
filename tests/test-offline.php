@@ -2196,4 +2196,6 @@ $GLOBALS['admin'] = false;
 ok(SAB::klickrate_kreis('B0TABLE001') === '', 'Klickrate: Besucher bekommen keinen Kreis');
 // 0.92.47: Kreis-CSS auch ohne Karte auf der Seite
 ok(strpos(SAB::KR_CSS, "border-radius:999px") !== false && strpos(SAB::KR_CSS, "position:absolute") !== false, "Kreis: eigenes CSS fuer alte Bausteine vorhanden");
+ok(SAB::karte_punkt('<p style="text-align: center;">[amz_karten][amz_karte asin="B08562GF55" stil="einzel"][/amz_karten].</p><hr />') === '<p style="text-align: center;">[amz_karten][amz_karte asin="B08562GF55" stil="einzel"][/amz_karten]</p><hr />', 'Karte: Rest-Satzpunkt hinter Einzelkarte wird nicht ausgegeben');
+ok(SAB::karte_punkt('[amz_karten][amz_karte asin="B08562GF55"][/amz_karten]. Weiter') === '[amz_karten][amz_karte asin="B08562GF55"][/amz_karten]. Weiter', 'Karte: andere Karten bleiben unberührt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
