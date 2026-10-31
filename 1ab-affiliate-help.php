@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.46
+ * Version: 0.92.47
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.46';
+    const VERSION = '0.92.47';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1991,8 +1991,9 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
             $r = wp_remote_get($quelle, ['timeout' => $alter === PHP_INT_MAX ? 6 : 10]);
             $ok = !is_wp_error($r) && wp_remote_retrieve_response_code($r) === 200
                && strpos((string) wp_remote_retrieve_header($r, 'content-type'), 'image/') === 0;
-            if ($ok) {
-                file_put_contents($file, wp_remote_retrieve_body($r));
+            $body = $ok ? (string) wp_remote_retrieve_body($r) : '';
+            if ($ok && strlen($body) > 100 && strlen($body) <= 3 * MB_IN_BYTES && @getimagesizefromstring($body) !== false) {   // nur echte Bilder bis 3 MB speichern
+                file_put_contents($file, $body, LOCK_EX);
                 $alter = 0;
             }
         }
@@ -6150,7 +6151,7 @@ JS;
         static $start = 0.0; if ($start === 0.0) { $start = microtime(true); }
         if ($budget <= 0 || microtime(true) - $start > 12) { self::$kurz_offen++; return ''; }   // Zeitgrenze: lieber beim nächsten Klick weitermachen als in einen PHP-Zeitfehler zu laufen
         $budget--;
-        $r = wp_remote_head($url, ['timeout' => 4, 'redirection' => 6]);
+        $r = wp_safe_remote_head($url, ['timeout' => 4, 'redirection' => 6]);
         $ziel = '';
         if (!is_wp_error($r)) {
             $o = $r['http_response'] ?? null;
@@ -6159,7 +6160,7 @@ JS;
         if (($ziel === '' || preg_match('#^https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/#i', $ziel)) && !is_wp_error($r) || ($ziel === '' && is_wp_error($r))) {   // Weiterleitung nicht verfolgt (z. B. neues link.amazon-Format): Location-Köpfe von Hand folgen, notfalls mit GET
             $u = $url;
             for ($i = 0; $i < 6; $i++) {
-                $rr = wp_remote_get($u, ['timeout' => 4, 'redirection' => 0, 'headers' => ['Range' => 'bytes=0-0']]);
+                $rr = wp_safe_remote_get($u, ['timeout' => 4, 'redirection' => 0, 'headers' => ['Range' => 'bytes=0-0']]);
                 if (is_wp_error($rr)) { break; }
                 $loc = wp_remote_retrieve_header($rr, 'location'); if (is_array($loc)) { $loc = (string) end($loc); }
                 if ($loc === '' || $loc === null) { if ($i > 0) { $ziel = $u; } break; }

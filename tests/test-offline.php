@@ -4,7 +4,7 @@ define('SAB_SYNC', 1); define('ABSPATH', dirname(__DIR__) . '/');
 if (!function_exists('get_post_status')) { function get_post_status($i) { return 'publish'; } }
 if (!function_exists('apply_filters')) { function apply_filters($t, $v) { return $v; } }
 if (!function_exists('get_post_field')) { function get_post_field($f, $i) { $a = []; foreach ((array) ($GLOBALS['opt']['sab_bildfehler'] ?? []) as $e) { if (!in_array($e['asin'], (array) ($GLOBALS['absent'] ?? []), true)) { $a[] = '[amz_bild asin="' . $e['asin'] . '"]'; } } return '<p>' . implode(' ', $a) . '</p>'; } }
-const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
+const MB_IN_BYTES = 1048576; const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
 $GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
 function add_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return '1ab-affiliate-help/1ab-affiliate-help.php'; } function wp_next_scheduled($x) { return true; }
@@ -30,7 +30,7 @@ function wp_remote_post($u, $a) {
     return ['code' => 200, 'body' => json_encode($antwort)];
 }
 function wp_remote_get($u, $a) {
-    if (strpos($u, 'update-1ab-affiliate-help.json') !== false) return ['code' => 200, 'body' => json_encode($GLOBALS['upd'] ?? [])]; return ['code' => 200, 'body' => 'JPG', 'ct' => 'image/jpeg']; }
+    if (strpos($u, 'update-1ab-affiliate-help.json') !== false) return ['code' => 200, 'body' => json_encode($GLOBALS['upd'] ?? [])]; return ['code' => 200, 'body' => str_repeat(base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), 3), 'ct' => 'image/jpeg']; }
 function wp_remote_retrieve_response_code($r) { return $r['code']; }
 if (!function_exists('wp_nonce_url')) { function wp_nonce_url($u, $a = '') { return $u . '&_wpnonce=x'; } }
 if (!function_exists('wp_verify_nonce')) { function wp_verify_nonce($n, $a = '') { return true; } }
@@ -71,6 +71,7 @@ function do_shortcode($t) {
 if (!function_exists('admin_url')) { function admin_url($p = '') { return 'https://x.test/wp-admin/' . $p; } }
 class FakeResp { public $url; function __construct($u) { $this->url = $u; } }
 class FakeHttp { public $o; function __construct($u) { $this->o = new FakeResp($u); } function get_response_object() { return $this->o; } }
+function wp_safe_remote_head($u, $a = []) { return wp_remote_head($u, $a); } function wp_safe_remote_get($u, $a = []) { return wp_remote_get($u, $a); }
 function wp_remote_head($u, $a = []) { $z = $GLOBALS['kurz'][$u] ?? ''; return ['http_response' => new FakeHttp($z)]; }
 $GLOBALS['kurz'] = ['https://amzn.to/abc' => 'https://www.amazon.es/Producto-Largo/dp/B0AAAAAAA1?tag=x', 'https://amzn.to/start' => 'https://www.amazon.es/'];
 $fail = 0;
