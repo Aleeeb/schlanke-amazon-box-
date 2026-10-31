@@ -2137,6 +2137,12 @@ ok($pn1 === 1 && $pa1 === '<p>Vorher.</p>[amz_karten][amz_karte asin="B0PAAR0001
 $pb = "<!-- wp:html -->\n<p>[amz_bild asin=\"B0PAAR0002\"]<a href=\"x\"><img src=\"a.jpg\"></a>[/amz_bild]<br>[amz_link asin=\"B0PAAR0002\"]Zum Angebot[/amz_link]</p>\n<!-- /wp:html -->";
 [$pb1, $pn2] = SAB::paare_zu_einzelkarten($pb);
 ok($pn2 === 1 && strpos($pb1, '[amz_karte asin="B0PAAR0002" stil="einzel"]') !== false && strpos($pb1, '[amz_link') === false && strpos($pb1, '[amz_bild') === false, 'Paare: Bild und Textlink im selben Absatz (' . $pb1 . ')');
+$pt = '<p>Vorher.</p><h3>Schneckenzaun Pro Set</h3><p>[amz_bild asin="B0PAAR0009" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0PAAR0009" land="es"]Schneckenzaun Pro[/amz_link]</p><p>Danach.</p>';
+[$pt1, $pnt] = SAB::paare_zu_einzelkarten($pt);
+ok($pnt === 1 && strpos($pt1, 'Schneckenzaun Pro Set') === false && strpos($pt1, '<p>Vorher.</p>[amz_karten]') === 0, 'Paare: alter Titel direkt über dem Bild wird entfernt (' . $pt1 . ')');
+$pu = '<h3>Ganz anderes Thema</h3><p>[amz_bild asin="B0PAAR0010"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>[amz_link asin="B0PAAR0010"]Schneckenzaun Pro[/amz_link]</p>';
+[$pu1] = SAB::paare_zu_einzelkarten($pu);
+ok(strpos($pu1, 'Ganz anderes Thema') !== false, 'Paare: unpassende Überschrift bleibt stehen');
 $pc = '<p>[amz_bild asin="B0PAAR0003"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Dieses lange Zaunsystem hat uns im Test gut gefallen, weil es stabil ist: [amz_link asin="B0PAAR0003"]Zaun[/amz_link] und viel mehr Text drumherum.</p>';
 SAB::$umbau_abw = []; [$pc1, $pn3] = SAB::paare_zu_einzelkarten($pc);
 ok($pn3 === 0 && $pc1 === $pc && count(SAB::$umbau_abw) === 1, 'Paare: Textlink im langen Satz bleibt, mit Hinweis');

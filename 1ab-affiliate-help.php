@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.44
+ * Version: 0.92.45
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.44';
+    const VERSION = '0.92.45';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6730,6 +6730,26 @@ JS;
         return [$s, $e, $komm];
     }
 
+    /** Steht direkt vor Position $pos eine kurze Überschrift/Fettzeile ohne Link, die zum Produkt passt? @return ?array{0:int,1:string} [Start, Text] */
+    private static function titel_davor(string $c, int $pos, string $asin, string $linktext): ?array {
+        $fenster = max(0, $pos - 600); $vor = substr($c, $fenster, $pos - $fenster);
+        $re = '#(?:<!--\s*wp:(?:heading|paragraph)[^>]*-->\s*)?(?:<(h[2-5])\b[^>]*>(.*?)</\1>|<p\b[^>]*>\s*<(strong|b)>(.*?)</\3>\s*</p>)\s*(?:<!--\s*/wp:(?:heading|paragraph)\s*-->\s*)?$#is';
+        if (!preg_match($re, $vor, $m, PREG_OFFSET_CAPTURE)) { return null; }
+        $inner = $m[2][1] >= 0 && $m[2][0] !== '' ? $m[2][0] : ($m[4][0] ?? '');
+        if (stripos($inner, '<a ') !== false || stripos($inner, '[amz_') !== false) { return null; }
+        $t = trim(html_entity_decode(strip_tags($inner)));
+        if ($t === '' || mb_strlen($t) > 120) { return null; }
+        $norm = static function (string $x): array { return array_values(array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($x)), static function ($w) { return mb_strlen($w) > 2; })); };
+        $tw = $norm($t); if (!$tw) { return null; }
+        $kand = [$linktext, (string) (self::produkte()[$asin] ?? '')];
+        foreach ($kand as $k) {
+            $kw = $norm($k); if (!$kw) { continue; }
+            $gem = count(array_intersect($tw, $kw));
+            if ($gem > 0 && $gem >= 0.6 * min(count($tw), count($kw))) { return [$fenster + $m[0][1], $t]; }
+        }
+        return null;
+    }
+
     /**
      * Bild und Textlink desselben Produkts, die getrennt im Artikel stehen ([amz_bild] und kurz danach [amz_link]), werden EINE Einzelkarte
      * (Titel, Bild, „Klick auf das Bild führt zum Angebot bei Amazon“ als ein Link). Nur wenn der Textlink in einem eigenen kurzen Absatz steht.
@@ -6764,6 +6784,8 @@ JS;
                     $land = preg_match('#\bland="([a-z.]+)"#i', $a[1][0] . ' ' . $a[3][0], $lm) ? ' land="' . strtolower($lm[1]) . '"' : '';
                     $tag = preg_match('#\btag="([A-Za-z0-9\-]{3,40})"#', $a[1][0] . ' ' . $a[3][0], $tm) ? ' tag="' . $tm[1] . '"' : '';
                     $karte = '[amz_karten][amz_karte asin="' . $asin . '"' . $land . $tag . ' stil="einzel"][/amz_karten]';
+                    $alt = self::titel_davor($c, $as_[0], $asin, $text);   // alter Titel direkt über dem Bild: die Karte hat ihren eigenen
+                    if ($alt) { $as_[0] = $alt[0]; self::$umbau_info[] = 'Alter Titel „' . mb_substr($alt[1], 0, 50) . '“ über der Karte entfernt (die Karte zeigt ihn selbst)'; self::namen_merken([$asin => $alt[1]]); }
                     if ($as_[2]) { $karte = "<!-- wp:shortcode -->\n" . $karte . "\n<!-- /wp:shortcode -->"; }
                     if ($same) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1]); }
                     else { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1], $bs[0] - $as_[1]) . substr($c, $bs[1]); }
