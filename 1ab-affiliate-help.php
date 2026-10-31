@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.45
+ * Version: 0.92.46
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.45';
+    const VERSION = '0.92.46';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6789,6 +6789,11 @@ JS;
                     if ($as_[2]) { $karte = "<!-- wp:shortcode -->\n" . $karte . "\n<!-- /wp:shortcode -->"; }
                     if ($same) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1]); }
                     else { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1], $bs[0] - $as_[1]) . substr($c, $bs[1]); }
+                    $kp = strpos($c, $karte, $as_[0]);   // Satzpunkt, der hinter dem Textlink stehen blieb, mit entfernen
+                    if ($kp !== false) {
+                        $ke = $kp + strlen($karte);
+                        $c = substr($c, 0, $ke) . preg_replace('#^(?:\s*<br\s*/?>)*\s*[.!]+(?=\s*(?:<|$))|^\s*(?:<!--\s*wp:paragraph[^>]*-->\s*)?<p\b[^>]*>\s*[.!]+\s*</p>(?:\s*<!--\s*/wp:paragraph\s*-->)?#i', '', substr($c, $ke), 1);
+                    }
                     $n++; self::$umbau_info[] = 'Bild und Textlink' . ($text !== '' ? ' („' . $text . '“)' : '') . ' zu ' . $asin . ' zu einer Einzelkarte zusammengeführt';
                     $getan = true; break 2;
                 }

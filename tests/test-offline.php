@@ -2140,6 +2140,12 @@ ok($pn2 === 1 && strpos($pb1, '[amz_karte asin="B0PAAR0002" stil="einzel"]') !==
 $pt = '<p>Vorher.</p><h3>Schneckenzaun Pro Set</h3><p>[amz_bild asin="B0PAAR0009" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0PAAR0009" land="es"]Schneckenzaun Pro[/amz_link]</p><p>Danach.</p>';
 [$pt1, $pnt] = SAB::paare_zu_einzelkarten($pt);
 ok($pnt === 1 && strpos($pt1, 'Schneckenzaun Pro Set') === false && strpos($pt1, '<p>Vorher.</p>[amz_karten]') === 0, 'Paare: alter Titel direkt über dem Bild wird entfernt (' . $pt1 . ')');
+$pv = '<p>[amz_bild asin="B0PAAR0011"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild führt zum [amz_link asin="B0PAAR0011"]Angebot bei Amazon[/amz_link]</p><p>.</p><p>Weiter.</p>';
+[$pv1] = SAB::paare_zu_einzelkarten($pv);
+ok($pv1 === '[amz_karten][amz_karte asin="B0PAAR0011" stil="einzel"][/amz_karten]<p>Weiter.</p>', 'Paare: übrig gebliebener Satzpunkt wird entfernt (' . $pv1 . ')');
+$pw = '<p>[amz_bild asin="B0PAAR0012"]<a href="x"><img src="a.jpg"></a>[/amz_bild]<br>Klick auf das Bild führt zum [amz_link asin="B0PAAR0012"]Angebot bei Amazon[/amz_link]</p>.<p>Weiter.</p>';
+[$pw1] = SAB::paare_zu_einzelkarten($pw);
+ok(strpos($pw1, '.<p>') === false, 'Paare: Punkt direkt hinter dem Absatz wird entfernt (' . $pw1 . ')');
 $pu = '<h3>Ganz anderes Thema</h3><p>[amz_bild asin="B0PAAR0010"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>[amz_link asin="B0PAAR0010"]Schneckenzaun Pro[/amz_link]</p>';
 [$pu1] = SAB::paare_zu_einzelkarten($pu);
 ok(strpos($pu1, 'Ganz anderes Thema') !== false, 'Paare: unpassende Überschrift bleibt stehen');
