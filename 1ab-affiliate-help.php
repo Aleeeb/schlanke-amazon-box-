@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.57
+ * Version: 0.92.58
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.57';
+    const VERSION = '0.92.58';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7134,7 +7134,7 @@ JS;
         $rest = array_values(array_filter($offen, fn($a) => $a['id'] > $ab));
         $liste = array_slice($rest, 0, self::UMBAU_PROSEITE);
         $h = '<h3>Vorschau für die offenen Artikel (' . $gesamt . ' Artikel offen' . ($ab > 0 ? ', weiter nach Artikel-Nr. ' . $ab : '') . ')</h3><p class="description">Es wird nichts gespeichert. Jeder Artikel wird so geprüft wie beim Umbau. „Bereit“ heißt: kein Problem gefunden. Probleme siehst du unten, dort kannst du auch Ersatz für Produkte wählen, die Amazon nicht mehr kennt.</p>';
-        $zeilen = []; $bereit = []; $wegAlle = []; $kurzOffen = 0; $nProb = 0; $letzte = $ab; $geprueft = 0;
+        $zeilen = []; $bereit = []; $wegAlle = []; $kurzOffen = 0; $nProb = 0; $letzte = $ab; $geprueft = 0; $muster = [];
         $t_start = microtime(true); $uebrig = 0;
         foreach ($liste as $a) {
             if (microtime(true) - $t_start > 20) { $uebrig++; continue; }   // Zeitgrenze: Der Rest kommt auf der nächsten Seite (sie beginnt nach dem letzten geprüften Artikel)
@@ -7144,6 +7144,7 @@ JS;
             try { self::umbau_text((string) $post->post_content); }
             catch (\Throwable $e) { self::$umbau_abw[] = 'Prüfung abgebrochen: ' . $e->getMessage(); }
             $abw = array_values(array_unique(self::$umbau_abw)); $info = count(array_unique(self::$umbau_info)); $kurzOffen += self::$kurz_offen;
+            foreach (array_unique(array_merge(array_map(fn($x) => 'A|' . $x, $abw), array_map(fn($x) => 'I|' . $x, self::$umbau_info))) as $mx) { $mk = $mx[0] . '|' . mb_substr(preg_replace('/„[^“]*“|\([^)]*\)|\b[A-Z0-9]{10}\b|\d+/u', '…', substr($mx, 2)), 0, 110); $muster[$mk]['n'] = ($muster[$mk]['n'] ?? 0) + 1; if (count($muster[$mk]['ids'] ?? []) < 3) { $muster[$mk]['ids'][] = (int) $a['id']; } }
             foreach (self::$umbau_weg as $w => $_) { $wegAlle[$w] = ($wegAlle[$w] ?? 0) + 1; }
             if ($abw) { $nProb++; $status = '<strong style="color:#a00">Problem (' . count($abw) . ')</strong>'; }
             elseif (self::$kurz_offen) { $status = '<strong style="color:#b36b00">noch nicht fertig geprüft</strong>'; }
@@ -7155,6 +7156,16 @@ JS;
         $h .= '<table class="widefat striped"><thead><tr><th>Artikel</th><th>Status</th><th>Probleme</th><th></th></tr></thead><tbody>' . ($zeilen ? implode('', array_column((function (array $z) { usort($z, fn($a, $b) => $a[0] <=> $b[0]); return $z; })($zeilen), 1)) : '<tr><td colspan="4">Keine weiteren offenen Artikel.</td></tr>') . '</tbody></table>';
         $nGeprueft = $geprueft;
         $h = str_replace('</h3><p class="description">Es wird nichts gespeichert.', '</h3><p style="font-size:15px"><strong>Diese Seite: ' . count($bereit) . ' bereit · ' . $nProb . ' mit Problem · ' . max(0, $nGeprueft - count($bereit) - $nProb) . ' noch nicht fertig geprüft' . ($uebrig ? ' · ' . $uebrig . ' ungeprüft (Zeitgrenze)' : '') . '</strong> (' . $gesamt . ' offen insgesamt). Umbau in zwei Stufen: <strong>Stufe 1</strong> baut nur die Artikel ohne Problem um (oben „Alle problemlosen umbauen“ erledigt das für alle Artikel auf einmal), <strong>Stufe 2</strong> sind die Artikel mit Problem, sobald das Ersatzprodukt getauscht ist.</p><p class="description">Es wird nichts gespeichert.', $h);
+        if ($muster) {   // Muster-Übersicht: was der Umbau auf dieser Seite tut und wo er unsicher ist
+            uasort($muster, fn($x, $y) => $y['n'] <=> $x['n']);
+            $h .= '<details open style="max-width:1000px;margin:10px 0;background:#fff;border:1px solid #c3c4c7;padding:6px 12px"><summary style="font-weight:600;cursor:pointer">Muster-Übersicht dieser Seite (' . count($muster) . ' verschiedene Muster)</summary><table class="widefat striped" style="margin:8px 0"><thead><tr><th>Art</th><th>Muster</th><th>Artikel</th><th>Beispiele</th></tr></thead><tbody>';
+            foreach (array_slice($muster, 0, 40, true) as $mk => $mv) {
+                $ist_abw = $mk[0] === 'A'; $bsp = '';
+                foreach ($mv['ids'] as $bid) { $bsp .= '<a href="' . esc_url(admin_url('post.php?post=' . $bid . '&action=edit')) . '" target="_blank" rel="noopener">' . $bid . '</a> '; }
+                $h .= '<tr><td>' . ($ist_abw ? '<strong style="color:#a00">unsicher, bleibt unberührt</strong>' : '<span style="color:#1a7f37">wird umgebaut</span>') . '</td><td>' . esc_html(substr($mk, 2)) . '</td><td>' . (int) $mv['n'] . '</td><td>' . $bsp . '</td></tr>';
+            }
+            $h .= '</tbody></table><p class="description" style="margin:0 0 6px">Nur zum Ansehen. „Unsicher“ heißt: Der Umbau fasst diese Stelle nicht an, sie braucht Handarbeit oder eine neue Regel.</p></details>';
+        }
         if ($uebrig) { $h .= '<p><strong>' . $uebrig . ' Artikel dieser Seite wurden wegen der Zeitgrenze noch nicht geprüft.</strong> Sie kommen auf der nächsten Seite dran.</p>'; }
         if ($kurzOffen) { $h .= '<p><strong>' . $kurzOffen . ' Kurzlinks wurden noch nicht aufgelöst</strong> (Abrufgrenze pro Aufruf), bitte diese Seite noch einmal öffnen.</p>'; }
         if ($wegAlle) {
