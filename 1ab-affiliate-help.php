@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.53
+ * Version: 0.92.54
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.53';
+    const VERSION = '0.92.54';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -8889,6 +8889,12 @@ JS;
         return $out;
     }
 
+    /** Klappt einen Abschnitt der Umbau-Seite zu; offen nur, wenn dort etwas zu tun ist. */
+    private static function umbau_falte(string $titel, string $html, bool $offen, string $stand = ''): string {
+        if (trim($html) === '') { return ''; }
+        return '<details' . ($offen ? ' open' : '') . ' style="max-width:1050px;margin:8px 0;background:#fff;border:1px solid ' . ($offen ? '#d63638' : '#c3c4c7') . ';border-radius:6px;padding:4px 12px"><summary style="cursor:pointer;font-weight:600;padding:6px 0">' . esc_html($titel) . ($stand !== '' ? ' <span style="color:#50575e">· ' . esc_html($stand) . '</span>' : ($offen ? ' <span style="color:#d63638">· hier ist etwas zu tun</span>' : ' <span style="color:#1a7f37">· nichts zu tun</span>')) . '</summary>' . $html . '</details>';
+    }
+
     private static function karten_doppelt_html(): string {
         global $wpdb;
         if (!isset($wpdb)) { return ''; }
@@ -9782,10 +9788,14 @@ JS;
             }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
-            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::phantome_html() . self::umbau_widgets_html() . self::karten_doppelt_html() . self::umbau_textreste_html()
-               . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
+            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau')
+               . self::umbau_falte('Phantom-Platzhalter', self::phantome_html(), false)
+               . self::umbau_falte('Widgets in der Seitenleiste', $wh_ = self::umbau_widgets_html(), strpos($wh_, 'alte Links</span>') !== false)
+               . self::umbau_falte('Karten mit etwas Doppeltem daneben', $dh_ = self::karten_doppelt_html(), strpos($dh_, '<li>') !== false)
+               . self::umbau_falte('Sichtbare Shortcode-Reste im Text', self::umbau_textreste_html(), self::$textreste !== null && self::$textreste !== [], self::$textreste === null ? 'noch nicht geprüft, zum Prüfen aufklappen' : '')
+               . '<details style="max-width:760px;margin:8px 0"><summary><strong>So funktioniert der Umbau</strong></summary><ol><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
-               . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'
+               . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol></details>'
                . '<p>Tipp: Zuerst <strong>einen einzelnen Artikel</strong> umbauen und im Browser ansehen. Wenn alles stimmt, unten „Alle auf einmal“.</p>'
                . '<p>Gefunden: <strong>' . count($liste) . '</strong> Artikel (Beiträge, Seiten und Entwürfe) mit Amazon-Links: <strong>' . ($nfertig) . '</strong> vollständig umgebaut, <strong>' . (count($liste) - $nfertig) . '</strong> noch offen' . ($nteil ? ' (davon ' . $nteil . ' teilweise umgebaut, es sind noch Links übrig)' : '') . '. Offen sind noch <strong>' . $nf . '</strong> feste Produkt-Links und <strong>' . $nk . '</strong> Kurzlinks (amzn.to).</p>';
             echo self::umbau_lauf_html(empty($_GET['alle_vorschau']) && empty($_POST['sab_alle_vorschau']) && empty($_GET['vorschau']) && empty($_POST['sab_vorschau']));
