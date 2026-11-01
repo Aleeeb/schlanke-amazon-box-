@@ -2198,4 +2198,7 @@ ok(SAB::klickrate_kreis('B0TABLE001') === '', 'Klickrate: Besucher bekommen kein
 ok(strpos(SAB::KR_CSS, "border-radius:999px") !== false && strpos(SAB::KR_CSS, "position:absolute") !== false, "Kreis: eigenes CSS fuer alte Bausteine vorhanden");
 ok(SAB::karte_punkt('<p style="text-align: center;">[amz_karten][amz_karte asin="B08562GF55" stil="einzel"][/amz_karten].</p><hr />') === '<p style="text-align: center;">[amz_karten][amz_karte asin="B08562GF55" stil="einzel"][/amz_karten]</p><hr />', 'Karte: Rest-Satzpunkt hinter Einzelkarte wird nicht ausgegeben');
 ok(SAB::karte_punkt('[amz_karten][amz_karte asin="B08562GF55"][/amz_karten]. Weiter') === '[amz_karten][amz_karte asin="B08562GF55"][/amz_karten]. Weiter', 'Karte: andere Karten bleiben unberührt');
+$kd1 = SAB::karten_doppelt_in('<h3>Zaun Pro</h3>[amz_karten][amz_karte asin="B0DOPPEL01" stil="einzel"][/amz_karten]<p>[amz_link asin="B0DOPPEL01"]Zum Zaun[/amz_link]</p>', 5, 'T');
+ok(count($kd1) === 1 && strpos($kd1[0]['grund'], 'Link oder Bild') !== false, 'Karten-Doppelt: zweiter Link neben der Karte wird gefunden');
+ok(SAB::karten_doppelt_in('<p>Text</p>[amz_karten][amz_karte asin="B0DOPPEL02"][/amz_karten]<p>Text</p>', 5, 'T') === [], 'Karten-Doppelt: saubere Karte meldet nichts');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

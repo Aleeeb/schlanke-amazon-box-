@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.50
+ * Version: 0.92.51
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.50';
+    const VERSION = '0.92.51';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2427,7 +2427,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         if ($a['stil'] === 'einzel' && preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb)) {   // Einzelprodukt-Karte: Titel über dem Bild, darunter „Klick auf das Bild zum Angebot bei Amazon“, alles EIN Link
             $et = self::EINZEL_TEXT[$land] ?? self::EINZEL_TEXT['de'];
             $cta = '<span class="sab-karte-cta">' . esc_html($et[0]) . (preg_match("/['’]$/u", $et[0]) ? '' : ' ') . '<span class="sab-karte-cta-l">' . esc_html($a['text'] !== '' ? $a['text'] : $et[1]) . '</span></span>';
-            $bt = ['de' => 'Zum Angebot bei Amazon', 'es' => 'Ver oferta en Amazon', 'fr' => "Voir l'offre sur Amazon", 'it' => "Vai all'offerta su Amazon", 'co.uk' => 'See offer on Amazon', 'com' => 'See offer on Amazon'][$land] ?? 'Zum Angebot bei Amazon';
+            $bt = ['de' => 'Jetzt ansehen', 'es' => 'Ver ahora', 'fr' => 'Voir maintenant', 'it' => 'Vedi ora', 'co.uk' => 'View now', 'com' => 'View now'][$land] ?? 'Jetzt ansehen';
             return '<div class="sab-karte sab-karte-einzel' . $kc . '">' . $mb[1] . $tt . $mb[2] . $ex . $cta . '<span class="sab-karte-btn">' . esc_html($bt) . '</span></a>' . $ebay . self::klickrate_kreis($asin) . '</div>';
         }
         // Bild, Titel und Button sind EIN Link (für Crawler zählt das als ein Affiliate-Link); data-sab-asin/-slot/-var bleiben für Statistik und Austausch am Link
@@ -8871,6 +8871,38 @@ JS;
         return 'Reste im Artikel entfernt (mit Sicherung, WordPress-Revision vorhanden).';
     }
 
+    /** Nur lesen: Karten, neben denen dasselbe Produkt noch einmal als Link/Bild/Karte oder als alter Titel steht (Reste von Hand-Umbauten). @return array<int,array{id:int,titel:string,asin:string,grund:string}> */
+    public static function karten_doppelt_in(string $c, int $id = 0, string $titel = ''): array {
+        $out = [];
+        if (!preg_match_all('#\[amz_karte\b[^\]]*\basin="([A-Za-z0-9]{10})"[^\]]*\]#i', $c, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { return $out; }
+        foreach ($m as $k) {
+            $asin = strtoupper($k[1][0]); $o = $k[0][1]; $e = $o + strlen($k[0][0]);
+            $vor = substr($c, max(0, $o - 800), min(800, $o)); $nach = substr($c, $e, 800);
+            $nach = preg_replace('#^.*?\[/amz_karten\]#s', '', $nach, 1);
+            $rest = $vor . ' ' . $nach;
+            $g = [];
+            if (preg_match('#\[amz_(?:link|bild)\b[^\]]*\basin="' . $asin . '"#i', $rest)) { $g[] = 'dasselbe Produkt steht daneben noch als Link oder Bild'; }
+            if (preg_match('#<a\b[^>]*(?:dp|gp/product)/' . $asin . '#i', $rest)) { $g[] = 'daneben steht noch ein fester Amazon-Link auf dasselbe Produkt'; }
+            if (preg_match('#\[amz_karte\b[^\]]*\basin="' . $asin . '"#i', $nach)) { $g[] = 'dieselbe Karte steht gleich noch einmal'; }
+            if (self::titel_davor($c, $o, $asin, '') !== null) { $g[] = 'direkt davor steht noch ein alter Titel'; }
+            if ($g) { $out[] = ['id' => $id, 'titel' => $titel, 'asin' => $asin, 'grund' => implode('; ', $g)]; }
+        }
+        return $out;
+    }
+
+    private static function karten_doppelt_html(): string {
+        global $wpdb;
+        if (!isset($wpdb)) { return ''; }
+        $rows = (array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status='publish' AND post_type IN ('post','page') AND post_content LIKE '%[amz\\_karte%'", ARRAY_A);
+        $l = [];
+        foreach ($rows as $r) { foreach (self::karten_doppelt_in((string) $r['post_content'], (int) $r['ID'], (string) $r['post_title']) as $x) { $l[] = $x; } }
+        $h = '<h3 style="margin-top:1.5em">Karten mit etwas Doppeltem daneben (' . count($l) . ')</h3><p class="description" style="max-width:820px">Nur zum Ansehen. Hier stehen Karten, neben denen dasselbe Produkt noch einmal als Link, Bild, zweite Karte oder alter Titel steht, meist Reste von Umbauten von Hand.</p>';
+        if (!$l) { return $h . '<p><strong style="color:#1a7f37">Nichts Doppeltes gefunden.</strong></p>'; }
+        $h .= '<ul style="margin:6px 0 0 16px;list-style:disc">';
+        foreach (array_slice($l, 0, 80) as $x) { $h .= '<li><strong>' . esc_html(mb_substr($x['titel'], 0, 60)) . '</strong> · ' . esc_html($x['asin']) . ': ' . esc_html($x['grund']) . ' · <a href="' . esc_url(get_edit_post_link($x['id'])) . '" target="_blank" rel="noopener">im Editor ↗</a> · <a href="' . esc_url(get_permalink($x['id'])) . '" target="_blank" rel="noopener">ansehen ↗</a></li>'; }
+        return $h . '</ul>';
+    }
+
     private static function umbau_textreste_html(): string {
         $h = '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau#sab-textreste')) . '" style="margin:10px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="textreste"><button class="button">Nach sichtbaren Shortcode-Resten suchen</button> <span class="description">Sucht in Widgets und Artikeln nach Textstücken wie <code>image_width="300")</code>, die Besucher als Text sehen könnten.</span></form>';
         if (self::$textreste === null) { return $h; }
@@ -9751,7 +9783,7 @@ JS;
             }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
-            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::phantome_html() . self::umbau_widgets_html() . self::umbau_textreste_html()
+            echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau') . self::phantome_html() . self::umbau_widgets_html() . self::karten_doppelt_html() . self::umbau_textreste_html()
                . '<ol style="max-width:760px"><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
                . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol>'
