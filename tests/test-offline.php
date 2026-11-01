@@ -2201,4 +2201,6 @@ ok(SAB::karte_punkt('[amz_karten][amz_karte asin="B08562GF55"][/amz_karten]. Wei
 $kd1 = SAB::karten_doppelt_in('<h3>Zaun Pro</h3>[amz_karten][amz_karte asin="B0DOPPEL01" stil="einzel"][/amz_karten]<p>[amz_link asin="B0DOPPEL01"]Zum Zaun[/amz_link]</p>', 5, 'T');
 ok(count($kd1) === 1 && strpos($kd1[0]['grund'], 'Link oder Bild') !== false, 'Karten-Doppelt: zweiter Link neben der Karte wird gefunden');
 ok(SAB::karten_doppelt_in('<p>Text</p>[amz_karten][amz_karte asin="B0DOPPEL02"][/amz_karten]<p>Text</p>', 5, 'T') === [], 'Karten-Doppelt: saubere Karte meldet nichts');
+$kb = SAB::karten_doppelt_in('[amz_karten][amz_karte asin="B0DOPPEL03" stil="einzel"][amz_karte asin="B0DOPPEL04"][/amz_karten]', 7, 'T');
+ok(count($kb) === 1 && strpos($kb[0]['grund'], 'zwei Buttons') !== false, 'Karten-Doppelt: Einzelkarte im Mehrfachblock wird gefunden');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
