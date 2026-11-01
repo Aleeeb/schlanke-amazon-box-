@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.51
+ * Version: 0.92.52
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.51';
+    const VERSION = '0.92.52';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2427,8 +2427,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         if ($a['stil'] === 'einzel' && preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb)) {   // Einzelprodukt-Karte: Titel über dem Bild, darunter „Klick auf das Bild zum Angebot bei Amazon“, alles EIN Link
             $et = self::EINZEL_TEXT[$land] ?? self::EINZEL_TEXT['de'];
             $cta = '<span class="sab-karte-cta">' . esc_html($et[0]) . (preg_match("/['’]$/u", $et[0]) ? '' : ' ') . '<span class="sab-karte-cta-l">' . esc_html($a['text'] !== '' ? $a['text'] : $et[1]) . '</span></span>';
-            $bt = ['de' => 'Jetzt ansehen', 'es' => 'Ver ahora', 'fr' => 'Voir maintenant', 'it' => 'Vedi ora', 'co.uk' => 'View now', 'com' => 'View now'][$land] ?? 'Jetzt ansehen';
-            return '<div class="sab-karte sab-karte-einzel' . $kc . '">' . $mb[1] . $tt . $mb[2] . $ex . $cta . '<span class="sab-karte-btn">' . esc_html($bt) . '</span></a>' . $ebay . self::klickrate_kreis($asin) . '</div>';
+            return '<div class="sab-karte sab-karte-einzel' . $kc . '">' . $mb[1] . $tt . $mb[2] . $ex . $cta . '</a>' . $ebay . self::klickrate_kreis($asin) . '</div>';
         }
         // Bild, Titel und Button sind EIN Link (für Crawler zählt das als ein Affiliate-Link); data-sab-asin/-slot/-var bleiben für Statistik und Austausch am Link
         if (preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb) && preg_match('#^<a\b[^>]*>(.*)</a>$#s', $btn, $mt)) {
