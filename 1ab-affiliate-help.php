@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.59
+ * Version: 0.92.60
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.59';
+    const VERSION = '0.92.60';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -8900,7 +8900,7 @@ JS;
             if (preg_match('#\[amz_karte\b[^\]]*\basin="' . $asin . '"#i', $nach)) { $g[] = 'dieselbe Karte steht gleich noch einmal'; }
             if (preg_match('#\[amz_karten\b[^\]]*\]((?:(?!\[/amz_karten\]).)*\[amz_karte\b[^\]]*\basin="' . $asin . '"(?:(?!\[/amz_karten\]).)*)\[/amz_karten\]#is', $c, $bl, 0, max(0, $o - 400)) && substr_count($bl[1], '[amz_karte ') > 1 && stripos($k[0][0], 'stil="einzel"') !== false) { $g[] = 'eine Einzelkarte steckt in einem Block mit mehreren Karten (zwei Buttons übereinander)'; }
             if (self::titel_davor($c, $o, $asin, '') !== null) { $g[] = 'direkt davor steht noch ein alter Titel'; }
-            if ($g) { $out[] = ['id' => $id, 'titel' => $titel, 'asin' => $asin, 'grund' => implode('; ', $g)]; }
+            if ($g) { $nr = 1 + preg_match_all('#\basin="' . $asin . '"#i', substr($c, 0, $o)); $lm = preg_match('#\bland="([a-z.]+)"#i', $k[0][0], $lx) ? strtolower($lx[1]) : ''; $out[] = ['id' => $id, 'titel' => $titel, 'asin' => $asin, 'grund' => implode('; ', $g), 'nr' => $nr, 'land' => $lm]; }
         }
         return $out;
     }
@@ -8920,7 +8920,12 @@ JS;
         $h = '<h3 style="margin-top:1.5em">Karten mit etwas Doppeltem daneben (' . count($l) . ')</h3><p class="description" style="max-width:820px">Nur zum Ansehen. Hier stehen Karten, neben denen dasselbe Produkt noch einmal als Link, Bild, zweite Karte oder alter Titel steht, meist Reste von Umbauten von Hand.</p>';
         if (!$l) { return $h . '<p><strong style="color:#1a7f37">Nichts Doppeltes gefunden.</strong></p>'; }
         $h .= '<ul style="margin:6px 0 0 16px;list-style:disc">';
-        foreach (array_slice($l, 0, 80) as $x) { $h .= '<li><strong>' . esc_html(mb_substr($x['titel'], 0, 60)) . '</strong> · ' . esc_html($x['asin']) . ': ' . esc_html($x['grund']) . ' · <a href="' . esc_url(get_edit_post_link($x['id'])) . '" target="_blank" rel="noopener">im Editor ↗</a> · <a href="' . esc_url(get_permalink($x['id'])) . '" target="_blank" rel="noopener">ansehen ↗</a></li>'; }
+        foreach (array_slice($l, 0, 80) as $x) {
+            $ld = isset(self::LAENDER[$x['land'] ?? '']) ? $x['land'] : self::land('');
+            $ze = ['sab_zeige' => $x['asin'], 'sab_nr' => max(1, (int) ($x['nr'] ?? 1))];
+            $h .= '<li><strong>' . esc_html(mb_substr($x['titel'], 0, 60)) . '</strong> · <a href="' . esc_url('https://' . self::LAENDER[$ld][0] . '/dp/' . $x['asin']) . '" target="_blank" rel="noopener" title="Produkt bei Amazon ansehen"><code>' . esc_html($x['asin']) . '</code></a>: ' . esc_html($x['grund'])
+                . ' · <a href="' . esc_url(add_query_arg($ze, admin_url('post.php?post=' . (int) $x['id'] . '&action=edit'))) . '" target="_blank" rel="noopener" title="Springt im Editor zur Stelle">im Editor ↗</a> · <a href="' . esc_url(add_query_arg($ze, (string) get_permalink($x['id']))) . '" target="_blank" rel="noopener" title="Seite ansehen, die Stelle wird markiert">ansehen ↗</a></li>';
+        }
         return $h . '</ul>';
     }
 
