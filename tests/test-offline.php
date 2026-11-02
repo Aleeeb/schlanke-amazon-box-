@@ -2203,4 +2203,6 @@ ok(count($kd1) === 1 && strpos($kd1[0]['grund'], 'Link oder Bild') !== false, 'K
 ok(SAB::karten_doppelt_in('<p>Text</p>[amz_karten][amz_karte asin="B0DOPPEL02"][/amz_karten]<p>Text</p>', 5, 'T') === [], 'Karten-Doppelt: saubere Karte meldet nichts');
 $kb = SAB::karten_doppelt_in('[amz_karten][amz_karte asin="B0DOPPEL03" stil="einzel"][amz_karte asin="B0DOPPEL04"][/amz_karten]', 7, 'T');
 ok(count($kb) === 1 && strpos($kb[0]['grund'], 'zwei Buttons') !== false, 'Karten-Doppelt: Einzelkarte im Mehrfachblock wird gefunden');
+$oh = ['B0OKAY0002' => ['ts' => 1, 'score' => 60, 'hart' => 1]];
+ok(SAB::belassen_gilt('B0OKAY0002', 100, 60, $oh) && !SAB::belassen_gilt('B0OKAY0002', 100, 30, $oh), 'Okay-belassen: wer ein dringendes Produkt bewusst belässt, sieht es nicht sofort wieder (nur bei Score-Absturz)');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

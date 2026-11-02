@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.60
+ * Version: 0.92.61
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.60';
+    const VERSION = '0.92.61';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3089,7 +3089,10 @@ JS;
         $o = (array) get_option('sab_austausch_okay', []);
         if ($an) {
             $d = self::uebersicht_daten(self::land(''), false); $x = $d['items'][$asin] ?? null;
-            $o[$asin] = ['ts' => time(), 'score' => $x ? (int) self::score(array_merge((array) $x, ['trotz' => isset(((array) get_option('sab_trotz', []))[$asin])]))[0] : -1];
+            $xx = $x ? array_merge((array) $x, ['trotz' => isset(((array) get_option('sab_trotz', []))[$asin])]) : null;
+            $sc = $xx ? (int) self::score($xx)[0] : -1;
+            $dr0 = $xx ? self::tausch_dringlichkeit($xx, max(0, $sc)) : 0;
+            $o[$asin] = ['ts' => time(), 'score' => $sc, 'hart' => $dr0 >= 100 ? 1 : 0];   // hart: schon beim Klick „dringend“ (z. B. ohne Preis/Prime unklar): bewusst belassen, bleibt ausgeblendet
         } else { unset($o[$asin]); }
         update_option('sab_austausch_okay', $o, false);
     }
@@ -3097,7 +3100,7 @@ JS;
     /** Gilt „bleiben“ noch? Nein bei nicht lieferbar/dringend (dr >= 100) oder wenn der Score um 15 Punkte und mehr unter den gemerkten gefallen ist. */
     public static function belassen_gilt(string $asin, int $dr, int $score_jetzt, array $o): bool {
         if (!isset($o[$asin])) { return false; }
-        if ($dr >= 100) { return false; }
+        if ($dr >= 100 && empty($o[$asin]['hart'])) { return false; }
         $alt = (int) ($o[$asin]['score'] ?? -1);
         return $alt < 0 || $score_jetzt >= $alt - 15;
     }
