@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.58
+ * Version: 0.92.59
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.58';
+    const VERSION = '0.92.59';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3163,6 +3163,7 @@ JS;
         echo '<script>(function(){' . self::balken_js() . 'var C=' . $cfg . ';var seen={};var cur={nth:0,txt:""};'
            . 'function post(a,d,f){var X=sabBalken(a==="sab_stelle_tausch"?"Tausche":"Arbeitet");var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);fd.append("kurz",cur.kurz||"");for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){X();f(r)}).catch(function(){X();f({success:false,data:"Verbindungsfehler"})})}'
            . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
+           . '(function(){if(!/[?&]sab_neu=karte(&|$)/.test(location.search)){return}var b=el("div","position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:100001;background:#0f3d2e;color:#fff;padding:10px 14px;border-radius:12px;font:600 14px sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center;max-width:94vw","✓ Karte eingebaut. Gefällt sie nicht?");var u=el("button","background:#fff;color:#0f3d2e;border:0;border-radius:999px;padding:6px 14px;font:700 14px sans-serif;cursor:pointer","↩ Rückgängig machen");u.type="button";u.onclick=function(){u.disabled=true;u.textContent="Mache rückgängig …";post("sab_stelle_zurueck",{neu:""},function(r){if(r.success){location.href=location.pathname}else{u.disabled=false;u.textContent="↩ Rückgängig machen";alert(r.data||"Rückgängig geht hier nicht.")}})};var c=el("button","background:transparent;color:#fff;border:1px solid #fff;border-radius:999px;padding:5px 12px;font:600 13px sans-serif;cursor:pointer","OK");c.type="button";c.onclick=function(){b.remove();try{history.replaceState(null,"",location.pathname)}catch(e){}};b.appendChild(u);b.appendChild(c);document.body.appendChild(b)})();'
            . 'function oeffne(o,asin){var ov=el("div","position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto");'
            . 'var bx=el("div","background:#fff;color:#222;max-width:640px;width:100%;border-radius:10px;padding:18px;font:14px/1.4 sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)");ov.appendChild(bx);'
            . 'ov.onclick=function(e){if(e.target===ov){ov.remove()}};document.body.appendChild(ov);'
@@ -3193,7 +3194,7 @@ JS;
            . 'if(a.hasAttribute("data-sab-asin")||a.closest("[data-sab-ord],#wpadminbar,.sab-karte,.sab-produkt")||!a.closest("article,.entry-content,.hentry,main,.post")){continue}cn[as]=(cn[as]||0)+1;'
            . '(function(a,as,nth,nr){var sp=el("span","display:inline-block;margin-left:4px;white-space:nowrap");function kn(t,f){var b=el("button","font:600 11px sans-serif;padding:1px 7px;margin-right:3px;border:1px solid #2271b1;border-radius:10px;background:#fff;color:#2271b1;cursor:pointer",t);b.type="button";if(t.indexOf("tauschen")>0){b.className="sab-tb";b.setAttribute("data-o","h"+nth+as)}b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f()};sp.appendChild(b);return b}'
            . 'kn("⇄ tauschen",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};oeffne(0,as)});'
-           . 'var kb=kn("＋ Karte",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};kb.textContent="⏳ Karte wird gebaut …";kb.disabled=true;post("sab_stelle_karte",{asin:as,ord:0},function(r){if(r.success){kb.textContent="✓ Karte da";location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr}else{kb.disabled=false;kb.textContent="＋ Karte";alert(r.data)}})});kb.title="Fügt unter dem Absatz eine Karte mit Bild und Link ein (mit Sicherung, rückgängig im Tausch-Fenster)";'
+           . 'var kb=kn("＋ Karte",function(){cur={nth:nth,txt:a.textContent.replace(/\s+/g," ").trim()};kb.textContent="⏳ Karte wird gebaut …";kb.disabled=true;post("sab_stelle_karte",{asin:as,ord:0},function(r){if(r.success){kb.textContent="✓ Karte da";location.href=location.pathname+"?sab_zeige="+encodeURIComponent(r.data.asin)+"&sab_nr="+r.data.nr+"&sab_neu=karte"}else{kb.disabled=false;kb.textContent="＋ Karte";alert(r.data)}})});kb.title="Fügt unter dem Absatz eine Karte mit Bild und Link ein (mit Sicherung, rückgängig im Tausch-Fenster)";'
            . 'if(C.e){kn("✎ bearbeiten",function(){window.open(C.e+encodeURIComponent(as)+"&sab_nr="+nr,"_blank")})}'
            . 'a.parentNode.insertBefore(sp,a.nextSibling)})(a,as,cn[as],al[as])}'
            . 'function abBtn(box,top,left,t,title,f){var b=el("button","position:absolute;top:"+top+"px;"+(left?"left":"right")+":4px;z-index:50;font:600 12px sans-serif;padding:3px 8px;border:1px solid #8a5a00;border-radius:12px;background:#fff;color:#8a5a00;cursor:pointer;opacity:.9",t);b.type="button";b.title=title;b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();f(b)};if(getComputedStyle(box).position==="static"){box.style.position="relative"}box.appendChild(b);return b}'
