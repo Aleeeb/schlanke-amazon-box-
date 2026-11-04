@@ -3176,7 +3176,7 @@ JS;
         echo '<script>(function(){' . self::balken_js() . 'var C=' . $cfg . ';var seen={};var cur={nth:0,txt:""};'
            . 'function post(a,d,f){var X=sabBalken(a==="sab_stelle_tausch"?"Tausche":"Arbeitet");var fd=new FormData();fd.append("action",a);fd.append("n",C.n);fd.append("post",C.p);fd.append("nth",cur.nth);fd.append("txt",cur.txt);fd.append("kurz",cur.kurz||"");for(var k in d){fd.append(k,d[k])}fetch(C.u,{method:"POST",body:fd,credentials:"same-origin"}).then(function(r){return r.json()}).then(function(r){X();f(r)}).catch(function(){X();f({success:false,data:"Verbindungsfehler"})})}'
            . 'function el(t,s,x){var e=document.createElement(t);if(s){e.style.cssText=s}if(x!==undefined){e.textContent=x}return e}'
-           . '(function(){if(!/[?&]sab_neu=karte(&|$)/.test(location.search)){return}var b=el("div","position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:100001;background:#0f3d2e;color:#fff;padding:10px 14px;border-radius:12px;font:600 14px sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center;max-width:94vw","✓ Karte eingebaut. Gefällt sie nicht?");var u=el("button","background:#fff;color:#0f3d2e;border:0;border-radius:999px;padding:6px 14px;font:700 14px sans-serif;cursor:pointer","↩ Rückgängig machen");u.type="button";u.onclick=function(){u.disabled=true;u.textContent="Mache rückgängig …";post("sab_stelle_zurueck",{neu:""},function(r){if(r.success){location.href=location.pathname}else{u.disabled=false;u.textContent="↩ Rückgängig machen";alert(r.data||"Rückgängig geht hier nicht.")}})};var c=el("button","background:transparent;color:#fff;border:1px solid #fff;border-radius:999px;padding:5px 12px;font:600 13px sans-serif;cursor:pointer","OK");c.type="button";c.onclick=function(){b.remove();try{history.replaceState(null,"",location.pathname)}catch(e){}};b.appendChild(u);b.appendChild(c);document.body.appendChild(b)})();'
+           . '(function(){if(!/[?&]sab_neu=karte(&|$)/.test(location.search)){return}var b=el("div","position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:100001;background:#0f3d2e;color:#fff;padding:10px 14px;border-radius:12px;font:600 14px sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center;max-width:94vw","✓ Karte eingebaut. Hat es nicht geklappt?");var u=el("button","background:#fff;color:#0f3d2e;border:0;border-radius:999px;padding:6px 14px;font:700 14px sans-serif;cursor:pointer","↩ Zurück, hat nicht geklappt");u.type="button";u.onclick=function(){u.disabled=true;u.textContent="Mache rückgängig …";post("sab_stelle_zurueck",{neu:""},function(r){if(r.success){location.href=location.pathname}else{u.disabled=false;u.textContent="↩ Zurück, hat nicht geklappt";alert(r.data||"Rückgängig geht hier nicht.")}})};var c=el("button","background:transparent;color:#fff;border:1px solid #fff;border-radius:999px;padding:5px 12px;font:600 13px sans-serif;cursor:pointer","OK");c.type="button";c.onclick=function(){b.remove();try{history.replaceState(null,"",location.pathname)}catch(e){}};b.appendChild(u);b.appendChild(c);document.body.appendChild(b)})();'
            . 'function oeffne(o,asin){var ov=el("div","position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto");'
            . 'var bx=el("div","background:#fff;color:#222;max-width:640px;width:100%;border-radius:10px;padding:18px;font:14px/1.4 sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.4)");ov.appendChild(bx);'
            . 'ov.onclick=function(e){if(e.target===ov){ov.remove()}};document.body.appendChild(ov);'
@@ -6770,6 +6770,21 @@ JS;
         return [$s, $e, $ko > 0];
     }
 
+    /** Warum ist um den Platzhalter [von, bis) kein eigener kurzer Absatz zu finden? Klartext für die Vorschau (statt immer „mitten im Satz“). */
+    private static function paar_grund(string $c, int $von, int $bis, bool $ist_bild): string {
+        $wer = $ist_bild ? 'Das Bild' : 'Der Textlink';
+        $vor = substr($c, 0, $von); $ps = null; $o = strrpos($vor, '<p');
+        while ($o !== false) { if (preg_match('#^<p(?:\s[^>]*)?>#i', substr($c, $o, 300))) { $ps = $o; break; } $o = $o > 0 ? strrpos($vor, '<p', $o - strlen($vor) - 1) : false; }
+        if ($ps === null || stripos(substr($c, $ps, $von - $ps), '</p>') !== false) { return $wer . ' steht nicht in einem eigenen Absatz (z. B. in einer Liste, Tabelle, Spalte, Gruppe oder Überschrift)'; }
+        $pe = stripos($c, '</p>', $bis); if ($pe === false) { return $wer . ' steht in einem Absatz ohne Ende'; }
+        $innen = substr($c, $ps, $pe - $ps);
+        $ohne = str_replace(substr($c, $von, $bis - $von), '', $innen);
+        if (strpos($ohne, '[amz_') !== false || stripos($ohne, '<a ') !== false) { return 'Im Absatz ' . ($ist_bild ? 'des Bildes' : 'des Textlinks') . ' steht noch ein anderer Link'; }
+        $rest = trim(html_entity_decode(strip_tags($ohne)));
+        if (mb_strlen($rest) > 80) { return 'Im Absatz ' . ($ist_bild ? 'des Bildes' : 'des Textlinks') . ' steht ein längerer Text (' . mb_strlen($rest) . ' Zeichen, erlaubt sind 80)'; }
+        return $wer . ' ist in einem Absatz, der sich nicht sauber lösen lässt';
+    }
+
     /** Der ganze Absatz um einen Platzhalter, wenn daneben höchstens ein kurzer Restsatz steht (z. B. „Klick auf das Bild zum …“). @return ?array{0:int,1:int,2:bool} */
     private static function paar_absatz(string $c, int $von, int $bis, array $weg = []): ?array {
         $vor = substr($c, 0, $von);
@@ -6827,7 +6842,12 @@ JS;
                 foreach ($B as $b) {
                     $boff = $b[0][1];
                     if ($boff < $aend || strtoupper($b[1][0]) !== $asin) { continue; }
-                    if ($boff - $aend > 1500 || preg_match('#<hr|<h[1-6]\b|\[amz_(?:karte|karten|produkt|bild)\b|\[/amz_karten#i', substr($c, $aend, $boff - $aend))) { break; }
+                    $lueck = substr($c, $aend, $boff - $aend); $gt = null;
+                    if ($boff - $aend <= 1500 && preg_match('#^(?:\s|<!--.*?-->|</p>|</figure>|</div>)*(?:<(h[2-5])\b[^>]*>(.*?)</\1>|<p\b[^>]*>\s*<(?:strong|b)>(.*?)</(?:strong|b)>\s*</p>)(?:\s|<!--.*?-->)*(?:<p\b[^>]*>[^<]*)?$#is', $lueck, $lm) && stripos($lm[0], '<a ') === false && stripos($lm[0], '[amz_') === false) {   // Titel steht ZWISCHEN Bild und Textlink: wird Kartentitel
+                        $gtt = trim(html_entity_decode(strip_tags($lm[2] !== '' ? $lm[2] : ($lm[3] ?? '')), ENT_QUOTES, 'UTF-8'));
+                        if ($gtt !== '' && mb_strlen($gtt) <= 120) { $gt = $gtt; }
+                    }
+                    if ($gt === null && ($boff - $aend > 1500 || preg_match('#<hr|<h[1-6]\b|\[amz_(?:karte|karten|produkt|bild)\b|\[/amz_karten#i', $lueck))) { break; }
                     $sig = md5($a[0][0] . $b[0][0]);
                     if (isset($versucht[$sig])) { break; }
                     $versucht[$sig] = 1;
@@ -6844,8 +6864,9 @@ JS;
                         else {
                             if (self::umbau_ok('satz:' . $asin)) { continue 2; }
                             $ctx = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags(preg_replace('#\[amz_link\b[^\]]*\](.*?)\[/amz_link\]#is', '»$1«', substr($c, max(0, $boff - 140), 300))))));
-                            $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ' stehen getrennt, lassen sich aber nicht sicher zu einer Karte zusammenführen (Textlink mitten in einem längeren Satz oder in einer Liste/Tabelle).';
-                            self::$umbau_keys[self::$umbau_abw[] = $msg] = 'satz:' . $asin; self::$paare_log[$asin] = ['schwierig', '', $text, $ctx];
+                            $grund = $as_ === null ? 'Das Bild steht nicht allein in seinem Absatz oder Block (z. B. Text oder andere Elemente direkt daneben)' : self::paar_grund($c, $boff, $bend, false);
+                            $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ' stehen getrennt und lassen sich nicht sicher zusammenführen: ' . $grund . '.';
+                            self::$umbau_keys[self::$umbau_abw[] = $msg] = 'satz:' . $asin; self::$paare_log[$asin] = ['schwierig', '', $text, $ctx, $grund, $msg];
                             continue 2;
                         }
                     }
@@ -6854,6 +6875,7 @@ JS;
                     $karte = '[amz_karten][amz_karte asin="' . $asin . '"' . $land . $tag . ' stil="einzel"][/amz_karten]';
                     $alt = self::titel_davor($c, $as_[0], $asin, $text);   // alter Titel direkt über dem Bild: die Karte hat ihren eigenen
                     $eigen = trim((string) (((array) get_option('sab_paar_titel', []))[$asin] ?? ''));
+                    if ($eigen === '' && $gt !== null) { $eigen = $gt; }
                     if ($eigen !== '') { $karte = str_replace(' stil="einzel"', ' titel="' . esc_attr($eigen) . '" stil="einzel"', $karte); }
                     if (!$alt && $eigen === '' && !$erzwingen && get_option('sab_paar_ohne_titel', '0') !== '1' && !self::umbau_ok('paar:' . $asin)) {   // kein Titel erkannt: nicht raten, Redakteur entscheidet in der Vorschau
                         $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ': über dem Bild wurde kein Titel erkannt, nicht umgewandelt. Unten den Titel eintragen oder bestätigen.';
@@ -6863,9 +6885,9 @@ JS;
                     self::$paare_log[$asin] = ['karte', $alt ? $alt[1] : $eigen, $text];
                     if ($alt) { $as_[0] = $alt[0]; self::$umbau_info[] = 'Alter Titel „' . mb_substr($alt[1], 0, 50) . '“ über der Karte entfernt (die Karte zeigt ihn selbst)'; self::namen_merken([$asin => $alt[1]]); }
                     if ($as_[2]) { $karte = "<!-- wp:shortcode -->\n" . $karte . "\n<!-- /wp:shortcode -->"; }
-                    if ($nurtext) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1], $boff - $as_[1]) . $b[2][0] . substr($c, $bend); }
+                    if ($nurtext) { $c = substr($c, 0, $as_[0]) . $karte . ($gt !== null ? '' : substr($c, $as_[1], $boff - $as_[1])) . $b[2][0] . substr($c, $bend); }
                     elseif ($same) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1]); }
-                    else { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1], $bs[0] - $as_[1]) . substr($c, $bs[1]); }
+                    else { $c = substr($c, 0, $as_[0]) . $karte . ($gt !== null ? '' : substr($c, $as_[1], $bs[0] - $as_[1])) . substr($c, $bs[1]); }
                     $kp = strpos($c, $karte, $as_[0]);   // Satzpunkt, der hinter dem Textlink stehen blieb, mit entfernen
                     if ($kp !== false) {
                         $ke = $kp + strlen($karte);
@@ -8675,9 +8697,9 @@ JS;
                 $h .= '<div style="border-left:4px solid ' . ($ok ? '#1a7f37' : '#d63638') . ';padding:4px 10px;margin:6px 0;background:#fff">'
                     . $chip($ok ? 'Titel: ' . mb_substr((string) $l[1], 0, 50) : ($schw ? 'Textlink mitten im Satz' : 'Titel fehlt'), $ok ? '#1a7f37' : '#d63638') . $chip('Bild', '#1a7f37') . $chip('Textlink „' . mb_substr((string) $l[2], 0, 30) . '“', '#2271b1') . ' <code>' . esc_html($asin) . '</code>';
                 if ($schw) {
-                    $h .= '<div style="margin:6px 0;padding:6px 8px;background:#f6f7f7;font-size:13px">…' . esc_html((string) ($l[3] ?? '')) . '…</div>'
+                    $h .= '<div style="margin:6px 0;color:#a00;font-size:13px"><strong>Grund:</strong> ' . esc_html((string) ($l[4] ?? '')) . '</div><div style="margin:6px 0;padding:6px 8px;background:#f6f7f7;font-size:13px">…' . esc_html((string) ($l[3] ?? '')) . '…</div>'
                         . '<form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_paar_wahl"><input type="hidden" name="sab_asin" value="' . esc_attr($asin) . '"><input type="hidden" name="sab_vorschau" value="' . $id . '"><button class="button button-small button-primary" title="Das Bild wird zur Karte (mit dem einen Link). Der Textlink im Satz bleibt als normaler Text ohne Link stehen.">Karte setzen, Satz ohne Link lassen</button></form>'
-                        . self::ok_knopf('Bild und Textlink („' . $l[2] . '“) zu ' . $asin . ' stehen getrennt, lassen sich aber nicht sicher zu einer Karte zusammenführen (Textlink mitten in einem längeren Satz oder in einer Liste/Tabelle).', $id);
+                        . self::ok_knopf((string) ($l[5] ?? ''), $id);
                 } elseif (!$ok) {
                     $h .= '<form method="post" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_paar_titel"><input type="hidden" name="sab_asin" value="' . esc_attr($asin) . '"><input type="hidden" name="sab_vorschau" value="' . $id . '">'
                         . '<input type="text" name="sab_titel" class="regular-text" placeholder="Titel der Karte, z. B. Kurzname des Produkts" value="' . esc_attr(mb_substr(self::kurztitel((string) (self::produkte()[$asin] ?? '')), 0, 70)) . '"> <button class="button button-small button-primary">Diesen Titel nehmen und umwandeln</button></form>'

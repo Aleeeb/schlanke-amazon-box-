@@ -2243,4 +2243,15 @@ $c2_ = '<p>[amz_bild asin="B0PAAR0201" land="es"]<a href="x"><img src="a.jpg"></
 [$oa, $na] = SAB::paare_zu_einzelkarten($c2_, 'B0PAAR0201', true);
 ok($na === 1 && substr_count($oa, '[amz_karte ') === 1 && strpos($oa, 'B0PAAR0202') !== false && strpos($oa, '[amz_link asin="B0PAAR0202"') !== false && strpos($oa, '[amz_link asin="B0PAAR0201"') === false, 'Karte-Knopf: nur das gewählte Produkt wird zur Karte, ohne Titelzwang');
 $GLOBALS['opt']['sab_paar_ohne_titel'] = '1';
+// Titel steht ZWISCHEN Bild und Textlink: wird Kartentitel und nicht doppelt stehen gelassen
+$GLOBALS['opt']['sab_paar_ohne_titel'] = '0';
+$cz = '<p>Vorher.</p><p>[amz_bild asin="B0PAAR0301" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><h3>Kupferband Pro 50 mm</h3><p>Klick auf das Bild führt zum [amz_link asin="B0PAAR0301" land="es"]Angebot bei Amazon[/amz_link]</p><p>Danach.</p>';
+SAB::$paare_log = []; SAB::$umbau_abw = [];
+[$oz, $nz] = SAB::paare_zu_einzelkarten($cz);
+ok($nz === 1 && strpos($oz, 'titel="Kupferband Pro 50 mm"') !== false && substr_count($oz, 'Kupferband Pro 50 mm') === 1 && strpos($oz, '[amz_link') === false && strpos($oz, 'Vorher.') !== false && strpos($oz, 'Danach.') !== false, 'Titel zwischen Bild und Textlink wird Kartentitel (' . $oz . ')');
+$cg = '<p>[amz_bild asin="B0PAAR0302" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><ul><li>Hier [amz_link asin="B0PAAR0302" land="es"]steht[/amz_link] er</li></ul>';
+SAB::$paare_log = []; SAB::$umbau_abw = [];
+SAB::paare_zu_einzelkarten($cg);
+ok(strpos((string) (SAB::$paare_log['B0PAAR0302'][4] ?? ''), 'nicht in einem eigenen Absatz') !== false, 'Grund wird im Klartext genannt: ' . (SAB::$paare_log['B0PAAR0302'][4] ?? '-'));
+$GLOBALS['opt']['sab_paar_ohne_titel'] = '1';
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
