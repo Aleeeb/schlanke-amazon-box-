@@ -5,7 +5,7 @@ if (!function_exists('get_post_status')) { function get_post_status($i) { return
 if (!function_exists('apply_filters')) { function apply_filters($t, $v) { return $v; } }
 if (!function_exists('get_post_field')) { function get_post_field($f, $i) { $a = []; foreach ((array) ($GLOBALS['opt']['sab_bildfehler'] ?? []) as $e) { if (!in_array($e['asin'], (array) ($GLOBALS['absent'] ?? []), true)) { $a[] = '[amz_bild asin="' . $e['asin'] . '"]'; } } return '<p>' . implode(' ', $a) . '</p>'; } }
 const MB_IN_BYTES = 1048576; const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
-$GLOBALS['opt'] = []; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
+$GLOBALS['opt'] = ['sab_paar_ohne_titel' => '1']; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
 function add_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return '1ab-affiliate-help/1ab-affiliate-help.php'; } function wp_next_scheduled($x) { return true; }
 function date_i18n($f, $t = null) { return date($f, $t ?? time()); }

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.63
+ * Version: 0.92.64
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.63';
+    const VERSION = '0.92.64';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6425,6 +6425,8 @@ JS;
     public static array $umbau_weg = [];
     /** Meldungstext => Schlüssel, unter dem man die Abweichung als „gewollt, in Ordnung“ bestätigen kann. */
     public static array $umbau_keys = [];
+    /** Bild+Textlink-Paare der letzten Analyse: asin => [status (karte|titel_fehlt), titel, text]. Nur für die farbige Vorschau. */
+    public static array $paare_log = [];
 
     /** Hat der Redakteur diese Abweichung als gewollt bestätigt? */
     private static function umbau_ok(string $key): bool { return in_array($key, (array) get_option('sab_umbau_ok', []), true); }
@@ -6806,6 +6808,14 @@ JS;
                     $tag = preg_match('#\btag="([A-Za-z0-9\-]{3,40})"#', $a[1][0] . ' ' . $a[3][0], $tm) ? ' tag="' . $tm[1] . '"' : '';
                     $karte = '[amz_karten][amz_karte asin="' . $asin . '"' . $land . $tag . ' stil="einzel"][/amz_karten]';
                     $alt = self::titel_davor($c, $as_[0], $asin, $text);   // alter Titel direkt über dem Bild: die Karte hat ihren eigenen
+                    $eigen = trim((string) (((array) get_option('sab_paar_titel', []))[$asin] ?? ''));
+                    if ($eigen !== '') { $karte = str_replace(' stil="einzel"', ' titel="' . esc_attr($eigen) . '" stil="einzel"', $karte); }
+                    if (!$alt && $eigen === '' && get_option('sab_paar_ohne_titel', '0') !== '1' && !self::umbau_ok('paar:' . $asin)) {   // kein Titel erkannt: nicht raten, Redakteur entscheidet in der Vorschau
+                        $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ': über dem Bild wurde kein Titel erkannt, nicht umgewandelt. Unten den Titel eintragen oder bestätigen.';
+                        self::$umbau_keys[self::$umbau_abw[] = $msg] = 'paar:' . $asin; self::$paare_log[$asin] = ['titel_fehlt', '', $text];
+                        continue 2;
+                    }
+                    self::$paare_log[$asin] = ['karte', $alt ? $alt[1] : $eigen, $text];
                     if ($alt) { $as_[0] = $alt[0]; self::$umbau_info[] = 'Alter Titel „' . mb_substr($alt[1], 0, 50) . '“ über der Karte entfernt (die Karte zeigt ihn selbst)'; self::namen_merken([$asin => $alt[1]]); }
                     if ($as_[2]) { $karte = "<!-- wp:shortcode -->\n" . $karte . "\n<!-- /wp:shortcode -->"; }
                     if ($same) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1]); }
@@ -8527,7 +8537,7 @@ JS;
         if (!$post) { return '<p>Artikel nicht gefunden.</p>'; }
         $c = (string) $post->post_content;
         self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
-        self::$skip_laender = [];
+        self::$skip_laender = []; self::$paare_log = [];
         [$neu, $n, $sk] = self::umbau_text($c);   // der ganze Artikel auf einmal, wie beim echten Umbau (Tabellenspalten und Nachbarn sind sichtbar)
         $h = '<h3>Vorschau für „' . esc_html($post->post_title) . '“</h3><p class="description">Es wird nichts gespeichert. Gezeigt wird das Ergebnis für den ganzen Artikel, so wie der Umbau ihn schreiben würde.</p>';
         if (self::$skip_laender) { $h .= '<div class="notice notice-error inline"><p><strong>Keine Partner-ID für: ' . esc_html(implode(', ', array_keys(self::$skip_laender))) . '.</strong> Links zu diesen Amazon-Ländern werden deshalb nicht umgebaut. Bitte unter Einstellungen die Partner-ID dieses Shops eintragen.</p></div>'; }
@@ -8535,6 +8545,7 @@ JS;
         $h .= $knopf;
         if (self::$umbau_info) { $h .= '<div class="notice notice-info inline"><p><strong>Das Bild bestimmt das Produkt, daher angepasst:</strong></p><ul>' . implode('', array_map(fn($x) => '<li>' . esc_html($x) . self::ort_links($x, $id) . self::ok_knopf($x, $id) . '</li>', array_unique(self::$umbau_info))) . '</ul></div>'; }
         if (self::$umbau_abw) { $h .= '<div class="notice notice-warning inline"><p><strong>Wird bewusst nicht umgebaut (bitte von Hand klären):</strong></p><ul>' . implode('', array_map(fn($x) => '<li>' . esc_html($x) . self::ort_links($x, $id) . self::ok_knopf($x, $id) . '</li>', array_unique(self::$umbau_abw))) . '</ul></div>'; }
+        $h .= self::paare_panel_html($id, $neu);
         $h .= self::kurzlink_liste_html($id, '<input type="hidden" name="sab_vorschau" value="' . $id . '">');
         if (self::$umbau_weg) { $h .= self::umbau_ersatz_html(array_keys(self::$umbau_weg), $id, $c, 0, 'einzel'); }
         if (self::$kurz_offen) { $h .= '<p><strong>' . (int) self::$kurz_offen . ' Kurzlinks wurden noch nicht aufgelöst</strong> (Abrufgrenze), bitte die Vorschau noch einmal öffnen.</p>'; }
@@ -8585,6 +8596,34 @@ JS;
             $h .= '</ul></details>';
         }
         return $h . $knopf . '<p><strong>Amazon-Links, die unverändert bleiben (' . count($rest) . '):</strong></p>' . ($rest ? '<ul>' . implode('', $rest) . '</ul><p class="description">Das sind Links ohne erkennbares Produkt oder ohne Partner-ID für das Land, Kurzlinks, die sich nicht eindeutig zuordnen lassen, oder Produkte, die Amazon nicht mehr kennt.</p>' : '<p>Keine.</p>');
+    }
+
+    /** Farbige Übersicht der Bild+Textlink-Paare (grün = Titel erkannt, rot = kein Titel, Redakteur entscheidet) und der doppelten Elemente nach dem Umbau. */
+    private static function paare_panel_html(int $id, string $neu): string {
+        $h = '';
+        if (self::$paare_log) {
+            $chip = static function (string $t, string $f): string { return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;margin:0 4px 0 0;font-size:12px;background:' . $f . ';color:#fff">' . esc_html($t) . '</span>'; };
+            $h .= '<div class="notice notice-info inline" style="padding:8px 12px"><p><strong>Bild und Textlink zu einer Karte (' . count(self::$paare_log) . '):</strong> <span class="description">grün = alles erkannt, rot = Titel über dem Bild fehlt, dort entscheidest du.</span></p>';
+            foreach (self::$paare_log as $asin => $l) {
+                $ok = $l[0] === 'karte';
+                $h .= '<div style="border-left:4px solid ' . ($ok ? '#1a7f37' : '#d63638') . ';padding:4px 10px;margin:6px 0;background:#fff">'
+                    . $chip($ok ? 'Titel: ' . mb_substr((string) $l[1], 0, 50) : 'Titel fehlt', $ok ? '#1a7f37' : '#d63638') . $chip('Bild', '#1a7f37') . $chip('Textlink „' . mb_substr((string) $l[2], 0, 30) . '“', '#2271b1') . ' <code>' . esc_html($asin) . '</code>';
+                if (!$ok) {
+                    $h .= '<form method="post" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_paar_titel"><input type="hidden" name="sab_asin" value="' . esc_attr($asin) . '"><input type="hidden" name="sab_vorschau" value="' . $id . '">'
+                        . '<input type="text" name="sab_titel" class="regular-text" placeholder="Titel der Karte, z. B. Kurzname des Produkts" value="' . esc_attr(mb_substr(self::kurztitel((string) (self::produkte()[$asin] ?? '')), 0, 70)) . '"> <button class="button button-small button-primary">Diesen Titel nehmen und umwandeln</button></form>'
+                        . self::ok_knopf('Bild und Textlink („' . $l[2] . '“) zu ' . $asin . ': über dem Bild wurde kein Titel erkannt, nicht umgewandelt. Unten den Titel eintragen oder bestätigen.', $id);
+                }
+                $h .= '</div>';
+            }
+            $h .= '</div>';
+        }
+        $dop = self::karten_doppelt_in($neu, $id);
+        if ($dop) {
+            $h .= '<div class="notice notice-warning inline"><p><strong>Nach dem Umbau würden doppelte Elemente stehen:</strong></p><ul>';
+            foreach ($dop as $d) { $h .= '<li><code>' . esc_html($d['asin']) . '</code>: ' . esc_html($d['grund']) . '</li>'; }
+            $h .= '</ul></div>';
+        }
+        return $h;
     }
 
     /** Alles zurück: Originaltext aus der Sicherung wiederherstellen. */
@@ -9625,12 +9664,15 @@ JS;
                 $meldung = $ok . ' Artikel umgebaut (' . $links . ' Links bzw. Blöcke).' . ($nicht_dran ? ' ' . $nicht_dran . ' Artikel blieben wegen der Zeitgrenze offen, bitte erneut markieren.' : '') . ($uebersprungen ? ' Mit Hinweis, bitte ansehen: ' . implode('; ', array_slice($uebersprungen, 0, 6)) . '.' : '');
             } elseif ($form === 'umbau_ok' || $form === 'umbau_ok_weg') {
                 $k = sanitize_text_field(wp_unslash($_POST['sab_key'] ?? '')); $okl = (array) get_option('sab_umbau_ok', []);
-                if ($k !== '' && preg_match('/^(titel|dupl|weg):[A-Za-z0-9,:]+$/', $k)) {
+                if ($k !== '' && preg_match('/^(titel|dupl|weg|paar):[A-Za-z0-9,:]+$/', $k)) {
                     $okl = array_values(array_diff($okl, [$k]));
                     if ($form === 'umbau_ok') { $okl[] = $k; }
                     update_option('sab_umbau_ok', $okl, false);
                     $meldung = $form === 'umbau_ok' ? 'Gemerkt: Diese Abweichung ist gewollt und wird beim Umbau nicht mehr beanstandet.' : 'Die Abweichung wird wieder geprüft.';
                 }
+            } elseif ($form === 'umbau_paar_titel') {
+                $pa = self::asin((string) wp_unslash($_POST['sab_asin'] ?? '')); $tt = trim(sanitize_text_field(wp_unslash($_POST['sab_titel'] ?? '')));
+                if (strlen($pa) === 10 && $tt !== '') { $mp = (array) get_option('sab_paar_titel', []); $mp[$pa] = mb_substr($tt, 0, 120); update_option('sab_paar_titel', $mp, false); $meldung = 'Titel für ' . $pa . ' gemerkt. In der Vorschau siehst du jetzt die fertige Karte.'; }
             } elseif ($form === 'kurzlink_setzen') {
                 $meldung = self::kurzlink_setzen((int) ($_POST['sab_id'] ?? 0), esc_url_raw(html_entity_decode((string) wp_unslash($_POST['sab_kurz'] ?? ''))), sanitize_text_field(wp_unslash($_POST['sab_asin'] ?? '')));
             } elseif ($form === 'bilder_nachladen') {
