@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.69
+ * Version: 0.92.70
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.69';
+    const VERSION = '0.92.70';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -9045,6 +9045,35 @@ JS;
 
     const WIDGET_CSS = '.sab-wb,.sab-wt,.sab-wl{box-sizing:border-box;max-width:340px;margin:0 auto 18px;font-family:inherit}.sab-wb{position:relative;background:#fff;border:1px solid #dfe6d8;border-radius:14px;padding:18px 16px 14px;box-shadow:0 2px 10px rgba(40,70,30,.08);text-align:center}.sab-wb .sab-wtag{position:absolute;top:-10px;left:14px;background:#e8873a;color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 10px;border-radius:999px}.sab-wb .sab-wcover{margin:6px auto 12px}.sab-wb .sab-wcover img{display:block;margin:0 auto;max-height:210px;width:auto;max-width:70%;height:auto;border-radius:4px 10px 10px 4px;box-shadow:-4px 4px 0 #cfd9c7,0 6px 14px rgba(0,0,0,.2)}.sab-wb h4{margin:0 0 6px;font-size:17px;line-height:1.25}.sab-wb p{margin:0 0 12px;font-size:14px;line-height:1.45;color:#44543f}.sab-wb a.sab-wbtn{display:block;background:#2f7a3d;border:1px solid #2f7a3d;color:#fff!important;text-decoration:none!important;font-weight:600;padding:9px 12px;border-radius:9px;font-size:14px}.sab-wb a.sab-wbtn:hover{background:#256331;border-color:#256331}.sab-wb a.sab-wbtn:after{content:"";position:absolute;inset:0;border-radius:14px}.sab-wb a.sab-walt{position:relative;z-index:2;display:inline-block;margin-top:9px;font-size:13px;color:#2f7a3d}.sab-wb .sab-wnote{font-size:11px;color:#7b8a76;margin-top:8px}.sab-wt{background:linear-gradient(160deg,#fff7e8,#ffeccb);border-radius:14px;padding:16px;border:1px solid #f1d9a8}.sab-wt b{display:block;font-size:17px;margin-bottom:6px}.sab-wt p{margin:0 0 10px;font-size:14px;line-height:1.45}.sab-wt a{display:inline-block;background:#e8873a;color:#fff!important;text-decoration:none!important;font-weight:700;padding:9px 14px;border-radius:9px;font-size:14px}.sab-wl{background:#fff;border-radius:14px;padding:14px 16px;border:1px solid #dfe6d8}.sab-wl h4{margin:0 0 10px;font-size:16px}.sab-wl ol{margin:0;padding:0;list-style:none;counter-reset:n}.sab-wl li{counter-increment:n;display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #edf1e9;font-size:14px}.sab-wl li:first-child{border-top:0}.sab-wl li:before{content:counter(n);flex:none;width:24px;height:24px;border-radius:50%;background:#2f7a3d;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}.sab-wl li a{color:inherit;text-decoration:none}.sab-tw,.sab-tier,.sab-perch{display:none}@media (hover:hover) and (pointer:fine) and (min-width:1024px) and (prefers-reduced-motion:no-preference){.sab-wb .sab-wcover{position:relative;overflow:hidden;padding:0 14px 20px;margin:6px -14px -8px}.sab-wb .sab-wcover img{transform-origin:bottom left;animation:sabwip 20s ease-in-out infinite}.sab-wb .sab-wcover::after{content:"";position:absolute;top:0;left:-60%;width:30%;height:100%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-15deg);animation:sabgl 20s ease-in-out infinite}@keyframes sabwip{0%,38%,46%,100%{transform:none}41%{transform:rotate(-4deg) translateY(-3px)}44%{transform:rotate(1.5deg)}}@keyframes sabgl{0%,80%{left:-60%}92%,100%{left:130%}}.sab-tw{display:block!important;position:relative;left:50%;width:0;height:0;pointer-events:none}.sab-tier{display:block;position:absolute;left:0;top:0;width:34px;height:23px;pointer-events:none;opacity:0;z-index:2}.sab-tier svg{display:block;width:100%;height:100%;overflow:visible}.sab-tier .fw{transform-box:fill-box;transform-origin:50% 50%;animation:sabfl .12s ease-in-out infinite alternate}@keyframes sabfl{to{transform:scaleY(.3)}}.sab-tier .fd{transform-box:fill-box;transform-origin:50% 50%}@supports (offset-path:path("M0 0")){.sab-perch{display:block;position:absolute;z-index:1;pointer-events:none;opacity:0;transform-origin:50% 100%;height:30px;top:-26px;width:36px}.sab-perch svg{display:block;width:100%;height:100%;overflow:visible}.sab-pa{left:77px}.sab-pb{left:-113px}.sab-p3{width:44px;top:-27px}.sab-p3.sab-pa{left:73px}.sab-p3.sab-pb{left:-117px}.sab-t1,.sab-p1{animation-duration:90s}.sab-t2,.sab-p2{animation-duration:110s}.sab-t3,.sab-p3{animation-duration:76s}.sab-tier{offset-path:path("M-150 -70C-100 -150 -50 10 0 -80C50 -170 90 -160 150 -70C210 20 250 -20 340 -100");offset-rotate:auto;animation-name:sabfly;animation-iteration-count:infinite;animation-timing-function:ease-in-out}.sab-tier .fd{animation:sabfd 90s infinite}.sab-t2 .fd{animation-duration:110s}.sab-t3 .fd{animation-duration:76s}.sab-pa{animation-name:sabpa;animation-iteration-count:infinite}.sab-pb{animation-name:sabpb;animation-iteration-count:infinite}.sab-wb:hover .sab-tier{offset-path:path("M-150 -70C-100 -150 -50 10 0 -80C50 -170 90 -160 150 -70C210 20 250 -20 340 -100");animation:sabhov 2.6s ease-in-out 1}@keyframes sabfly{0%,19.9%{opacity:0;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:0%}20%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:0%}28%,35%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:57.7%}41%{opacity:1;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:100%}41.3%{opacity:0;offset-path:path("M-150 -150C-110 -200 -70 -90 -30 -140C10 -190 40 -200 60 -110C72 -75 58 -16 95 -15C125 -14 150 -110 210 -85C270 -60 280 -150 340 -120");offset-distance:100%}41.4%,69.9%{opacity:0;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:0%}70%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:0%}78%,85%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:57.7%}91%{opacity:1;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:100%}91.3%,100%{opacity:0;offset-path:path("M150 -150C110 -200 70 -90 30 -140C-10 -190 -40 -200 -60 -110C-72 -75 -58 -16 -95 -15C-125 -14 -150 -110 -210 -85C-270 -60 -280 -150 -340 -120");offset-distance:100%}}@keyframes sabfd{0%,27.5%{transform:none}28.5%,34.5%{transform:scaleY(.5)}35.5%,77.5%{transform:none}78.5%,84.5%{transform:scaleY(.5)}85.5%,100%{transform:none}}@keyframes sabpa{0%,14%{opacity:0;transform:scale(0)}18%,42%{opacity:1;transform:scale(1)}46%,100%{opacity:0;transform:scale(0)}}@keyframes sabpb{0%,64%{opacity:0;transform:scale(0)}68%,92%{opacity:1;transform:scale(1)}96%,100%{opacity:0;transform:scale(0)}}@keyframes sabhov{0%{opacity:0;offset-distance:0%}8%{opacity:1}92%{opacity:1}100%{opacity:0;offset-distance:100%}}}}';
     private static $widget_css = false;
+
+    /** Aus Zeilen [pfad, aufrufe] (absteigend) die ersten $n Beiträge: Startseite und Nicht-Beiträge fallen weg. $lose liefert zu einem Pfad [titel, url] oder null. @return list<array{0:string,1:string}> */
+    public static function top_seiten_aus_zeilen(array $zeilen, int $n, callable $lose): array {
+        $out = []; $gesehen = [];
+        foreach ($zeilen as $r) {
+            $pf = (string) ($r['pfad'] ?? ''); if ($pf === '' || $pf === '/' || isset($gesehen[$pf])) { continue; }
+            $gesehen[$pf] = 1; $t = $lose($pf);
+            if (is_array($t) && ($t[0] ?? '') !== '' && !in_array($t[1], array_column($out, 1), true)) { $out[] = [(string) $t[0], (string) $t[1]]; }
+            if (count($out) >= $n) { break; }
+        }
+        return $out;
+    }
+
+    /** Die meistgelesenen Beiträge der letzten 7 Tage, 3 Stunden zwischengespeichert. Nur veröffentlichte Beiträge; leer, wenn es noch keine Daten gibt. */
+    public static function top_seiten_woche(int $n = 3): array {
+        $c = get_transient('sab_top_woche_' . $n); if (is_array($c)) { return $c; }
+        global $wpdb; $out = [];
+        if (isset($wpdb) && method_exists($wpdb, 'get_results') && function_exists('url_to_postid')) {
+            $von = gmdate('Y-m-d', time() - 7 * DAY_IN_SECONDS); $ts = self::seiten_tabelle();
+            $rows = (array) $wpdb->get_results($wpdb->prepare("SELECT pfad, SUM(n) v FROM $ts WHERE tag >= %s GROUP BY pfad ORDER BY v DESC LIMIT 40", $von), ARRAY_A);
+            $out = self::top_seiten_aus_zeilen($rows, $n, static function (string $pf): ?array {
+                $id = (int) url_to_postid(home_url($pf)); if ($id < 1) { return null; }
+                $p = get_post($id); if (!$p || $p->post_status !== 'publish' || $p->post_type !== 'post') { return null; }
+                return [trim(html_entity_decode(strip_tags((string) get_the_title($id)), ENT_QUOTES, 'UTF-8')), (string) get_permalink($id)];
+            });
+        }
+        set_transient('sab_top_woche_' . $n, $out, 3 * HOUR_IN_SECONDS);
+        return $out;
+    }
     private static $widget_benutzt = false;
 
     /** Sicherheitsnetz: Das Widget-CSS steht auch im Seitenfuß, falls das erste Widget ohne CSS ausgegeben oder sein Ergebnis verworfen wurde (Besucher sahen sonst Karten ohne Gestaltung). */
@@ -9071,7 +9100,7 @@ JS;
      * Buch-Karte: Bild und Knopf sind EIN Affiliate-Link (das Bild ist kein eigener Link, der Knopf deckt die ganze Karte ab).
      */
     public static function sc_widget($a, $inhalt = ''): string {
-        $a = shortcode_atts(['typ' => 'buch', 'asin' => '', 'land' => '', 'marke' => '', 'titel' => '', 'text' => '', 'knopf' => '', 'alt_text' => '', 'alt_url' => '', 'url' => '', 'hinweis' => '', 'tag' => ''], (array) $a);
+        $a = shortcode_atts(['typ' => 'buch', 'asin' => '', 'land' => '', 'marke' => '', 'titel' => '', 'text' => '', 'knopf' => '', 'alt_text' => '', 'alt_url' => '', 'url' => '', 'hinweis' => '', 'tag' => '', 'auto' => '', 'anzahl' => ''], (array) $a);
         $css = '';
         self::$widget_benutzt = true;
         if (!self::$widget_css) { self::$widget_css = true; $css = '<style id="sab-widget">' . self::WIDGET_CSS . '</style>'; }
@@ -9082,6 +9111,10 @@ JS;
         }
         if ($typ === 'liste') {
             $li = '';
+            if (strtolower(trim((string) $a['auto'])) === 'woche') {   // ehrliche Wochenliste: die Seiten mit den meisten Aufrufen der letzten 7 Tage (aus der eigenen Zählung, ohne Cookie und IP)
+                $inhalt = '';
+                foreach (self::top_seiten_woche(max(1, min(10, (int) $a['anzahl'] ?: 3))) as $t) { $inhalt .= $t[0] . '|' . $t[1] . "\n"; }
+            }
             foreach (preg_split('/\R/', trim(strip_tags((string) $inhalt))) as $z) {
                 $z = trim($z); if ($z === '') { continue; }
                 [$t, $u] = array_pad(array_map('trim', explode('|', $z, 2)), 2, '');

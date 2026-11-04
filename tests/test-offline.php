@@ -2237,4 +2237,8 @@ $GLOBALS['opt']['sab_paar_titel'] = ['B0PAAR0098' => 'Netz Pro'];
 [$o4, $n4] = SAB::paare_zu_einzelkarten($c1);
 ok($n4 === 1 && strpos($o4, '[amz_link') === false && strpos($o4, 'das Netz Pro für große Beete') !== false && strpos($o4, '[amz_karte') !== false, 'Wahl text: Karte statt Bild, Satz bleibt ohne Link');
 unset($GLOBALS['opt']['sab_paar_wahl'], $GLOBALS['opt']['sab_paar_titel']); $GLOBALS['opt']['sab_paar_ohne_titel'] = '1';
+// Wochenliste: Startseite, Duplikate und Nicht-Beiträge fallen weg, Reihenfolge nach Aufrufen bleibt
+$zl = [['pfad' => '/', 'v' => 99], ['pfad' => '/a/', 'v' => 50], ['pfad' => '/seite/', 'v' => 40], ['pfad' => '/b/', 'v' => 30], ['pfad' => '/a/', 'v' => 20], ['pfad' => '/c/', 'v' => 10], ['pfad' => '/d/', 'v' => 5]];
+$tp = SAB::top_seiten_aus_zeilen($zl, 3, function ($pf) { return $pf === '/seite/' ? null : ['Titel ' . trim($pf, '/'), 'https://x.test' . $pf]; });
+ok(count($tp) === 3 && $tp[0][0] === 'Titel a' && $tp[1][0] === 'Titel b' && $tp[2][0] === 'Titel c', 'Wochenliste: ehrliche Reihenfolge nach Aufrufen, ohne Startseite, Nicht-Beiträge und Doppelte');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
