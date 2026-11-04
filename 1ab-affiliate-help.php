@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.67
+ * Version: 0.92.69
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.67';
+    const VERSION = '0.92.69';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2394,7 +2394,11 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         if ($ab) { self::$ab_ctx = ['slot' => 'ab-' . $ab['id'], 'var' => $ab['v']]; }
         $html = do_shortcode(trim($inhalt));
         self::$ab_ctx = null;
-        return '<div class="sab-karten" style="grid-template-columns:repeat(' . $n . ',minmax(0,1fr))"' . ($ab ? ' data-sab-ab="' . esc_attr($ab['id']) . '" data-sab-abv="' . $ab['v'] . '" data-sab-abo="' . (int) $ab['o'] . '" data-sab-abi="' . (int) $ab['i'] . '"' : '') . ($abx !== '' ? ' data-sab-abx="' . $abx . '"' : '') . '>' . $html . '</div>' . ($ab && $ab['i'] === 2 ? self::ab_skript($ab) : '');
+        $blk = '<div class="sab-karten" style="grid-template-columns:repeat(' . $n . ',minmax(0,1fr))"' . ($ab ? ' data-sab-ab="' . esc_attr($ab['id']) . '" data-sab-abv="' . $ab['v'] . '" data-sab-abo="' . (int) $ab['o'] . '" data-sab-abi="' . (int) $ab['i'] . '"' : '') . ($abx !== '' ? ' data-sab-abx="' . $abx . '"' : '') . '>' . $html . '</div>';
+        if ($ab && $ab['i'] === 2) {   // Besucher und Crawler: der zweite Block liegt inaktiv (ohne Links) in <template>, im HTML steht nur der erste mit Link
+            return self::ab_editor() ? $blk . self::ab_skript($ab) : '<template data-sab-abt="' . (int) $ab['o'] . '">' . $blk . '</template>' . self::ab_skript($ab);
+        }
+        return $blk;
     }
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
@@ -3580,6 +3584,12 @@ JS;
         if (!self::$ab_gesehen) { $css = '<style>.sab-karten[data-sab-abi="2"]{display:none}</style><noscript><style>.sab-karten[data-sab-abi="2"]{display:grid!important}</style></noscript>'; }
         self::$ab_gesehen[$ab['id']] = 1;
         $ed = self::ab_editor() ? 'true' : 'false';
+        if (!self::ab_editor()) {
+            self::$ab_gesehen[$ab['id']] = 1;
+            return '<script>(function(o,id){var t=document.querySelector(\'template[data-sab-abt="\'+o+\'"]\'),a=document.querySelector(\'.sab-karten[data-sab-abo="\'+o+\'"]\');if(!t||!a)return;var bot=' . self::AB_BOT_JS . ',f=(location.search.match(/[?&]sab_ab=([AB])/)||[])[1],b=t.content.firstElementChild,bv=b?b.getAttribute("data-sab-abv"):"B",av=a.getAttribute("data-sab-abv"),i=bot?0:(f?(av===f?0:1):(Math.random()<.5?0:1));'
+                . 'if(i===1&&b){a.parentNode.replaceChild(t.content.cloneNode(true),a)}'
+                . 'if(!f&&!bot){(window.sabAB=window.sabAB||[]).push({b:id,v:i?bv:av})}})(' . (int) $ab['o'] . ',' . wp_json_encode($ab['id']) . ');</script>';
+        }
         return $css . '<script>(function(o,id,ed){var p=document.querySelectorAll(\'.sab-karten[data-sab-abo="\'+o+\'"]\');if(p.length!==2)return;'
             . 'var f=(location.search.match(/[?&]sab_ab=([AB])/)||[])[1],i=f?(p[0].getAttribute("data-sab-abv")===f?0:1):(ed?0:(Math.random()<.5?0:1));'
             . 'p[1-i].style.setProperty("display","none","important");p[i].style.setProperty("display","grid","important");'
@@ -3683,7 +3693,18 @@ JS;
     }
 
     /** Zwei Varianten in einer Hülle (display:contents, bleibt im Raster oder in der Seitenleiste eine Zelle); das Skript zeigt eine davon. */
+    /** Crawler-Skript-Teil: Suchmaschinen und Automaten bekommen nie eine andere Variante als A (und keine Messung). */
+    private const AB_BOT_JS = '/bot|crawl|spider|slurp|headless|lighthouse|facebookexternalhit|preview/i.test(navigator.userAgent)||navigator.webdriver';
+
     private static function ab_huelle(string $id, array $panes, int $o): string {
+        if (!self::ab_editor()) {   // Besucher und Crawler: im HTML steht nur Variante A mit Link; B und C liegen inaktiv (ohne Links) in <template> und werden nur im Browser eines Besuchers eingesetzt
+            $h = ''; $pn = array_values($panes);
+            foreach ($pn as $i => $x) { $h .= $i === 0 ? '<div class="sab-ab-ep" data-v="A" style="display:contents">' . $x . '</div>' : '<template data-v="' . chr(65 + $i) . '">' . $x . '</template>'; }
+            return '<div class="sab-ab-e" data-sab-abe="' . esc_attr($id) . '" data-sab-abo="' . $o . '" style="display:contents">' . $h . '</div>'
+                . '<script>(function(o,id){var w=document.querySelector(\'.sab-ab-e[data-sab-abo="\'+o+\'"]\');if(!w)return;var bot=' . self::AB_BOT_JS . ',ts=w.querySelectorAll("template"),n=ts.length+1,f=(location.search.match(/[?&]sab_ab=([ABC])/)||[])[1],i=bot?0:(f?Math.min(n-1,f.charCodeAt(0)-65):Math.floor(Math.random()*n));'
+                . 'var v="A";if(i>0){var t=ts[i-1],d=document.createElement("div");d.className="sab-ab-ep";d.setAttribute("data-v",t.getAttribute("data-v"));d.style.display="contents";d.appendChild(t.content.cloneNode(true));w.replaceChild(d,w.firstElementChild);v=t.getAttribute("data-v")}'
+                . 'if(!f&&!bot){(window.sabAB=window.sabAB||[]).push({b:id,v:v})}})(' . $o . ',' . wp_json_encode($id) . ');</script>';
+        }
         $ed = self::ab_editor() ? 'true' : 'false'; $h = '';
         foreach (array_values($panes) as $i => $x) { $h .= '<div class="sab-ab-ep" data-v="' . chr(65 + $i) . '" style="display:' . ($i === 0 ? 'contents' : 'none') . '">' . $x . '</div>'; }
         return '<div class="sab-ab-e" data-sab-abe="' . esc_attr($id) . '" data-sab-abo="' . $o . '" style="display:contents">' . $h . '</div>'

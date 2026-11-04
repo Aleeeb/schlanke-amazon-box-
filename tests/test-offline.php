@@ -1851,7 +1851,7 @@ $tc = SAB::ab_inhalt('Vor ' . $zwei . $zwei2 . ' Nach');
 ok(substr_count($tc, '[amz_karten ab="' . $f2[0]['id'] . '"') === 2 && strpos($tc, 'abi="2"') !== false && strpos($tc, 'Vor ') === 0 && substr($tc, -5) === ' Nach', 'A/B: laufender Test markiert beide Zweierblöcke');
 $o1 = SAB::sc_karten(['ab' => $f2[0]['id'], 'abv' => 'A', 'abo' => '1', 'abi' => '1'], $kk2('B0AB000001') . $kk2('B0AB000002'));
 $o2 = SAB::sc_karten(['ab' => $f2[0]['id'], 'abv' => 'B', 'abo' => '1', 'abi' => '2'], $kk2('B0AB000003') . $kk2('B0AB000004'));
-ok(strpos($o1, 'data-sab-abv="A"') !== false && strpos($o1, '<script') === false && strpos($o2, 'data-sab-abi="2"') !== false && strpos($o2, 'Math.random') !== false && strpos($o2, 'display:none}') !== false, 'A/B: Blöcke tragen Kennung, Skript steht erst nach dem zweiten');
+ok(strpos($o1, 'data-sab-abv="A"') !== false && strpos($o1, '<script') === false && strpos($o2, 'data-sab-abi="2"') !== false && strpos($o2, 'Math.random') !== false && strpos($o2, '<template data-sab-abt=') !== false, 'A/B: Blöcke tragen Kennung, zweiter Block liegt im template, Skript steht danach');
 ok(strpos($o1, 'data-sab-slot="ab-' . $f2[0]['id'] . '"') !== false && strpos($o1, 'data-sab-var="A"') !== false && strpos($o2, 'data-sab-var="B"') !== false, 'A/B: Klick-Links tragen Test und Paar (slot ab-…, var A/B)');
 $onb = SAB::sc_karten([], $kk2('B0AB000001'));
 ok(strpos($onb, 'data-sab-slot') === false && strpos($onb, 'data-sab-ab') === false, 'A/B: Karten außerhalb eines Tests bleiben ohne Test-Daten');
@@ -1974,7 +1974,9 @@ ok(SAB::ab_bewerten_n(['A' => [0, 0], 'B' => [0, 0], 'C' => [0, 0]], 1000)['stat
 $GLOBALS['opt']['sab_ab'] = ['cafe0003' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0EZ000001'], 'b' => ['B0EZ000002'], 'c' => ['B0EZ000003'], 'w' => 1, 'wf' => ['titel' => 'Buch B', 'text' => 'Text B'], 'wfc' => ['titel' => 'Buch C', 'text' => 'Text C']]];
 $GLOBALS['http']['B0EZ000003'] = item('B0EZ000003', [$money('1 €')]);
 $w3 = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A', 'text' => 'Text A']);
-ok(substr_count($w3, 'class="sab-ab-ep"') === 3 && strpos($w3, 'data-v="C"') !== false && strpos($w3, 'data-sab-var="C"') !== false && strpos($w3, 'Buch C') !== false && strpos($w3, 'Math.floor(Math.random()*n)') !== false, 'A/B/C: Widget zeigt drei Panes, Klicks von C zählen für den Test');
+ok(substr_count($w3, 'class="sab-ab-ep"') === 1 && substr_count($w3, '<template data-v=') === 2 && strpos($w3, 'data-v="C"') !== false && strpos($w3, 'data-sab-var="C"') !== false && strpos($w3, 'Buch C') !== false && strpos($w3, 'Math.floor(Math.random()*n)') !== false, 'A/B/C: Widget hat Variante A im HTML und B/C im template, Klicks von C zählen für den Test');
+$w3_ohne = preg_replace('#<template\b.*?</template>#s', '', $w3);
+ok(substr_count($w3_ohne, '<a ') >= 1 && strpos($w3_ohne, 'B0EZ000002') === false && strpos($w3_ohne, 'B0EZ000003') === false && strpos($w3_ohne, 'Buch B') === false && preg_match('/bot\|crawl/', $w3) === 1, 'Crawler: außerhalb des templates nur Variante A mit Link, B und C ohne Link, Bots bekommen immer A');
 $mKh3 = new ReflectionMethod('SAB', 'ab_karte_html'); $mKh3->setAccessible(true);
 $k3 = $mKh3->invoke(null, 'cafe0003', $GLOBALS['opt']['sab_ab']['cafe0003'], ['r' => $n3, 'v' => [], 's' => ['/x/' => ['A' => ['n' => 5, 'k' => 1]]], 't' => ['2026-10-29' => ['C' => ['n' => 5, 'k' => 1]], '2026-10-30' => ['C' => ['n' => 9, 'k' => 2]]]], true);
 ok(strpos($k3, 'Klarer Sieger: Paar A') !== false && strpos($k3, 'Variante C') !== false && strpos($k3, 'Wahrscheinlichkeit, die beste zu sein') !== false && strpos($k3, 'sicher besser') !== false, 'A/B/C: Karte zeigt drei Varianten, Gesamttest und Vergleiche');
@@ -1985,7 +1987,7 @@ foreach (['B0ZW000001', 'B0ZW000002', 'B0ZW000003', 'B0ZW000004'] as $a_) { $GLO
 $GLOBALS['opt']['sab_ab'] = ['beef0001' => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d'), 'a' => ['B0ZW000001', 'B0ZW000002'], 'b' => ['B0ZW000003', 'B0ZW000004'], 'z' => 1]];
 $zin = $kk2('B0ZW000002') . $kk2('B0ZW000001');
 $zh = $GLOBALS['sc']['amz_karten']([], $zin);
-ok(strpos($zh, 'data-sab-abe="beef0001"') !== false && substr_count($zh, 'class="sab-ab-ep"') === 2 && strpos($zh, 'B0ZW000003') !== false && strpos($zh, 'B0ZW000004') !== false && strpos($zh, 'data-sab-var="B"') !== false && strpos($zh, 'data-sab-slot="ab-beef0001"') !== false, 'Zweierblock-Test: Block erscheint mit dem anderen Block als zweite Variante (Reihenfolge egal)');
+ok(strpos($zh, 'data-sab-abe="beef0001"') !== false && substr_count($zh, 'class="sab-ab-ep"') === 1 && substr_count($zh, '<template data-v="B">') === 1 && strpos($zh, 'B0ZW000003') !== false && strpos($zh, 'B0ZW000004') !== false && strpos($zh, 'data-sab-var="B"') !== false && strpos($zh, 'data-sab-slot="ab-beef0001"') !== false, 'Zweierblock-Test: Block erscheint mit dem anderen Block als zweite Variante (Reihenfolge egal)');
 $zo = $GLOBALS['sc']['amz_karten']([], $kk2('B0ZW000001') . $kk2('B0ZW000009'));
 ok(strpos($zo, 'sab-ab-e') === false, 'Zweierblock-Test: andere Blöcke bleiben unberührt');
 $GLOBALS['opt']['sab_ab']['beef0001']['an'] = 0;
