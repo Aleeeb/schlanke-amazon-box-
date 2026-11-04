@@ -2395,9 +2395,11 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $html = do_shortcode(trim($inhalt));
         self::$ab_ctx = null;
         $blk = '<div class="sab-karten" style="grid-template-columns:repeat(' . $n . ',minmax(0,1fr))"' . ($ab ? ' data-sab-ab="' . esc_attr($ab['id']) . '" data-sab-abv="' . $ab['v'] . '" data-sab-abo="' . (int) $ab['o'] . '" data-sab-abi="' . (int) $ab['i'] . '"' : '') . ($abx !== '' ? ' data-sab-abx="' . $abx . '"' : '') . '>' . $html . '</div>';
-        if ($ab && $ab['i'] === 2) {   // Besucher und Crawler: der zweite Block liegt inaktiv (ohne Links) in <template>, im HTML steht nur der erste mit Link
-            return self::ab_editor() ? $blk . self::ab_skript($ab) : '<template data-sab-abt="' . (int) $ab['o'] . '">' . $blk . '</template>' . self::ab_skript($ab);
+        if ($ab && !self::ab_editor()) {   // Besucher und Crawler: nur der Block der heutigen Variante liegt offen (mit Link), der andere inaktiv in <template>
+            if (($ab['i'] - 1) !== self::ab_tagesvariante(2)) { $blk = '<template data-sab-abt="' . (int) $ab['o'] . '">' . $blk . '</template>'; }
+            return $ab['i'] === 2 ? $blk . self::ab_skript($ab) : $blk;
         }
+        if ($ab && $ab['i'] === 2) { return $blk . self::ab_skript($ab); }
         return $blk;
     }
 
@@ -3696,13 +3698,17 @@ JS;
     /** Crawler-Skript-Teil: Suchmaschinen und Automaten bekommen nie eine andere Variante als A (und keine Messung). */
     private const AB_BOT_JS = '/bot|crawl|spider|slurp|headless|lighthouse|facebookexternalhit|preview/i.test(navigator.userAgent)||navigator.webdriver';
 
+    /** Welche Variante steht heute im HTML (für Crawler)? Wechselt jeden Tag der Reihe nach: Tag 1 A, Tag 2 B, Tag 3 C, dann wieder A. */
+    public static ?int $ab_tag = null;
+    private static function ab_tagesvariante(int $n): int { return $n < 2 ? 0 : (self::$ab_tag ?? (int) floor(time() / 86400)) % $n; }
+
     private static function ab_huelle(string $id, array $panes, int $o): string {
         if (!self::ab_editor()) {   // Besucher und Crawler: im HTML steht nur Variante A mit Link; B und C liegen inaktiv (ohne Links) in <template> und werden nur im Browser eines Besuchers eingesetzt
-            $h = ''; $pn = array_values($panes);
-            foreach ($pn as $i => $x) { $h .= $i === 0 ? '<div class="sab-ab-ep" data-v="A" style="display:contents">' . $x . '</div>' : '<template data-v="' . chr(65 + $i) . '">' . $x . '</template>'; }
+            $h = ''; $pn = array_values($panes); $tv = self::ab_tagesvariante(count($pn));
+            foreach ($pn as $i => $x) { $h .= $i === $tv ? '<div class="sab-ab-ep" data-v="' . chr(65 + $i) . '" style="display:contents">' . $x . '</div>' : '<template data-v="' . chr(65 + $i) . '">' . $x . '</template>'; }
             return '<div class="sab-ab-e" data-sab-abe="' . esc_attr($id) . '" data-sab-abo="' . $o . '" style="display:contents">' . $h . '</div>'
-                . '<script>(function(o,id){var w=document.querySelector(\'.sab-ab-e[data-sab-abo="\'+o+\'"]\');if(!w)return;var bot=' . self::AB_BOT_JS . ',ts=w.querySelectorAll("template"),n=ts.length+1,f=(location.search.match(/[?&]sab_ab=([ABC])/)||[])[1],i=bot?0:(f?Math.min(n-1,f.charCodeAt(0)-65):Math.floor(Math.random()*n));'
-                . 'var v="A";if(i>0){var t=ts[i-1],d=document.createElement("div");d.className="sab-ab-ep";d.setAttribute("data-v",t.getAttribute("data-v"));d.style.display="contents";d.appendChild(t.content.cloneNode(true));w.replaceChild(d,w.firstElementChild);v=t.getAttribute("data-v")}'
+                . '<script>(function(o,id){var w=document.querySelector(\'.sab-ab-e[data-sab-abo="\'+o+\'"]\');if(!w)return;var bot=' . self::AB_BOT_JS . ',ts=w.querySelectorAll("template"),n=ts.length+1,f=(location.search.match(/[?&]sab_ab=([ABC])/)||[])[1],i=bot?0:(f?-2:Math.floor(Math.random()*n)),vis=w.querySelector(".sab-ab-ep"),v=vis.getAttribute("data-v");if(f&&f!==v){for(var q=0;q<ts.length;q++){if(ts[q].getAttribute("data-v")===f){i=q+1}}}if(i<0){i=0}'
+                . 'if(i>0){var t=ts[i-1],d=document.createElement("div");d.className="sab-ab-ep";d.setAttribute("data-v",t.getAttribute("data-v"));d.style.display="contents";d.appendChild(t.content.cloneNode(true));w.replaceChild(d,vis);v=t.getAttribute("data-v")}'
                 . 'if(!f&&!bot){(window.sabAB=window.sabAB||[]).push({b:id,v:v})}})(' . $o . ',' . wp_json_encode($id) . ');</script>';
         }
         $ed = self::ab_editor() ? 'true' : 'false'; $h = '';

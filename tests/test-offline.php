@@ -1849,6 +1849,7 @@ ok(SAB::ab_inhalt($vier) === $vier, 'A/B: ohne eingeschalteten Test bleibt der I
 $GLOBALS['opt']['sab_ab'] = [$f2[0]['id'] => ['an' => 1, 'ziel' => 1000, 'start' => gmdate('Y-m-d')]];
 $tc = SAB::ab_inhalt('Vor ' . $zwei . $zwei2 . ' Nach');
 ok(substr_count($tc, '[amz_karten ab="' . $f2[0]['id'] . '"') === 2 && strpos($tc, 'abi="2"') !== false && strpos($tc, 'Vor ') === 0 && substr($tc, -5) === ' Nach', 'A/B: laufender Test markiert beide Zweierblöcke');
+SAB::$ab_tag = 0;
 $o1 = SAB::sc_karten(['ab' => $f2[0]['id'], 'abv' => 'A', 'abo' => '1', 'abi' => '1'], $kk2('B0AB000001') . $kk2('B0AB000002'));
 $o2 = SAB::sc_karten(['ab' => $f2[0]['id'], 'abv' => 'B', 'abo' => '1', 'abi' => '2'], $kk2('B0AB000003') . $kk2('B0AB000004'));
 ok(strpos($o1, 'data-sab-abv="A"') !== false && strpos($o1, '<script') === false && strpos($o2, 'data-sab-abi="2"') !== false && strpos($o2, 'Math.random') !== false && strpos($o2, '<template data-sab-abt=') !== false, 'A/B: Blöcke tragen Kennung, zweiter Block liegt im template, Skript steht danach');
@@ -1975,8 +1976,14 @@ $GLOBALS['opt']['sab_ab'] = ['cafe0003' => ['an' => 1, 'ziel' => 1000, 'start' =
 $GLOBALS['http']['B0EZ000003'] = item('B0EZ000003', [$money('1 €')]);
 $w3 = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A', 'text' => 'Text A']);
 ok(substr_count($w3, 'class="sab-ab-ep"') === 1 && substr_count($w3, '<template data-v=') === 2 && strpos($w3, 'data-v="C"') !== false && strpos($w3, 'data-sab-var="C"') !== false && strpos($w3, 'Buch C') !== false && strpos($w3, 'Math.floor(Math.random()*n)') !== false, 'A/B/C: Widget hat Variante A im HTML und B/C im template, Klicks von C zählen für den Test');
-$w3_ohne = preg_replace('#<template\b.*?</template>#s', '', $w3);
-ok(substr_count($w3_ohne, '<a ') >= 1 && strpos($w3_ohne, 'B0EZ000002') === false && strpos($w3_ohne, 'B0EZ000003') === false && strpos($w3_ohne, 'Buch B') === false && preg_match('/bot\|crawl/', $w3) === 1, 'Crawler: außerhalb des templates nur Variante A mit Link, B und C ohne Link, Bots bekommen immer A');
+foreach ([0, 1, 2] as $tg) {   // Crawler-Variante wechselt täglich: jeden Tag genau eine Variante mit Link im HTML, die anderen nur im template
+    SAB::$ab_tag = $tg;
+    $wt = $GLOBALS['sc']['amz_widget'](['typ' => 'buch', 'asin' => 'B0EZ000001', 'titel' => 'Buch A', 'text' => 'Text A']);
+    $wo = preg_replace('#<template\b.*?</template>#s', '', $wt);
+    $vars = []; if (preg_match_all('#data-sab-var="([ABC])"#', $wo, $mv)) { $vars = array_values(array_unique($mv[1])); }
+    ok($vars === [chr(65 + $tg)] && substr_count($wt, '<template data-v=') === 2 && preg_match('/bot\|crawl/', $wt) === 1, 'Crawler: Tag ' . ($tg + 1) . ' zeigt nur Variante ' . chr(65 + $tg) . ' mit Link, die anderen im template (' . implode(',', $vars) . ')');
+}
+SAB::$ab_tag = 0;
 $mKh3 = new ReflectionMethod('SAB', 'ab_karte_html'); $mKh3->setAccessible(true);
 $k3 = $mKh3->invoke(null, 'cafe0003', $GLOBALS['opt']['sab_ab']['cafe0003'], ['r' => $n3, 'v' => [], 's' => ['/x/' => ['A' => ['n' => 5, 'k' => 1]]], 't' => ['2026-10-29' => ['C' => ['n' => 5, 'k' => 1]], '2026-10-30' => ['C' => ['n' => 9, 'k' => 2]]]], true);
 ok(strpos($k3, 'Klarer Sieger: Paar A') !== false && strpos($k3, 'Variante C') !== false && strpos($k3, 'Wahrscheinlichkeit, die beste zu sein') !== false && strpos($k3, 'sicher besser') !== false, 'A/B/C: Karte zeigt drei Varianten, Gesamttest und Vergleiche');
