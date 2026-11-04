@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.66
+ * Version: 0.92.67
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -49,7 +49,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.66';
+    const VERSION = '0.92.67';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6800,9 +6800,17 @@ JS;
                     $same = $as !== null && $boff < $as[1];
                     if ($same) { $as_ = $as; $bs = null; }
                     else { $as_ = self::paar_huelle($c, $aoff, $aend); $bs = self::paar_absatz($c, $boff, $bend); }
+                    $nurtext = false;
                     if ($as_ === null || (!$same && $bs === null)) {
-                        self::$umbau_abw[] = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ' stehen getrennt, lassen sich aber nicht sicher zu einer Karte zusammenführen (Textlink mitten in einem längeren Satz oder in einer Liste/Tabelle). Bitte dort den Karte-Knopf im Artikel nehmen.';
-                        break;
+                        $wahl = ((array) get_option('sab_paar_wahl', []))[$asin] ?? '';
+                        if ($wahl === 'text' && $as_ !== null && !$same) { $nurtext = true; $bs = null; }   // Karte ersetzt das Bild, der Textlink bleibt als normaler Text im Satz
+                        else {
+                            if (self::umbau_ok('satz:' . $asin)) { continue 2; }
+                            $ctx = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags(preg_replace('#\[amz_link\b[^\]]*\](.*?)\[/amz_link\]#is', '»$1«', substr($c, max(0, $boff - 140), 300))))));
+                            $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ' stehen getrennt, lassen sich aber nicht sicher zu einer Karte zusammenführen (Textlink mitten in einem längeren Satz oder in einer Liste/Tabelle).';
+                            self::$umbau_keys[self::$umbau_abw[] = $msg] = 'satz:' . $asin; self::$paare_log[$asin] = ['schwierig', '', $text, $ctx];
+                            continue 2;
+                        }
                     }
                     $land = preg_match('#\bland="([a-z.]+)"#i', $a[1][0] . ' ' . $a[3][0], $lm) ? ' land="' . strtolower($lm[1]) . '"' : '';
                     $tag = preg_match('#\btag="([A-Za-z0-9\-]{3,40})"#', $a[1][0] . ' ' . $a[3][0], $tm) ? ' tag="' . $tm[1] . '"' : '';
@@ -6818,7 +6826,8 @@ JS;
                     self::$paare_log[$asin] = ['karte', $alt ? $alt[1] : $eigen, $text];
                     if ($alt) { $as_[0] = $alt[0]; self::$umbau_info[] = 'Alter Titel „' . mb_substr($alt[1], 0, 50) . '“ über der Karte entfernt (die Karte zeigt ihn selbst)'; self::namen_merken([$asin => $alt[1]]); }
                     if ($as_[2]) { $karte = "<!-- wp:shortcode -->\n" . $karte . "\n<!-- /wp:shortcode -->"; }
-                    if ($same) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1]); }
+                    if ($nurtext) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1], $boff - $as_[1]) . $b[2][0] . substr($c, $bend); }
+                    elseif ($same) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1]); }
                     else { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1], $bs[0] - $as_[1]) . substr($c, $bs[1]); }
                     $kp = strpos($c, $karte, $as_[0]);   // Satzpunkt, der hinter dem Textlink stehen blieb, mit entfernen
                     if ($kp !== false) {
@@ -8598,6 +8607,26 @@ JS;
         return $h . $knopf . '<p><strong>Amazon-Links, die unverändert bleiben (' . count($rest) . '):</strong></p>' . ($rest ? '<ul>' . implode('', $rest) . '</ul><p class="description">Das sind Links ohne erkennbares Produkt oder ohne Partner-ID für das Land, Kurzlinks, die sich nicht eindeutig zuordnen lassen, oder Produkte, die Amazon nicht mehr kennt.</p>' : '<p>Keine.</p>');
     }
 
+    /** Liste aller Artikel mit Bild und Textlink zum selben Produkt (Karte möglich / Titel fehlt / Textlink mitten im Satz). Nur Lesen. */
+    private static function paare_liste_html(): string {
+        global $wpdb;
+        if (!isset($wpdb)) { return ''; }
+        $rows = (array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND post_content LIKE '%[amz\\_bild%' AND post_content LIKE '%[amz\\_link%' ORDER BY ID LIMIT 400", ARRAY_A);
+        $z = []; $sum = [0, 0, 0];
+        foreach ($rows as $r) {
+            self::$paare_log = []; self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_keys = [];
+            try { [, $n] = self::paare_zu_einzelkarten((string) $r['post_content']); } catch (\Throwable $e) { continue; }
+            $fehlt = 0; $schw = 0; foreach (self::$paare_log as $l) { if ($l[0] === 'titel_fehlt') { $fehlt++; } elseif ($l[0] === 'schwierig') { $schw++; } }
+            if (!$n && !$fehlt && !$schw) { continue; }
+            $sum[0] += $n; $sum[1] += $fehlt; $sum[2] += $schw;
+            $ampel = $schw ? '#d63638' : ($fehlt ? '#dba617' : '#1a7f37');
+            $z[] = '<tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' . $ampel . '"></span></td><td><a href="' . esc_url((string) get_permalink((int) $r['ID'])) . '" target="_blank" rel="noopener">' . esc_html((string) ($r['post_title'] ?: 'Beitrag ' . $r['ID'])) . '</a></td><td>' . $n . '</td><td>' . $fehlt . '</td><td>' . $schw . '</td><td><a class="button button-small" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => (int) $r['ID']], admin_url('admin.php'))) . '">Vorschau</a></td></tr>';
+        }
+        self::$paare_log = []; self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_keys = [];
+        if (!$z) { return '<p>Keine Artikel mit Bild und Textlink zum selben Produkt gefunden (nur Artikel, in denen der Umbau schon <code>[amz_bild]</code> und <code>[amz_link]</code> gesetzt hat; neue Artikel zuerst über die Vorschau umbauen).</p>'; }
+        return '<p><strong>' . count($z) . ' Artikel</strong>: ' . $sum[0] . ' Paare werden zur Karte, bei ' . $sum[1] . ' fehlt der Titel (gelb), ' . $sum[2] . ' stehen mitten im Satz (rot). Nur zum Ansehen, es wird nichts geändert. Reine Textlinks ohne Bild bleiben, wie sie sind.</p><table class="widefat striped" style="max-width:900px"><thead><tr><th></th><th>Artikel</th><th>Wird Karte</th><th>Titel fehlt</th><th>Mitten im Satz</th><th></th></tr></thead><tbody>' . implode('', $z) . '</tbody></table>';
+    }
+
     /** Farbige Übersicht der Bild+Textlink-Paare (grün = Titel erkannt, rot = kein Titel, Redakteur entscheidet) und der doppelten Elemente nach dem Umbau. */
     private static function paare_panel_html(int $id, string $neu): string {
         $h = '';
@@ -8605,10 +8634,14 @@ JS;
             $chip = static function (string $t, string $f): string { return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;margin:0 4px 0 0;font-size:12px;background:' . $f . ';color:#fff">' . esc_html($t) . '</span>'; };
             $h .= '<div class="notice notice-info inline" style="padding:8px 12px"><p><strong>Bild und Textlink zu einer Karte (' . count(self::$paare_log) . '):</strong> <span class="description">grün = alles erkannt, rot = Titel über dem Bild fehlt, dort entscheidest du.</span></p>';
             foreach (self::$paare_log as $asin => $l) {
-                $ok = $l[0] === 'karte';
+                $ok = $l[0] === 'karte'; $schw = $l[0] === 'schwierig';
                 $h .= '<div style="border-left:4px solid ' . ($ok ? '#1a7f37' : '#d63638') . ';padding:4px 10px;margin:6px 0;background:#fff">'
-                    . $chip($ok ? 'Titel: ' . mb_substr((string) $l[1], 0, 50) : 'Titel fehlt', $ok ? '#1a7f37' : '#d63638') . $chip('Bild', '#1a7f37') . $chip('Textlink „' . mb_substr((string) $l[2], 0, 30) . '“', '#2271b1') . ' <code>' . esc_html($asin) . '</code>';
-                if (!$ok) {
+                    . $chip($ok ? 'Titel: ' . mb_substr((string) $l[1], 0, 50) : ($schw ? 'Textlink mitten im Satz' : 'Titel fehlt'), $ok ? '#1a7f37' : '#d63638') . $chip('Bild', '#1a7f37') . $chip('Textlink „' . mb_substr((string) $l[2], 0, 30) . '“', '#2271b1') . ' <code>' . esc_html($asin) . '</code>';
+                if ($schw) {
+                    $h .= '<div style="margin:6px 0;padding:6px 8px;background:#f6f7f7;font-size:13px">…' . esc_html((string) ($l[3] ?? '')) . '…</div>'
+                        . '<form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_paar_wahl"><input type="hidden" name="sab_asin" value="' . esc_attr($asin) . '"><input type="hidden" name="sab_vorschau" value="' . $id . '"><button class="button button-small button-primary" title="Das Bild wird zur Karte (mit dem einen Link). Der Textlink im Satz bleibt als normaler Text ohne Link stehen.">Karte setzen, Satz ohne Link lassen</button></form>'
+                        . self::ok_knopf('Bild und Textlink („' . $l[2] . '“) zu ' . $asin . ' stehen getrennt, lassen sich aber nicht sicher zu einer Karte zusammenführen (Textlink mitten in einem längeren Satz oder in einer Liste/Tabelle).', $id);
+                } elseif (!$ok) {
                     $h .= '<form method="post" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_paar_titel"><input type="hidden" name="sab_asin" value="' . esc_attr($asin) . '"><input type="hidden" name="sab_vorschau" value="' . $id . '">'
                         . '<input type="text" name="sab_titel" class="regular-text" placeholder="Titel der Karte, z. B. Kurzname des Produkts" value="' . esc_attr(mb_substr(self::kurztitel((string) (self::produkte()[$asin] ?? '')), 0, 70)) . '"> <button class="button button-small button-primary">Diesen Titel nehmen und umwandeln</button></form>'
                         . self::ok_knopf('Bild und Textlink („' . $l[2] . '“) zu ' . $asin . ': über dem Bild wurde kein Titel erkannt, nicht umgewandelt. Unten den Titel eintragen oder bestätigen.', $id);
@@ -9664,12 +9697,15 @@ JS;
                 $meldung = $ok . ' Artikel umgebaut (' . $links . ' Links bzw. Blöcke).' . ($nicht_dran ? ' ' . $nicht_dran . ' Artikel blieben wegen der Zeitgrenze offen, bitte erneut markieren.' : '') . ($uebersprungen ? ' Mit Hinweis, bitte ansehen: ' . implode('; ', array_slice($uebersprungen, 0, 6)) . '.' : '');
             } elseif ($form === 'umbau_ok' || $form === 'umbau_ok_weg') {
                 $k = sanitize_text_field(wp_unslash($_POST['sab_key'] ?? '')); $okl = (array) get_option('sab_umbau_ok', []);
-                if ($k !== '' && preg_match('/^(titel|dupl|weg|paar):[A-Za-z0-9,:]+$/', $k)) {
+                if ($k !== '' && preg_match('/^(titel|dupl|weg|paar|satz):[A-Za-z0-9,:]+$/', $k)) {
                     $okl = array_values(array_diff($okl, [$k]));
                     if ($form === 'umbau_ok') { $okl[] = $k; }
                     update_option('sab_umbau_ok', $okl, false);
                     $meldung = $form === 'umbau_ok' ? 'Gemerkt: Diese Abweichung ist gewollt und wird beim Umbau nicht mehr beanstandet.' : 'Die Abweichung wird wieder geprüft.';
                 }
+            } elseif ($form === 'umbau_paar_wahl') {
+                $pa = self::asin((string) wp_unslash($_POST['sab_asin'] ?? ''));
+                if (strlen($pa) === 10) { $mw = (array) get_option('sab_paar_wahl', []); $mw[$pa] = 'text'; update_option('sab_paar_wahl', $mw, false); $meldung = 'Gemerkt für ' . $pa . ': Das Bild wird zur Karte, der Textlink im Satz bleibt Text ohne Link. Unten siehst du die Vorschau.'; }
             } elseif ($form === 'umbau_paar_titel') {
                 $pa = self::asin((string) wp_unslash($_POST['sab_asin'] ?? '')); $tt = trim(sanitize_text_field(wp_unslash($_POST['sab_titel'] ?? '')));
                 if (strlen($pa) === 10 && $tt !== '') { $mp = (array) get_option('sab_paar_titel', []); $mp[$pa] = mb_substr($tt, 0, 120); update_option('sab_paar_titel', $mp, false); $meldung = 'Titel für ' . $pa . ' gemerkt. In der Vorschau siehst du jetzt die fertige Karte.'; }
@@ -9857,6 +9893,7 @@ JS;
             echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau')
                . self::umbau_falte('Phantom-Platzhalter', self::phantome_html(), false)
                . self::umbau_falte('Widgets in der Seitenleiste', $wh_ = self::umbau_widgets_html(), strpos($wh_, 'alte Links</span>') !== false)
+               . self::umbau_falte('Bild und Textlink zu Karten (Liste)', self::paare_liste_html(), true)
                . self::umbau_falte('Karten mit etwas Doppeltem daneben', $dh_ = self::karten_doppelt_html(), strpos($dh_, '<li>') !== false)
                . self::umbau_falte('Sichtbare Shortcode-Reste im Text', self::umbau_textreste_html(), self::$textreste !== null && self::$textreste !== [], self::$textreste === null ? 'noch nicht geprüft, zum Prüfen aufklappen' : '')
                . '<details style="max-width:760px;margin:8px 0"><summary><strong>So funktioniert der Umbau</strong></summary><ol><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'

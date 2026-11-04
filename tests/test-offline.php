@@ -2205,4 +2205,27 @@ $kb = SAB::karten_doppelt_in('[amz_karten][amz_karte asin="B0DOPPEL03" stil="ein
 ok(count($kb) === 1 && strpos($kb[0]['grund'], 'zwei Buttons') !== false, 'Karten-Doppelt: Einzelkarte im Mehrfachblock wird gefunden');
 $oh = ['B0OKAY0002' => ['ts' => 1, 'score' => 60, 'hart' => 1]];
 ok(SAB::belassen_gilt('B0OKAY0002', 100, 60, $oh) && !SAB::belassen_gilt('B0OKAY0002', 100, 30, $oh), 'Okay-belassen: wer ein dringendes Produkt bewusst belässt, sieht es nicht sofort wieder (nur bei Score-Absturz)');
+// Paare: ohne erkannten Titel bleibt stehen, bis Titel/Bestätigung; Textlink mitten im Satz; Auswahl "text"
+$GLOBALS['opt']['sab_paar_ohne_titel'] = '0';
+$c0 = '<p>Hallo.</p><p>[amz_bild asin="B0PAAR0099" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild führt zum [amz_link asin="B0PAAR0099" land="es"]Angebot bei Amazon[/amz_link]</p>';
+SAB::$paare_log = []; SAB::$umbau_abw = [];
+[$o1, $n1] = SAB::paare_zu_einzelkarten($c0);
+ok($n1 === 0 && $o1 === $c0 && (SAB::$paare_log['B0PAAR0099'][0] ?? '') === 'titel_fehlt', 'Paar ohne Titel wird festgehalten, nicht umgewandelt');
+$GLOBALS['opt']['sab_paar_titel'] = ['B0PAAR0099' => 'Mein Titel'];
+[$o2, $n2] = SAB::paare_zu_einzelkarten($c0);
+ok($n2 === 1 && strpos($o2, 'titel="Mein Titel"') !== false, 'Eigener Titel kommt in die Karte');
+unset($GLOBALS['opt']['sab_paar_titel']);
+$rm = new ReflectionMethod('SAB', 'paare_panel_html'); $rm->setAccessible(true);
+SAB::$paare_log = []; SAB::$umbau_keys = []; SAB::$umbau_abw = []; SAB::paare_zu_einzelkarten($c0);
+$ph = $rm->invoke(null, 5, $c0);
+ok(strpos($ph, 'Titel fehlt') !== false && strpos($ph, 'umbau_paar_titel') !== false, 'Paare-Panel zeigt fehlenden Titel');
+$c1 = '<p>[amz_bild asin="B0PAAR0098" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Wir empfehlen dazu das [amz_link asin="B0PAAR0098" land="es"]Netz Pro[/amz_link] für große Beete, weil es sehr stabil ist, lange hält, sich leicht aufbauen lässt und im Winter nicht verrottet.</p>';
+SAB::$paare_log = []; SAB::$umbau_abw = [];
+[$o3, $n3] = SAB::paare_zu_einzelkarten($c1);
+ok($n3 === 0 && (SAB::$paare_log['B0PAAR0098'][0] ?? '') === 'schwierig', 'Textlink mitten im Satz wird als schwierig gemeldet');
+$GLOBALS['opt']['sab_paar_wahl'] = ['B0PAAR0098' => 'text'];
+$GLOBALS['opt']['sab_paar_titel'] = ['B0PAAR0098' => 'Netz Pro'];
+[$o4, $n4] = SAB::paare_zu_einzelkarten($c1);
+ok($n4 === 1 && strpos($o4, '[amz_link') === false && strpos($o4, 'das Netz Pro für große Beete') !== false && strpos($o4, '[amz_karte') !== false, 'Wahl text: Karte statt Bild, Satz bleibt ohne Link');
+unset($GLOBALS['opt']['sab_paar_wahl'], $GLOBALS['opt']['sab_paar_titel']); $GLOBALS['opt']['sab_paar_ohne_titel'] = '1';
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
