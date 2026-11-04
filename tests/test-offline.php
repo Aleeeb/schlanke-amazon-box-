@@ -2237,4 +2237,10 @@ $GLOBALS['opt']['sab_paar_titel'] = ['B0PAAR0098' => 'Netz Pro'];
 [$o4, $n4] = SAB::paare_zu_einzelkarten($c1);
 ok($n4 === 1 && strpos($o4, '[amz_link') === false && strpos($o4, 'das Netz Pro für große Beete') !== false && strpos($o4, '[amz_karte') !== false, 'Wahl text: Karte statt Bild, Satz bleibt ohne Link');
 unset($GLOBALS['opt']['sab_paar_wahl'], $GLOBALS['opt']['sab_paar_titel']); $GLOBALS['opt']['sab_paar_ohne_titel'] = '1';
+// Klick auf „Karte“ im Frontend: nur dieses Produkt, auch ohne erkannten Titel, durch Absatz getrennt
+$GLOBALS['opt']['sab_paar_ohne_titel'] = '0';
+$c2_ = '<p>[amz_bild asin="B0PAAR0201" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Danach [amz_link asin="B0PAAR0201" land="es"]Angebot[/amz_link]</p><p>[amz_bild asin="B0PAAR0202" land="es"]<a href="y"><img src="b.jpg"></a>[/amz_bild]</p><p>Danach [amz_link asin="B0PAAR0202" land="es"]Angebot[/amz_link]</p>';
+[$oa, $na] = SAB::paare_zu_einzelkarten($c2_, 'B0PAAR0201', true);
+ok($na === 1 && substr_count($oa, '[amz_karte ') === 1 && strpos($oa, 'B0PAAR0202') !== false && strpos($oa, '[amz_link asin="B0PAAR0202"') !== false && strpos($oa, '[amz_link asin="B0PAAR0201"') === false, 'Karte-Knopf: nur das gewählte Produkt wird zur Karte, ohne Titelzwang');
+$GLOBALS['opt']['sab_paar_ohne_titel'] = '1';
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
