@@ -7,7 +7,7 @@ if (!function_exists('get_post_field')) { function get_post_field($f, $i) { $a =
 const MB_IN_BYTES = 1048576; const DAY_IN_SECONDS = 86400; const HOUR_IN_SECONDS = 3600; const MINUTE_IN_SECONDS = 60;
 $GLOBALS['opt'] = ['sab_paar_ohne_titel' => '1']; $GLOBALS['tr'] = []; $GLOBALS['sc'] = []; $GLOBALS['http'] = []; $GLOBALS['admin'] = false;
 function add_shortcode($n, $f) { $GLOBALS['sc'][$n] = $f; }
-function add_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b) { $GLOBALS['mail'][] = [$t,$s,$b]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return '1ab-affiliate-help/1ab-affiliate-help.php'; } function wp_next_scheduled($x) { return true; }
+function add_action(...$a) {} function remove_action(...$a) {} function add_menu_page(...$a) { $GLOBALS['menu'][] = ['top', $a[3]]; } function add_submenu_page(...$a) { $GLOBALS['menu'][] = ['sub', $a[4]]; } function add_filter(...$a) {} function wp_mail($t,$s,$b,$h=[]) { $GLOBALS["mail"][] = [$t,$s,$b,$h]; return true; } function sanitize_email($e) { return $e; } function plugin_basename($f) { return '1ab-affiliate-help/1ab-affiliate-help.php'; } function wp_next_scheduled($x) { return true; }
 function date_i18n($f, $t = null) { return date($f, $t ?? time()); }
 function get_option($k, $d = false) { return $GLOBALS['opt'][$k] ?? $d; }
 function update_option($k, $v, $a = null) { $GLOBALS['opt'][$k] = $v; return true; }
@@ -2254,4 +2254,12 @@ SAB::$paare_log = []; SAB::$umbau_abw = [];
 SAB::paare_zu_einzelkarten($cg);
 ok(strpos((string) (SAB::$paare_log['B0PAAR0302'][4] ?? ''), 'nicht in einem eigenen Absatz') !== false, 'Grund wird im Klartext genannt: ' . (SAB::$paare_log['B0PAAR0302'][4] ?? '-'));
 $GLOBALS['opt']['sab_paar_ohne_titel'] = '1';
+// Wochenmail: gute Nachrichten, Trend, Direktlinks
+$wd = SAB::wochenmail_daten([['asin'=>'B000000001','n'=>12],['asin'=>'B000000002','n'=>3]], 10, [['pfad'=>'/a/','n'=>7]], [], []);
+$wt = SAB::wochenmail_text_aus($wd); $wh = SAB::wochenmail_html($wd);
+ok($wd['summe'] === 15 && strpos($wt, '+50 %') !== false, 'Wochenmail: Summe 15 und +50 % zur Vorwoche');
+ok(strpos($wt, 'Keine ausgefallenen Produkte') !== false && strpos($wt, 'admin.php?page=sab-austausch') !== false, 'Wochenmail: Schnellzugriff Austausch, keine Ausfälle');
+ok(strpos($wh, '<a href=') !== false && strpos($wh, 'Meistgeklickte Artikel') !== false && strpos($wh, 'ausgefallen, bitte tauschen') === false, 'Wochenmail HTML: Links, Artikel, kein Ausfall-Kasten');
+$wd2 = SAB::wochenmail_daten([], 0, [], ['B000000009'=>['name'=>'Testnetz','ersatz'=>'B000000008']], []);
+ok(strpos(SAB::wochenmail_text_aus($wd2), 'ACHTUNG: 1 Produkt(e) ausgefallen') !== false && strpos(SAB::wochenmail_html($wd2), 'Testnetz') !== false, 'Wochenmail: Ausfall steht oben und mit Namen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
