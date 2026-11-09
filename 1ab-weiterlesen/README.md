@@ -1,4 +1,4 @@
-# 1AB Weiterlesen (Version 0.2.0, nur Vorbereitung)
+# 1AB Weiterlesen-Modul (0.3.0): kein eigenes Plugin, Reiter für die Mini-Statistik
 
 Eigenständiges Plugin (Hooks wie Mini-Statistik, aber ohne deren Code). Standardmäßig komplett AUS. Contextual Related Posts bleibt unberührt.
 
@@ -12,3 +12,6 @@ Eigenständiges Plugin (Hooks wie Mini-Statistik, aber ohne deren Code). Standar
 - Test: `php tests-wl/test-weiterlesen.php`
 
 Nicht getestet: echtes WordPress (nur PHP-Syntax, Logiktests und Popup-Vorschau). Vor Livegang auf einer Testseite prüfen, insbesondere mit Seiten-Cache.
+
+## Einbau als Reiter in die Mini-Statistik
+Datei `1ab-weiterlesen-modul.php` neben die Mini-Statistik legen, dort `require_once` und `AB1_Weiterlesen::init()`, Tabellen über `AB1_Weiterlesen::aktivieren()` anlegen, im Reiterbereich `AB1_Weiterlesen::tab()` ausgeben und per Filter `ab1_wl_eigenes_menue` (false) das eigene Menü abschalten, `ab1_wl_seiten_url` auf die Reiter-URL setzen. Die dünne Hülle `1ab-weiterlesen.php` dient nur zum Testen davor.

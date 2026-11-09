@@ -2,7 +2,7 @@
 // Offline-Test ohne WordPress: php tests-wl/test-weiterlesen.php
 define('ABSPATH', __DIR__ . '/'); define('AB1_WL_TEST', 1);
 function add_action(...$a){} function add_filter(...$a){} function add_shortcode(...$a){} function register_activation_hook(...$a){}
-require __DIR__ . '/../1ab-weiterlesen/1ab-weiterlesen.php';
+require __DIR__ . '/../1ab-weiterlesen/1ab-weiterlesen-modul.php';
 $f = 0; function ok($c, $m) { global $f; echo ($c ? 'OK   ' : 'FEHLT ') . $m . "\n"; if (!$c) $f++; }
 $A = ['id'=>1,'titel'=>'Schnecken im Garten abwehren','kat'=>[5],'tag'=>[1],'sprache'=>'de','noindex'=>false,'fokus'=>'schneckenabwehr'];
 $B = $A; $B['id']=2; $B['titel']='Schnecken Hausmittel im Garten'; $B['fokus']='hausmittel gegen schnecken';
