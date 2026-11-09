@@ -2,14 +2,14 @@
 /**
  * Plugin Name: 1AB Weiterlesen
  * Description: Weiterlesen-Empfehlungen mit Klickmessung und A/B-Test sowie Exit-Popup (A/B/C/D). Cookiefrei, nichts im Browser gespeichert. Standardmäßig AUS, ersetzt Contextual Related Posts erst nach ausdrücklicher Freigabe.
- * Version: 0.1.0
+ * Version: 0.2.0
  * Author: Alexander Boeckmann
  * Text Domain: ab1-wl
  */
 if (!defined('ABSPATH')) exit;
 
 class AB1_Weiterlesen {
-    const VERSION = '0.1.0';
+    const VERSION = '0.2.0';
     const OPT = 'ab1_wl_opt';
     const REST = 'ab1-wl/v1';
     const SEITEN_OHNE_POPUP = 'impressum|datenschutz|kontakt|privacy|aviso-legal|mentions-legales|legal';
@@ -85,11 +85,12 @@ class AB1_Weiterlesen {
         return hash_hmac('sha256', $ip . '|' . $ua, $salz);
     }
 
-    /** Popup-Variante wählen, nie dieselbe wie zuletzt (wenn möglich). */
-    public static function popup_variante($zuletzt, $verfuegbar, $zufall) {
-        $liste = array_values(array_diff($verfuegbar, array($zuletzt)));
-        if (!$liste) $liste = array_values($verfuegbar);
-        return $liste[$zufall % count($liste)];
+    /** Popup-Variante aus Kennung und Tageszahl: wechselt täglich, nichts im Browser. */
+    public static function popup_variante($kennung, $tageszahl, array $verfuegbar) {
+        $verfuegbar = array_values($verfuegbar);
+        if (!$verfuegbar) return '';
+        $h = hash('sha256', $kennung . '|' . (int) $tageszahl);
+        return $verfuegbar[hexdec(substr($h, 0, 8)) % count($verfuegbar)];
     }
 
     /* ---------- Einstellungen ---------- */
@@ -97,11 +98,10 @@ class AB1_Weiterlesen {
     public static function std() {
         return array(
             'weiterlesen' => 0, 'popup' => 0, 'anzahl' => 4, 'ueberschrift' => 'Weiterlesen',
-            'push_a' => 0, 'push_b' => 0, 'ab' => 1,
+            'push' => array(), 'push_themenfrei' => 1, 'ab' => 1,
             'teaser_oben' => 0, 'teaser_absatz' => 3,
             'pop_sek' => 12, 'pop_tage' => 7, 'pop_titel' => 'Bevor du gehst',
             'pop_knopf' => 'Jetzt lesen', 'pop_nein' => 'Nicht mehr anzeigen',
-            'pop_varianten' => 'abcd',
         );
     }
     public static function opt($k = null) {
@@ -186,9 +186,13 @@ class AB1_Weiterlesen {
                 if (get_post_status($m) === 'publish' && $m !== $id) $liste[] = $m; // manuell: Redakteur entscheidet (Ausnahme erlaubt)
             }
         }
-        $push = array();
-        foreach (array((int) $o['push_a'], (int) $o['push_b']) as $p) {
-            if ($p && get_post_status($p) === 'publish' && self::darf_verlinken($a, self::info($p))) $push[] = $p;
+        $push = array(); // Buchstabe => Beitrags-ID, Buchstabe bleibt am Platz in den Einstellungen hängen
+        foreach (array_values((array) $o['push']) as $i => $p) {
+            $p = (int) $p;
+            if ($i > 4 || !$p || get_post_status($p) !== 'publish') continue;
+            $b = self::info($p);
+            if ($o['push_themenfrei']) $b['kat'] = $a['kat']; // Redakteur hat bewusst gewählt: Thema nicht prüfen
+            if (self::darf_verlinken($a, $b)) $push[chr(97 + $i)] = $p;
         }
         if ($modus !== 'manuell' && count($liste) < $max) {
             $q = new WP_Query(array(
@@ -230,25 +234,23 @@ class AB1_Weiterlesen {
         $h = '<aside class="ab1wl" data-q="' . (int) $id . '" aria-label="' . esc_attr($o['ueberschrift']) . '"><h2>' . esc_html($o['ueberschrift']) . '</h2><ul>';
         $pos = 1;
         if ($push) {
-            // zwei gepushte Artikel teilen sich Platz 1: Variante A zeigt den ersten, B den zweiten
-            if (count($push) === 2 && $o['ab']) {
-                $h .= self::karte($push[0], 1, ' data-s="a"') . self::karte($push[1], 1, ' data-s="b" hidden');
-            } else {
-                $h .= self::karte($push[0], 1);
+            // gepushte Artikel teilen sich Platz 1: je Aufruf zufällig einer (Varianten A bis E)
+            $erste = true;
+            foreach ($push as $buchstabe => $pid) {
+                $h .= self::karte($pid, 1, ($o['ab'] && count($push) > 1) ? ' data-s="' . $buchstabe . '"' . ($erste ? '' : ' hidden') : '');
+                $erste = false;
+                if (!$o['ab']) break;
             }
             $pos = 2;
         }
         foreach ($liste as $pid) { if ($pos > max(1, (int) $o['anzahl'])) break; $h .= self::karte($pid, $pos++); }
         $h .= '</ul></aside>';
         // Teaser weiter oben: nur Testvariante B, kleine Textbox
-        if ($o['teaser_oben'] && $push) {
-            $h .= '<template class="ab1wl-tz-t">' . self::teaser_html($id, $push) . '</template>';
-        }
-        return $h;
+                return $h;
     }
 
     public static function teaser_html($id, $push) {
-        $ziel = $push[0];
+        $ziel = reset($push);
         return '<p class="ab1wl-tz" data-q="' . (int) $id . '" data-z="' . (int) $ziel . '" data-p="0"><strong>' . esc_html__('Das könnte dich auch interessieren:', 'ab1-wl') . '</strong> <a href="' . esc_url(get_permalink($ziel)) . '">' . esc_html(get_the_title($ziel)) . '</a></p>';
     }
 
@@ -289,7 +291,7 @@ class AB1_Weiterlesen {
         echo '<style id="ab1wl-css">' . $css . '</style><script id="ab1wl-js">(function(){var C=' . wp_json_encode($cfg) . ';'
             . 'function r(){return Math.random()<.5?"a":"b"}'
             . 'function s(o){try{var b=new Blob([JSON.stringify(o)],{type:"text/plain"});if(navigator.sendBeacon)navigator.sendBeacon(C.u,b);else fetch(C.u,{method:"POST",body:b,keepalive:true})}catch(e){}}'
-            . 'function go(){var b=document.querySelector(".ab1wl");if(!b)return;var q=+b.getAttribute("data-q"),v=C.ab?r():"a",t=C.top?r():"a";'
+            . 'function go(){var b=document.querySelector(".ab1wl");if(!b)return;var q=+b.getAttribute("data-q"),L=[].map.call(b.querySelectorAll("[data-s]"),function(e){return e.getAttribute("data-s")}),v=L.length?L[Math.floor(Math.random()*L.length)]:"a",t=C.top?r():"a";'
             . '[].forEach.call(b.querySelectorAll("[data-s]"),function(e){e.hidden=e.getAttribute("data-s")!==v});'
             . 'var pl=document.querySelector(".ab1wl-tz-platz");if(pl&&t==="b"){pl.hidden=false;}else if(pl){pl.parentNode.removeChild(pl);t="a"}'
             . 'var seen={};function imp(el,k,vv){if(!("IntersectionObserver"in window))return;var io=new IntersectionObserver(function(x){if(x[0].isIntersecting&&!seen[k]){seen[k]=1;s({b:k,v:vv,e:"i",q:q,z:0,p:0});io.disconnect()}},{threshold:.5});io.observe(el)}'
@@ -301,16 +303,8 @@ class AB1_Weiterlesen {
     /* ---------- Exit-Popup ---------- */
 
     public static function popup_inhalte($id) {
-        $o = self::opt();
-        $w = self::auswahl($id);
-        $push = $w['push']; $liste = $w['liste'];
         $v = array();
-        if (!empty($push[0])) $v['a'] = array('typ' => 'karte', 'ids' => array($push[0]));
-        if (!empty($push[1])) $v['b'] = array('typ' => 'karte', 'ids' => array($push[1]));
-        if (count($liste) >= 3) $v['c'] = array('typ' => 'liste', 'ids' => array_slice($liste, 0, 3));
-        if (!empty($liste[0])) $v['d'] = array('typ' => 'karte', 'ids' => array($liste[0]));
-        // Nur erlaubte Varianten
-        foreach (array_keys($v) as $k) if (strpos($o['pop_varianten'], $k) === false) unset($v[$k]);
+        foreach (self::auswahl($id)['push'] as $buchstabe => $pid) $v[$buchstabe] = array('typ' => 'karte', 'ids' => array($pid));
         return $v;
     }
 
@@ -387,7 +381,7 @@ class AB1_Weiterlesen {
         if (!is_array($d)) return new WP_REST_Response(null, 204);
         $b = isset($d['b']) ? (string) $d['b'] : ''; $v = isset($d['v']) ? (string) $d['v'] : ''; $e = isset($d['e']) ? (string) $d['e'] : '';
         $q = (int) ($d['q'] ?? 0); $z = (int) ($d['z'] ?? 0); $p = max(0, min(20, (int) ($d['p'] ?? 0)));
-        if (!in_array($b, array('wl', 'tz', 'pu'), true) || !preg_match('/^[a-d]$/', $v) || !in_array($e, array('i', 'c'), true)) return new WP_REST_Response(null, 204);
+        if (!in_array($b, array('wl', 'tz', 'pu'), true) || !preg_match('/^[a-e]$/', $v) || !in_array($e, array('i', 'c'), true)) return new WP_REST_Response(null, 204);
         if (get_post_status($q) !== 'publish' || ($z && get_post_status($z) !== 'publish')) return new WP_REST_Response(null, 204);
         $t = $wpdb->prefix . 'ab1_wl_zaehler';
         $wpdb->query($wpdb->prepare("INSERT INTO $t (tag,bereich,variante,ereignis,quelle,ziel,pos,n) VALUES (%s,%s,%s,%s,%d,%d,%d,1) ON DUPLICATE KEY UPDATE n=n+1", gmdate('Y-m-d'), $b, $v, $e, $q, $z, $p));
@@ -399,15 +393,14 @@ class AB1_Weiterlesen {
         $o = self::opt();
         $t = $wpdb->prefix . 'ab1_wl_kennung';
         $k = self::meine_kennung();
-        $erlaubt = array_values(array_filter(str_split(preg_replace('/[^a-d]/', '', (string) $req->get_param('v')))));
-        $erlaubt = array_values(array_intersect($erlaubt, str_split($o['pop_varianten'])));
+        $erlaubt = array_values(array_filter(str_split(preg_replace('/[^a-e]/', '', (string) $req->get_param('v')))));
         $res = new WP_REST_Response(array('zeigen' => false));
         $res->header('Cache-Control', 'no-store');
         if (!$o['popup'] || !$erlaubt) return $res;
-        $r = $wpdb->get_row($wpdb->prepare("SELECT popup_bis, zuletzt, nein FROM $t WHERE kennung=%s", $k), ARRAY_A);
+        $r = $wpdb->get_row($wpdb->prepare("SELECT popup_bis, nein FROM $t WHERE kennung=%s", $k), ARRAY_A);
         $jetzt = gmdate('Y-m-d H:i:s');
         if ($r && ((int) $r['nein'] === 1 || $r['popup_bis'] > $jetzt)) return $res;
-        $v = self::popup_variante($r ? $r['zuletzt'] : '', $erlaubt, wp_rand(0, 1000));
+        $v = self::popup_variante($k, (int) floor(time() / 86400), $erlaubt);
         $bis = gmdate('Y-m-d H:i:s', time() + max(1, (int) $o['pop_tage']) * DAY_IN_SECONDS);
         $wpdb->query($wpdb->prepare("INSERT INTO $t (kennung,popup_bis,zuletzt,nein,zeit) VALUES (%s,%s,%s,0,%s) ON DUPLICATE KEY UPDATE popup_bis=VALUES(popup_bis),zuletzt=VALUES(zuletzt),zeit=VALUES(zeit)", $k, $bis, $v, $jetzt));
         $res->set_data(array('zeigen' => true, 'v' => $v));
@@ -451,7 +444,7 @@ class AB1_Weiterlesen {
     }
 
     public static function menue() {
-        add_options_page('Weiterlesen (1AB)', 'Weiterlesen (1AB)', 'manage_options', 'ab1-wl', array(__CLASS__, 'seite'));
+        $h = add_options_page('Weiterlesen (1AB)', 'Weiterlesen (1AB)', 'manage_options', 'ab1-wl', array(__CLASS__, 'seite'));
     }
 
     public static function einstellungen_speichern() {
@@ -459,65 +452,138 @@ class AB1_Weiterlesen {
         check_admin_referer('ab1_wl_s');
         $s = self::std(); $in = wp_unslash($_POST);
         $n = array();
-        foreach (array('weiterlesen', 'popup', 'ab', 'teaser_oben') as $k) $n[$k] = empty($in[$k]) ? 0 : 1;
-        foreach (array('anzahl' => array(1, 6), 'push_a' => array(0, PHP_INT_MAX), 'push_b' => array(0, PHP_INT_MAX), 'teaser_absatz' => array(1, 20), 'pop_sek' => array(3, 120), 'pop_tage' => array(1, 90)) as $k => $r) $n[$k] = max($r[0], min($r[1], (int) ($in[$k] ?? $s[$k])));
+        foreach (array('weiterlesen', 'popup', 'ab', 'teaser_oben', 'push_themenfrei') as $k) $n[$k] = empty($in[$k]) ? 0 : 1;
+        foreach (array('anzahl' => array(1, 6), 'teaser_absatz' => array(1, 20), 'pop_sek' => array(3, 120), 'pop_tage' => array(1, 90)) as $k => $r) $n[$k] = max($r[0], min($r[1], (int) ($in[$k] ?? $s[$k])));
         foreach (array('ueberschrift', 'pop_titel', 'pop_knopf', 'pop_nein') as $k) $n[$k] = sanitize_text_field($in[$k] ?? $s[$k]);
-        $n['pop_varianten'] = preg_replace('/[^a-d]/', '', (string) ($in['pop_varianten'] ?? 'abcd')) ?: 'abcd';
+        $push = array();
+        for ($i = 0; $i < 5; $i++) {
+            $p = (int) ($in['push'][$i] ?? 0);
+            $push[] = ($p && get_post_type($p) === 'post' && get_post_status($p) === 'publish') ? $p : 0;
+        }
+        $n['push'] = $push;
         update_option(self::OPT, $n);
         self::cache_leeren();
         wp_safe_redirect(admin_url('options-general.php?page=ab1-wl&ok=1'));
         exit;
     }
 
-    private static function bericht() {
+    /** Aufrufe je Artikel (30 Tage): Mini-Statistik, falls vorhanden; sonst eigene Einblendungen der Box. */
+    public static function besucher() {
+        global $wpdb;
+        $v = array(); $quelle = '';
+        $t = $wpdb->prefix . 'mini_statistik';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $t)) === $t) {
+            $quelle = 'Mini-Statistik';
+            $rows = $wpdb->get_results("SELECT path, COUNT(*) n FROM $t WHERE kind='view' AND day >= (CURDATE() - INTERVAL 30 DAY) GROUP BY path ORDER BY n DESC LIMIT 300", ARRAY_A);
+            foreach ($rows as $r) { $id = url_to_postid(home_url($r['path'])); if ($id) $v[$id] = ($v[$id] ?? 0) + (int) $r['n']; }
+        } else {
+            $quelle = 'eigene Einblendungen der Weiterlesen-Box';
+            $z = $wpdb->prefix . 'ab1_wl_zaehler';
+            $rows = $wpdb->get_results("SELECT quelle, SUM(n) n FROM $z WHERE bereich='wl' AND ereignis='i' AND tag >= (CURDATE() - INTERVAL 30 DAY) GROUP BY quelle ORDER BY n DESC LIMIT 300", ARRAY_A);
+            foreach ($rows as $r) $v[(int) $r['quelle']] = (int) $r['n'];
+        }
+        return array($v, $quelle);
+    }
+
+    /** Fünf Vorschläge: meistbesuchte Artikel, ohne noindex, höchstens zwei je Kategorie. */
+    public static function vorschlaege($n = 5) {
+        list($v, $quelle) = self::besucher();
+        $out = array(); $kat = array();
+        foreach ($v as $id => $aufrufe) {
+            if (get_post_type($id) !== 'post' || get_post_status($id) !== 'publish') continue;
+            $i = self::info($id);
+            if ($i['noindex']) continue;
+            $k = $i['kat'] ? $i['kat'][0] : 0;
+            if (($kat[$k] ?? 0) >= 2) continue;
+            $kat[$k] = ($kat[$k] ?? 0) + 1;
+            $out[] = array('id' => $id, 'aufrufe' => $aufrufe);
+            if (count($out) >= $n) break;
+        }
+        if (count($out) < $n) { // Notbehelf: neueste Artikel, wenn noch keine Zahlen da sind
+            $ids = get_posts(array('numberposts' => $n * 3, 'fields' => 'ids', 'post_status' => 'publish'));
+            foreach ($ids as $id) { if (count($out) >= $n) break; if (!in_array($id, array_column($out, 'id'), true)) $out[] = array('id' => $id, 'aufrufe' => 0); }
+        }
+        return array($out, $quelle);
+    }
+
+    private static function ergebnis_tabelle($bereich, $titel, $beschreibung) {
         global $wpdb;
         $t = $wpdb->prefix . 'ab1_wl_zaehler';
-        $z = $wpdb->get_results("SELECT bereich,variante,ereignis,SUM(n) n FROM $t WHERE tag >= (CURDATE() - INTERVAL 30 DAY) GROUP BY bereich,variante,ereignis", ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT variante,ereignis,SUM(n) n FROM $t WHERE bereich=%s AND tag >= (CURDATE() - INTERVAL 30 DAY) GROUP BY variante,ereignis", $bereich), ARRAY_A);
         $m = array();
-        foreach ($z as $r) $m[$r['bereich']][$r['variante']][$r['ereignis']] = (int) $r['n'];
-        $namen = array('wl' => 'Weiterlesen-Box (Platz 1: Push-Artikel A gegen B)', 'tz' => 'Teaser weiter oben im Artikel', 'pu' => 'Exit-Popup (A, B, C, D)');
-        $h = '<h2>Auswertung, letzte 30 Tage</h2>';
-        foreach ($namen as $b => $name) {
-            $h .= '<h3>' . esc_html($name) . '</h3><table class="widefat striped" style="max-width:720px"><thead><tr><th>Variante</th><th>Einblendungen</th><th>Klicks</th><th>Klickrate</th><th>95-%-Bereich</th></tr></thead><tbody>';
-            if (empty($m[$b])) { $h .= '<tr><td colspan="5">Noch keine Daten.</td></tr>'; }
-            else foreach ($m[$b] as $v => $e) {
-                $i = $e['i'] ?? 0; $c = $e['c'] ?? 0; list($lo, $hi) = self::wilson($c, $i);
-                $h .= '<tr><td>' . esc_html(strtoupper($v)) . '</td><td>' . (int) $i . '</td><td>' . (int) $c . '</td><td>' . ($i ? esc_html(number_format_i18n(100 * $c / $i, 1)) . ' %' : '–') . '</td><td>' . ($i ? esc_html(number_format_i18n(100 * $lo, 1) . ' – ' . number_format_i18n(100 * $hi, 1)) . ' %' : '–') . '</td></tr>';
-            }
-            $h .= '</tbody></table>';
+        foreach ($rows as $r) $m[$r['variante']][$r['ereignis']] = (int) $r['n'];
+        $push = array_values((array) self::opt('push'));
+        $h = '<div class="ab1-karte"><h3>' . esc_html($titel) . '</h3><p class="d">' . esc_html($beschreibung) . '</p>';
+        if (!$m) return $h . '<p class="d">Noch keine Daten. Die Messung beginnt, sobald die Funktion eingeschaltet ist.</p></div>';
+        ksort($m);
+        $max = 0.0001;
+        foreach ($m as $e) { $i = $e['i'] ?? 0; if ($i) $max = max($max, ($e['c'] ?? 0) / $i); }
+        $h .= '<table class="ab1-t"><thead><tr><th>Variante</th><th>Artikel</th><th>Einblendungen</th><th>Klicks</th><th>Klickrate</th><th>95-%-Bereich</th></tr></thead><tbody>';
+        foreach ($m as $v => $e) {
+            $i = $e['i'] ?? 0; $c = $e['c'] ?? 0; list($lo, $hi) = self::wilson($c, $i);
+            $idx = ord($v) - 97; $pid = (int) ($push[$idx] ?? 0);
+            $rate = $i ? $c / $i : 0;
+            $h .= '<tr><td><b>' . esc_html(strtoupper($v)) . '</b></td><td>' . ($pid ? esc_html(get_the_title($pid)) : '–') . '</td><td>' . (int) $i . '</td><td>' . (int) $c . '</td><td><div class="ab1-bar"><i style="width:' . round(100 * $rate / $max) . '%"></i></div>' . ($i ? esc_html(number_format_i18n(100 * $rate, 1)) . ' %' : '–') . '</td><td>' . ($i ? esc_html(number_format_i18n(100 * $lo, 1) . ' – ' . number_format_i18n(100 * $hi, 1)) . ' %' : '–') . '</td></tr>';
         }
-        $h .= '<p>Ein Sieger gilt erst ab etwa 300 Einblendungen je Variante und wenn sich die 95-%-Bereiche nicht überlappen. Es wird nichts automatisch umgestellt.</p>';
-        $top = $wpdb->get_results("SELECT ziel, SUM(n) n FROM $t WHERE ereignis='c' AND bereich='wl' AND tag >= (CURDATE() - INTERVAL 30 DAY) GROUP BY ziel ORDER BY n DESC LIMIT 10", ARRAY_A);
-        if ($top) {
-            $h .= '<h3>Meistgeklickte Weiterlesen-Ziele</h3><ol>';
-            foreach ($top as $r) $h .= '<li>' . esc_html(get_the_title((int) $r['ziel'])) . ' (' . (int) $r['n'] . ')</li>';
-            $h .= '</ol>';
-        }
+        $h .= '</tbody></table>';
+        $voll = true; foreach ($m as $e) if (($e['i'] ?? 0) < 300) $voll = false;
+        $h .= '<p class="d">' . ($voll ? 'Genug Einblendungen je Variante. Ein Sieger ist erst klar, wenn sich die 95-%-Bereiche nicht überlappen.' : 'Vorläufig: unter 300 Einblendungen je Variante, noch kein Sieger erkennbar.') . ' Es wird nichts automatisch umgestellt.</p></div>';
         return $h;
     }
 
     public static function seite() {
         if (!current_user_can('manage_options')) return;
         $o = self::opt();
-        $f = function ($n, $l, $typ = 'text', $extra = '') use ($o) {
-            return '<tr><th><label for="' . esc_attr($n) . '">' . esc_html($l) . '</label></th><td><input id="' . esc_attr($n) . '" name="' . esc_attr($n) . '" type="' . $typ . '" value="' . esc_attr($o[$n]) . '" class="regular-text" ' . $extra . '></td></tr>';
+        $push = array_pad(array_values((array) $o['push']), 5, 0);
+        list($vor, $vquelle) = self::vorschlaege(5);
+        $ck = function ($n, $l, $d = '') use ($o) {
+            return '<label class="ab1-ck"><input type="checkbox" name="' . esc_attr($n) . '" value="1"' . checked($o[$n], 1, false) . '> <b>' . esc_html($l) . '</b>' . ($d ? '<span class="d">' . esc_html($d) . '</span>' : '') . '</label>';
         };
-        $ck = function ($n, $l) use ($o) {
-            return '<tr><th>' . esc_html($l) . '</th><td><label><input type="checkbox" name="' . esc_attr($n) . '" value="1"' . checked($o[$n], 1, false) . '> an</label></td></tr>';
+        $f = function ($n, $l, $w = 'regular-text') use ($o) {
+            return '<label class="ab1-f">' . esc_html($l) . '<input name="' . esc_attr($n) . '" value="' . esc_attr($o[$n]) . '" class="' . $w . '"></label>';
         };
-        echo '<div class="wrap"><h1>Weiterlesen und Exit-Popup (1AB)</h1>';
-        if (!empty($_GET['ok'])) echo '<div class="notice notice-success"><p>Gespeichert.</p></div>';
+        echo '<style>.ab1-w{max-width:1000px}.ab1-karte{background:#fff;border:1px solid #dcdcde;border-radius:12px;padding:16px 20px;margin:16px 0}.ab1-karte h3{margin:0 0 4px;font-size:1.15em}.d{display:block;color:#646970;margin:2px 0 8px;font-size:12.5px}'
+            . '.ab1-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}.ab1-slot{border:2px solid #e3e8e0;border-radius:12px;padding:10px;background:#f8faf7;position:relative}.ab1-slot .b{position:absolute;top:-10px;left:10px;background:#2f7d32;color:#fff;border-radius:10px;padding:0 9px;font-weight:700}'
+            . '.ab1-slot img{width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:8px;background:#e5eadf}.ab1-slot .t{font-weight:600;min-height:2.6em;margin:6px 0}.ab1-slot input[type=search]{width:100%}.ab1-erg{list-style:none;margin:2px 0 0;padding:0;max-height:180px;overflow:auto;background:#fff;border:1px solid #dcdcde;border-radius:6px}.ab1-erg:empty{display:none}.ab1-erg li{padding:6px 8px;cursor:pointer;margin:0}.ab1-erg li:hover{background:#eef5ec}'
+            . '.ab1-vor{display:flex;flex-wrap:wrap;gap:8px}.ab1-vor button{border:1px solid #2f7d32;background:#fff;color:#2f7d32;border-radius:20px;padding:4px 12px;cursor:pointer}.ab1-vor button:hover{background:#2f7d32;color:#fff}'
+            . '.ab1-ck{display:block;margin:8px 0}.ab1-f{display:block;margin:8px 0}.ab1-f input{display:block}.ab1-t{border-collapse:collapse;width:100%}.ab1-t th,.ab1-t td{text-align:left;padding:7px 8px;border-bottom:1px solid #eee}.ab1-bar{height:8px;background:#eef2ec;border-radius:4px;margin-bottom:3px;width:140px}.ab1-bar i{display:block;height:100%;background:#2f7d32;border-radius:4px}</style>';
+        echo '<div class="wrap ab1-w"><h1>Weiterlesen und Exit-Popup (1AB)</h1>';
+        if (!empty($_GET['ok'])) echo '<div class="notice notice-success is-dismissible"><p>Gespeichert.</p></div>';
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="ab1_wl_speichern">';
         wp_nonce_field('ab1_wl_s');
-        echo '<table class="form-table">' . $ck('weiterlesen', 'Weiterlesen-Box unter Artikeln') . $ck('popup', 'Exit-Popup') . $ck('ab', 'A/B-Test für die zwei gepushten Artikel')
-            . $f('ueberschrift', 'Überschrift der Box') . $f('anzahl', 'Anzahl Karten (1–6)', 'number')
-            . $f('push_a', 'Gepushter Artikel A (Beitrags-ID)', 'number') . $f('push_b', 'Gepushter Artikel B (Beitrags-ID)', 'number')
-            . $ck('teaser_oben', 'Kleiner Teaser weiter oben (Testvariante)') . $f('teaser_absatz', 'Teaser nach Absatz Nr.', 'number')
-            . $f('pop_sek', 'Popup frühestens nach Sekunden', 'number') . $f('pop_tage', 'Popup höchstens alle … Tage je Besucher', 'number')
-            . $f('pop_titel', 'Popup-Titel') . $f('pop_knopf', 'Popup-Knopftext') . $f('pop_nein', 'Text „Nicht mehr anzeigen“') . $f('pop_varianten', 'Popup-Varianten (Buchstaben a–d)')
-            . '</table><p><button class="button button-primary">Speichern</button></p></form>';
-        echo '<p><em>Beide Funktionen sind standardmäßig aus. Contextual Related Posts bleibt aktiv, bis es nach dem Test bewusst abgeschaltet wird.</em></p>';
-        echo self::bericht() . '</div>';
+        echo '<div class="ab1-karte"><h3>Schalter</h3><p class="d">Beides ist standardmäßig aus. Contextual Related Posts bleibt aktiv, bis es nach dem Test bewusst abgeschaltet wird.</p>'
+            . $ck('weiterlesen', 'Weiterlesen-Box unter den Artikeln') . $ck('popup', 'Exit-Popup') . $ck('ab', 'A/B-Test der gepushten Artikel in der Weiterlesen-Box')
+            . $ck('teaser_oben', 'Kleinen Teaser weiter oben im Artikel testen', 'Nur zwischen normalen Absätzen, nie in Listen, Tabellen oder Boxen.') . '</div>';
+        echo '<div class="ab1-karte"><h3>Gepushte Artikel (bis zu fünf, Varianten A bis E)</h3><p class="d">Tippe einen Titel in ein Feld und wähle den Artikel. Jeder gepushte Artikel erscheint im Popup und auf Platz 1 der Weiterlesen-Box. Welcher, entscheidet je Besucher die serverseitige Kennung plus Tageszahl (wechselt täglich, nichts im Browser).</p><div class="ab1-slots">';
+        foreach ($push as $i => $pid) {
+            $L = chr(65 + $i);
+            $bild = $pid ? get_the_post_thumbnail_url($pid, 'medium') : '';
+            echo '<div class="ab1-slot" data-i="' . $i . '"><span class="b">' . $L . '</span>' . ($bild ? '<img src="' . esc_url($bild) . '" alt="">' : '<img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">')
+                . '<div class="t">' . ($pid ? esc_html(get_the_title($pid)) : 'noch leer') . '</div><input type="hidden" name="push[' . $i . ']" value="' . (int) $pid . '">'
+                . '<input type="search" placeholder="Artikel suchen …" autocomplete="off"><ul class="ab1-erg"></ul><a href="#" class="ab1-weg">entfernen</a></div>';
+        }
+        echo '</div>' . $ck('push_themenfrei', 'Gepushte Artikel auch unter Artikeln anderer Kategorie zeigen', 'Sprache, noindex und gleiches Fokus-Keyword werden weiter geprüft. Aus = nur bei gleicher Kategorie, dann sehen weniger Seiten den Test.') . '</div>';
+        echo '<div class="ab1-karte"><h3>Vorschläge nach Besucherzahlen</h3><p class="d">Meistbesuchte Artikel der letzten 30 Tage (Quelle: ' . esc_html($vquelle) . '), höchstens zwei je Kategorie. Klick übernimmt in den nächsten freien Platz.</p><div class="ab1-vor">';
+        foreach ($vor as $r) echo '<button type="button" data-id="' . (int) $r['id'] . '" data-t="' . esc_attr(get_the_title($r['id'])) . '" data-b="' . esc_url(get_the_post_thumbnail_url($r['id'], 'medium')) . '">' . esc_html(get_the_title($r['id'])) . ($r['aufrufe'] ? ' · ' . (int) $r['aufrufe'] : '') . '</button>';
+        echo '</div></div>';
+        echo '<div class="ab1-karte"><h3>Einstellungen</h3>' . $f('ueberschrift', 'Überschrift der Box') . $f('anzahl', 'Anzahl Karten (1–6)', 'small-text') . $f('teaser_absatz', 'Teaser nach Absatz Nr.', 'small-text')
+            . $f('pop_sek', 'Popup frühestens nach … Sekunden', 'small-text') . $f('pop_tage', 'Popup höchstens alle … Tage je Besucher', 'small-text')
+            . $f('pop_titel', 'Popup-Titel') . $f('pop_knopf', 'Popup-Knopftext') . $f('pop_nein', 'Text „Nicht mehr anzeigen“') . '</div>';
+        echo '<p><button class="button button-primary button-hero">Speichern</button></p></form>';
+        echo '<h2>Vorläufige Ergebnisse, letzte 30 Tage</h2>'
+            . self::ergebnis_tabelle('pu', 'Exit-Popup', 'Eine Einblendung zählt, wenn das Popup erscheint; ein Klick, wenn der Artikel angeklickt wird.')
+            . self::ergebnis_tabelle('wl', 'Weiterlesen-Box, Platz 1', 'Einblendung zählt, wenn mindestens die Hälfte der Box im Sichtbereich war.')
+            . self::ergebnis_tabelle('tz', 'Teaser weiter oben', 'Nur wenn der Teaser getestet wird.');
+        $z = $GLOBALS['wpdb']->prefix . 'ab1_wl_zaehler';
+        $top = $GLOBALS['wpdb']->get_results("SELECT ziel, SUM(n) n FROM $z WHERE ereignis='c' AND bereich='wl' AND tag >= (CURDATE() - INTERVAL 30 DAY) GROUP BY ziel ORDER BY n DESC LIMIT 10", ARRAY_A);
+        if ($top) { echo '<div class="ab1-karte"><h3>Meistgeklickte Weiterlesen-Ziele</h3><ol>'; foreach ($top as $r) echo '<li>' . esc_html(get_the_title((int) $r['ziel'])) . ' (' . (int) $r['n'] . ')</li>'; echo '</ol></div>'; }
+        $api = esc_url_raw(rest_url('wp/v2/posts'));
+        echo '</div><script>(function(){var A=' . wp_json_encode($api) . ',N=' . wp_json_encode(wp_create_nonce('wp_rest')) . ';'
+            . 'function set(sl,id,t,b){sl.querySelector("input[type=hidden]").value=id;sl.querySelector(".t").textContent=t||"noch leer";if(b)sl.querySelector("img").src=b;sl.querySelector(".ab1-erg").innerHTML="";}'
+            . '[].forEach.call(document.querySelectorAll(".ab1-slot"),function(sl){var inp=sl.querySelector("input[type=search]"),ul=sl.querySelector(".ab1-erg"),tm;'
+            . 'inp.addEventListener("input",function(){clearTimeout(tm);var q=inp.value.trim();if(q.length<2){ul.innerHTML="";return}tm=setTimeout(function(){fetch(A+"?per_page=8&_fields=id,title,jetpack_featured_media_url&search="+encodeURIComponent(q),{headers:{"X-WP-Nonce":N}}).then(function(r){return r.json()}).then(function(j){ul.innerHTML="";j.forEach(function(p){var li=document.createElement("li");li.textContent=p.title.rendered.replace(/<[^>]+>/g,"");li.onclick=function(){set(sl,p.id,li.textContent,"");inp.value=""};ul.appendChild(li)})})},250)});'
+            . 'sl.querySelector(".ab1-weg").onclick=function(e){e.preventDefault();set(sl,0,"","")}});'
+            . '[].forEach.call(document.querySelectorAll(".ab1-vor button"),function(b){b.onclick=function(){var s=[].slice.call(document.querySelectorAll(".ab1-slot")).filter(function(x){return x.querySelector("input[type=hidden]").value==="0"})[0];if(s)set(s,b.getAttribute("data-id"),b.getAttribute("data-t"),b.getAttribute("data-b"))}})})();</script>';
     }
 }
 

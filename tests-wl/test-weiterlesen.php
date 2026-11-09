@@ -24,7 +24,11 @@ list($lo,$hi) = AB1_Weiterlesen::wilson(30,300); ok($lo>0.06 && $hi<0.14 && $lo<
 $k1 = AB1_Weiterlesen::kennung('1.2.3.4','UA','g',1000); $k2 = AB1_Weiterlesen::kennung('1.2.3.4','UA','g',1000+86400);
 $k3 = AB1_Weiterlesen::kennung('1.2.3.4','UA','g',1000+700000);
 ok($k1===$k2 && $k1!==$k3 && strlen($k1)==64 && strpos($k1,'1.2.3.4')===false, 'Kennung stabil in der Woche, wechselt danach, enthält keine IP');
-$gleich = 0; for($i=0;$i<40;$i++){ if (AB1_Weiterlesen::popup_variante('b',['a','b','c','d'],$i)==='b') $gleich++; }
-ok($gleich===0, 'Popup zeigt nie dieselbe Variante wie zuletzt');
-ok(AB1_Weiterlesen::popup_variante('a',['a'],5)==='a', 'einzige Variante bleibt erlaubt');
+$v5 = ['a','b','c','d','e']; $z = [];
+for ($i = 0; $i < 400; $i++) $z[AB1_Weiterlesen::popup_variante('k'.$i, 20000, $v5)] = 1;
+ok(count($z) === 5, 'alle fünf Varianten kommen vor');
+ok(AB1_Weiterlesen::popup_variante('kx', 20000, $v5) === AB1_Weiterlesen::popup_variante('kx', 20000, $v5), 'am selben Tag stabil für denselben Besucher');
+$tage = []; for ($d = 20000; $d < 20040; $d++) $tage[AB1_Weiterlesen::popup_variante('kx', $d, $v5)] = 1;
+ok(count($tage) >= 4, 'Variante wechselt mit der Tageszahl');
+ok(AB1_Weiterlesen::popup_variante('kx', 1, ['c']) === 'c' && AB1_Weiterlesen::popup_variante('kx', 1, []) === '', 'eine oder keine Variante');
 echo $f ? "\n$f Fehler\n" : "\nAlles bestanden\n"; exit($f ? 1 : 0);
