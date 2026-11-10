@@ -12,3 +12,6 @@ Die alte Linie `schlanke-amazon-box.*` und `update.json` bleiben nur für Seiten
 
 ## Datenschutz und Aufbewahrung
 Klick-, Seiten-, A/B- und Heatmap-Daten enthalten keine IP und kein Cookie. Standardmäßig wird nichts gelöscht. Wer will, setzt `sab_aufbewahrung_tage` auf eine Tageszahl, dann werden ältere Zeilen täglich entfernt. Obergrenze der Messungen: `sab_messungen_je_minute` (Filter, Standard 600).
+
+## 1AB-Test-Statistik (Unterordner `statistik/`)
+Zweites Plugin im selben Repo (Ordner `mini-statistik/`, Hauptdatei `mini-statistik.php`). Update-Quelle: `statistik/update.json` mit Version, ZIP-Adresse (`statistik/mini-statistik.zip`) und `sha256`. Release: Version in Kopfzeile und `const VERSION` erhöhen, ZIP mit Ordner `mini-statistik/` bauen, nach `statistik/mini-statistik.zip` legen, `sha256sum` in `statistik/update.json` eintragen. Es gibt nur dieses eine Repo für beide Plugins.
