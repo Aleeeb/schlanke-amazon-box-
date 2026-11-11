@@ -13,7 +13,7 @@ Der Hauptzweig, das Verzeichnis `statistik/` und die Live-Seiten sind davon nich
 ## Noch offen vor der Einreichung
 
 - Das offizielle Werkzeug „Plugin Check“ konnte hier nicht laufen (wordpress.org ist aus der Arbeitsumgebung nicht erreichbar). Es muss einmal auf einer echten Installation laufen.
-- Test mit MySQL/MariaDB statt SQLite und mit einem Cache-Plugin.
+- Test mit MySQL/MariaDB statt SQLite und mit einem Cache-Plugin. Dabei auch das Löschen des Plugins prüfen: Einstellungen und Zeitplan wurden im Test entfernt, das Entfernen der Tabelle ließ sich nicht prüfen, weil der SQLite-Testtreiber `DROP TABLE` grundsätzlich nicht ausführt.
 - Endgültiger Name. Bei einem anderen Namen ändern sich Ordner, Textdomain und Hauptdatei.
 - `Contributors` in `readme.txt` (Benutzername bei WordPress.org) eintragen.
 - Bildschirmfotos und Symbol für das Verzeichnis.
