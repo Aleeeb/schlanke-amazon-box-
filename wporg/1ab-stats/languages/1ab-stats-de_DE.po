@@ -1,0 +1,228 @@
+# Copyright (C) 2026 Alexander Boeckmann
+# This file is distributed under the GPLv2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: 1AB Stats 1.0.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/1ab-stats\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: German\n"
+"Language: de_DE\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-11-11T01:47:47+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"X-Domain: 1ab-stats\n"
+
+#. Plugin Name of the plugin
+#: 1ab-stats.php
+#: includes/class-oneab-stats-admin.php:34
+#: includes/class-oneab-stats-admin.php:35
+#: includes/class-oneab-stats-admin.php:105
+msgid "1AB Stats"
+msgstr "1AB Stats"
+
+#. Description of the plugin
+#: 1ab-stats.php
+msgid "Cookieless visitor statistics with affiliate click tracking. No cookies, no stored IP addresses, all data stays on your own server."
+msgstr "Besucherstatistik ohne Cookies mit Klickmessung für Partnerlinks. Keine Cookies, keine gespeicherten IP-Adressen, alle Daten bleiben auf dem eigenen Server."
+
+#. Author of the plugin
+#: 1ab-stats.php
+msgid "Alexander Boeckmann"
+msgstr "Alexander Boeckmann"
+
+#: includes/class-oneab-stats-admin.php:63
+msgid "Statistics"
+msgstr "Statistik"
+
+#: includes/class-oneab-stats-admin.php:72
+msgid "You are not allowed to change these settings."
+msgstr "Du darfst diese Einstellungen nicht ändern."
+
+#: includes/class-oneab-stats-admin.php:107
+msgid "Overview"
+msgstr "Übersicht"
+
+#: includes/class-oneab-stats-admin.php:108
+msgid "Settings"
+msgstr "Einstellungen"
+
+#: includes/class-oneab-stats-admin.php:113
+msgid "Settings saved."
+msgstr "Einstellungen gespeichert."
+
+#: includes/class-oneab-stats-admin.php:132
+msgid "Data retention"
+msgstr "Aufbewahrung"
+
+#: includes/class-oneab-stats-admin.php:133
+#: includes/class-oneab-stats-admin.php:137
+msgid "days"
+msgstr "Tage"
+
+#: includes/class-oneab-stats-admin.php:134
+msgid "0 keeps the data without limit. Otherwise older entries are deleted once a day."
+msgstr "0 bewahrt die Daten unbegrenzt auf. Sonst werden ältere Einträge einmal am Tag gelöscht."
+
+#: includes/class-oneab-stats-admin.php:136
+msgid "Recognise returning visitors for"
+msgstr "Wiederkehrende Besucher erkennen für"
+
+#: includes/class-oneab-stats-admin.php:138
+msgid "After this time the random value behind the visitor identifier is replaced. Older identifiers can then no longer be matched. 1 is the most privacy-friendly choice."
+msgstr "Nach dieser Zeit wird der Zufallswert hinter der Besucher-Kennung ersetzt. Ältere Kennungen lassen sich dann nicht mehr zuordnen. 1 ist die datensparsamste Wahl."
+
+#: includes/class-oneab-stats-admin.php:140
+msgid "More affiliate link domains"
+msgstr "Weitere Domains für Partnerlinks"
+
+#: includes/class-oneab-stats-admin.php:142
+msgid "One domain per line. Clicks on links to Amazon and eBay are always counted."
+msgstr "Eine Domain je Zeile. Klicks auf Links zu Amazon und eBay werden immer gezählt."
+
+#: includes/class-oneab-stats-admin.php:144
+msgid "Proxy or CDN"
+msgstr "Proxy oder CDN"
+
+#: includes/class-oneab-stats-admin.php:145
+msgid "My site is behind a proxy or CDN that passes the visitor address in the X-Forwarded-For header"
+msgstr "Meine Seite liegt hinter einem Proxy oder CDN, der die Besucher-Adresse in der Kopfzeile X-Forwarded-For weitergibt"
+
+#: includes/class-oneab-stats-admin.php:146
+msgid "Only tick this if it is true for your site. Otherwise all visitors behind the proxy may be counted as one, or visitor numbers can be inflated by forged headers."
+msgstr "Nur ankreuzen, wenn das für deine Seite zutrifft. Sonst zählen womöglich alle Besucher hinter dem Proxy als einer, oder gefälschte Kopfzeilen treiben die Besucherzahl hoch."
+
+#: includes/class-oneab-stats-admin.php:148
+msgid "What is counted"
+msgstr "Was gezählt wird"
+
+#: includes/class-oneab-stats-admin.php:148
+msgid "Logged-in users, previews, robots and browsers that send \"Do Not Track\" are not counted. No cookie is set and nothing is stored in the visitor's browser. The visitor address is never stored."
+msgstr "Angemeldete Benutzer, Vorschauen, Roboter und Browser mit „Do Not Track“ werden nicht gezählt. Es wird kein Cookie gesetzt und nichts im Browser des Besuchers gespeichert. Die Adresse des Besuchers wird nie gespeichert."
+
+#: includes/class-oneab-stats-admin.php:198
+msgid "no data for the previous period"
+msgstr "keine Daten für den Vorzeitraum"
+
+#. translators: %s: change in percent with sign, e.g. +12 %
+#: includes/class-oneab-stats-admin.php:203
+#, php-format
+msgid "%s vs. previous period"
+msgstr "%s zum Vorzeitraum"
+
+#: includes/class-oneab-stats-admin.php:219
+msgid "Nothing counted yet."
+msgstr "Noch nichts gezählt."
+
+#: includes/class-oneab-stats-admin.php:226
+msgid "Count"
+msgstr "Anzahl"
+
+#: includes/class-oneab-stats-admin.php:228
+#: includes/class-oneab-stats-admin.php:329
+msgid "Visitors"
+msgstr "Besucher"
+
+#: includes/class-oneab-stats-admin.php:252
+#: includes/class-oneab-stats-admin.php:275
+msgid "Unknown"
+msgstr "Unbekannt"
+
+#: includes/class-oneab-stats-admin.php:271
+msgid "Phone"
+msgstr "Handy"
+
+#: includes/class-oneab-stats-admin.php:272
+msgid "Tablet"
+msgstr "Tablet"
+
+#: includes/class-oneab-stats-admin.php:273
+msgid "Computer"
+msgstr "Computer"
+
+#. translators: %d: number of days
+#: includes/class-oneab-stats-admin.php:322
+#, php-format
+msgid "%d day"
+msgid_plural "%d days"
+msgstr[0] "%d Tag"
+msgstr[1] "%d Tage"
+
+#: includes/class-oneab-stats-admin.php:328
+msgid "Page views"
+msgstr "Seitenaufrufe"
+
+#: includes/class-oneab-stats-admin.php:330
+msgid "Affiliate link clicks"
+msgstr "Klicks auf Partnerlinks"
+
+#: includes/class-oneab-stats-admin.php:343
+msgid "Most viewed pages"
+msgstr "Meistbesuchte Seiten"
+
+#: includes/class-oneab-stats-admin.php:343
+#: includes/class-oneab-stats-admin.php:347
+msgid "Page"
+msgstr "Seite"
+
+#: includes/class-oneab-stats-admin.php:344
+msgid "Where visitors come from"
+msgstr "Woher die Besucher kommen"
+
+#: includes/class-oneab-stats-admin.php:344
+msgid "Website"
+msgstr "Website"
+
+#: includes/class-oneab-stats-admin.php:345
+msgid "Countries"
+msgstr "Länder"
+
+#: includes/class-oneab-stats-admin.php:345
+msgid "Country"
+msgstr "Land"
+
+#: includes/class-oneab-stats-admin.php:346
+msgid "Devices"
+msgstr "Geräte"
+
+#: includes/class-oneab-stats-admin.php:346
+msgid "Device"
+msgstr "Gerät"
+
+#: includes/class-oneab-stats-admin.php:347
+msgid "Affiliate link clicks by page"
+msgstr "Klicks auf Partnerlinks je Seite"
+
+#: includes/class-oneab-stats-admin.php:348
+msgid "Affiliate link clicks by target"
+msgstr "Klicks auf Partnerlinks je Ziel"
+
+#: includes/class-oneab-stats-admin.php:348
+msgid "Target"
+msgstr "Ziel"
+
+#: includes/class-oneab-stats-admin.php:351
+msgid "Visitors are counted per day. Someone who comes on two days counts twice in the total. Countries are estimated from the time zone and language of the browser, not from the address."
+msgstr "Besucher werden je Tag gezählt. Wer an zwei Tagen kommt, zählt in der Summe zweimal. Länder werden aus Zeitzone und Sprache des Browsers geschätzt, nicht aus der Adresse."
+
+#: includes/class-oneab-stats-admin.php:369
+msgid "Direct or unknown"
+msgstr "Direkt oder unbekannt"
+
+#: includes/class-oneab-stats-admin.php:387
+#: includes/class-oneab-stats-admin.php:388
+msgid "Page views per day"
+msgstr "Seitenaufrufe je Tag"
+
+#. translators: 1: date, 2: page views, 3: visitors, 4: affiliate link clicks
+#: includes/class-oneab-stats-admin.php:394
+#, php-format
+msgid "%1$s: %2$s page views, %3$s visitors, %4$s affiliate link clicks"
+msgstr "%1$s: %2$s Seitenaufrufe, %3$s Besucher, %4$s Klicks auf Partnerlinks"
+
+#: includes/class-oneab-stats-admin.php:401
+msgid "at most per day"
+msgstr "höchstens je Tag"
