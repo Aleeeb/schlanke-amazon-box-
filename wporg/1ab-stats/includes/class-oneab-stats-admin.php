@@ -93,7 +93,7 @@ final class OneAB_Stats_Admin {
 		}
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only view parameters.
 		$tab  = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'report';
-		$tab  = in_array( $tab, array( 'next', 'settings' ), true ) ? $tab : 'report';
+		$tab  = in_array( $tab, array( 'next', 'elements', 'settings' ), true ) ? $tab : 'report';
 		$days = isset( $_GET['days'] ) ? absint( $_GET['days'] ) : 30;
 		$days = in_array( $days, array( 7, 30, 90, 365 ), true ) ? $days : 30;
 		$done = ! empty( $_GET['saved'] );
@@ -104,6 +104,7 @@ final class OneAB_Stats_Admin {
 		echo '<nav class="nav-tab-wrapper">';
 		echo '<a class="nav-tab' . ( 'report' === $tab ? ' nav-tab-active' : '' ) . '" href="' . esc_url( $base ) . '">' . esc_html__( 'Overview', '1ab-stats' ) . '</a>';
 		echo '<a class="nav-tab' . ( 'next' === $tab ? ' nav-tab-active' : '' ) . '" href="' . esc_url( $base . '&tab=next' ) . '">' . esc_html__( 'Read next and A/B test', '1ab-stats' ) . '</a>';
+		echo '<a class="nav-tab' . ( 'elements' === $tab ? ' nav-tab-active' : '' ) . '" href="' . esc_url( $base . '&tab=elements' ) . '">' . esc_html__( 'Buttons, images and cards', '1ab-stats' ) . '</a>';
 		echo '<a class="nav-tab' . ( 'settings' === $tab ? ' nav-tab-active' : '' ) . '" href="' . esc_url( $base . '&tab=settings' ) . '">' . esc_html__( 'Settings', '1ab-stats' ) . '</a>';
 		echo '</nav>';
 
@@ -114,6 +115,8 @@ final class OneAB_Stats_Admin {
 			self::settings_form();
 		} elseif ( 'next' === $tab ) {
 			OneAB_Stats_Next::tab();
+		} elseif ( 'elements' === $tab ) {
+			OneAB_Stats_Elements::tab();
 		} else {
 			self::report( $days, $base );
 		}
@@ -367,6 +370,10 @@ final class OneAB_Stats_Admin {
 		 * @param string $to   Last day of the period (Y-m-d).
 		 */
 		do_action( 'oneab_stats_report_after', $from, $to );
+
+		if ( oneab_stats_fs()->is_not_paying() ) {
+			echo '<p class="oneab-pro">' . esc_html__( 'The Pro version adds the clicks for every single product.', '1ab-stats' ) . ' <a href="' . esc_url( oneab_stats_fs()->get_upgrade_url() ) . '">' . esc_html__( 'See what Pro offers', '1ab-stats' ) . '</a></p>';
+		}
 	}
 
 	/**

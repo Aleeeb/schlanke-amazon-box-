@@ -6,6 +6,8 @@ Der Hauptzweig, das Verzeichnis `statistik/` und die Live-Seiten sind davon nich
 
 ## Stand
 
+- Seit 11.11.2026 (zweiter Schritt): Bausteine „Knopf, Bild, Karte“ mit eigenem A/B-Test je Baustein, einsetzbar als Block, Shortcode `[oneab_element id="1"]` oder klassisches Widget. Variante A kommt vom Server, B wird im Browser ausgelost, ohne Flackern und ohne Speicherung. Test mit 40 echten Browser-Besuchen: Zähler stimmen genau mit den ausgelosten Varianten und Klicks überein.
+- Freemius-SDK 2.13.5 ist eingebunden (`vendor/freemius`, Produkt 44600). Die Datei `uninstall.php` ist dafür entfallen; das Aufräumen hängt jetzt am Freemius-Ereignis `after_uninstall`. Erster Pro-Teil: Klicks je Produkt (`includes/class-oneab-stats-products__premium_only.php`, wird von Freemius aus der Gratis-Fassung entfernt).
 - Seit 11.11.2026 zusätzlich: Heatmap (Lesetiefe, Verweildauer, Klickpunkte als reine Summen) und Weiterlesen-Karten mit A/B-Test (Überschrift, Aussehen, Platz; Auslosung im Browser ohne Speicherung, Tageszähler).
 - Zweiter Test auf WordPress 7.1.4 mit MariaDB 10.11: 30 echte Browser-Besuche, Zähler für Heatmap und A/B-Test stimmen, Ansichten geprüft, Löschen entfernt alle Tabellen. Die Heatmap-Meldung beim Verlassen der Seite ließ sich im ferngesteuerten Testbrowser nur über das Ereignis „Seite verborgen“ auslösen, nicht über eine echte Navigation; das bitte einmal auf einer echten Seite gegenprüfen.
 
@@ -20,5 +22,6 @@ Der Hauptzweig, das Verzeichnis `statistik/` und die Live-Seiten sind davon nich
 - Endgültiger Name. Bei einem anderen Namen ändern sich Ordner, Textdomain und Hauptdatei.
 - `Contributors` in `readme.txt` (Benutzername bei WordPress.org) eintragen.
 - Bildschirmfotos und Symbol für das Verzeichnis.
-- Freemius-SDK einbinden (braucht Produkt-ID und öffentlichen Schlüssel aus Alexanders Freemius-Konto) und festlegen, welche Teile Pro werden.
-- Pro als getrenntes Zusatz-Plugin (Anknüpfpunkte: Aktionen `oneab_stats_event` und `oneab_stats_report_after`).
+- Festlegen, welche Teile Pro werden (bisher nur Klicks je Produkt). WordPress.org erlaubt in der Gratis-Fassung keine gesperrten Funktionen und keine künstlichen Obergrenzen; Pro muss also zusätzlicher Code sein.
+- Plan „Pro“ in Freemius fertig anlegen (Stand 11.11.: nur 4,90 € monatlich für 1 Seite gespeichert) und den Baustein in `1ab-stats.php` mit dem Schnipsel aus dem Freemius-Konto abgleichen.
+- Einwilligungsseite von Freemius auf einer echten Installation prüfen (in der Arbeitsumgebung ist Freemius nicht erreichbar).

@@ -176,7 +176,11 @@ final class OneAB_Stats_Tracker {
 			OneAB_Stats_Heat::store( $data, $path );
 			return $none;
 		} elseif ( 'ab' === $type ) {
-			OneAB_Stats_Next::count( $data );
+			if ( isset( $data['id'] ) && (int) $data['id'] >= OneAB_Stats_Elements::FIRST_TEST ) {
+				OneAB_Stats_Elements::count( $data );
+			} else {
+				OneAB_Stats_Next::count( $data );
+			}
 			return $none;
 		} else {
 			/**

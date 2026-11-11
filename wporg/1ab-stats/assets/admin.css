@@ -24,3 +24,8 @@
 .oneab-stats .oneab-empty { color: #50575e; margin: 0; }
 .oneab-stats .oneab-heat { margin-left: 8px; font-size: 12px; white-space: nowrap; }
 .oneab-stats .oneab-card select, .oneab-stats .oneab-card input[type="text"] { max-width: 100%; }
+.oneab-stats .oneab-pro { margin-top: 12px; }
+.oneab-stats .oneab-pick__preview { display: block; max-width: 220px; height: auto; margin: 0 0 8px; border-radius: 4px; }
+.oneab-stats .oneab-pick__clear, .oneab-stats .oneab-delete { color: #b32d2e; margin-left: 8px; }
+.oneab-stats .oneab-preview { max-width: 520px; }
+.oneab-stats .oneab-card textarea { max-width: 100%; }

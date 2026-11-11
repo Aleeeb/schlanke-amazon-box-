@@ -129,6 +129,23 @@ final class OneAB_Stats {
 	}
 
 	/**
+	 * Removes all data and settings when the plugin is deleted.
+	 */
+	public static function uninstall() {
+		global $wpdb;
+		foreach ( array( self::table(), OneAB_Stats_Heat::table(), OneAB_Stats_Next::table() ) as $table ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- Removing the plugin's own tables.
+			$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $table ) );
+		}
+		delete_option( self::OPTION );
+		delete_option( 'oneab_stats_salt' );
+		delete_option( 'oneab_stats_elements' );
+		delete_option( 'oneab_stats_test_seq' );
+		delete_option( 'oneab_stats_db' );
+		wp_clear_scheduled_hook( 'oneab_stats_cleanup' );
+	}
+
+	/**
 	 * Updates the table after a plugin update.
 	 */
 	public static function maybe_upgrade() {

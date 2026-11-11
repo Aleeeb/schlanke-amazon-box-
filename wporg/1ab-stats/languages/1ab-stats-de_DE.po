@@ -1,18 +1,16 @@
-# Copyright (C) 2026 Alexander Boeckmann
-# This file is distributed under the GPLv2 or later.
 msgid ""
 msgstr ""
 "Project-Id-Version: 1AB Stats 1.0.0\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/1ab-stats\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: German\n"
-"Language: de_DE\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "POT-Creation-Date: 2026-11-11T06:58:32+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Language: de_DE\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: 1ab-stats\n"
 
@@ -39,7 +37,8 @@ msgid "Statistics"
 msgstr "Statistik"
 
 #: includes/class-oneab-stats-admin.php:72
-#: includes/class-oneab-stats-next.php:293
+#: includes/class-oneab-stats-elements.php:395
+#: includes/class-oneab-stats-next.php:324
 msgid "You are not allowed to change these settings."
 msgstr "Du darfst diese Einstellungen nicht ändern."
 
@@ -51,201 +50,202 @@ msgstr "Übersicht"
 msgid "Read next and A/B test"
 msgstr "Weiterlesen und A/B-Test"
 
-#: includes/class-oneab-stats-admin.php:107
+#: includes/class-oneab-stats-admin.php:108
 msgid "Settings"
 msgstr "Einstellungen"
 
-#: includes/class-oneab-stats-admin.php:111
+#: includes/class-oneab-stats-admin.php:112
 msgid "Settings saved."
 msgstr "Einstellungen gespeichert."
 
-#: includes/class-oneab-stats-admin.php:133
+#: includes/class-oneab-stats-admin.php:136
 msgid "Data retention"
 msgstr "Aufbewahrung"
 
-#: includes/class-oneab-stats-admin.php:134
-#: includes/class-oneab-stats-admin.php:138
+#: includes/class-oneab-stats-admin.php:137
+#: includes/class-oneab-stats-admin.php:141
 msgid "days"
 msgstr "Tage"
 
-#: includes/class-oneab-stats-admin.php:135
+#: includes/class-oneab-stats-admin.php:138
 msgid "0 keeps the data without limit. Otherwise older entries are deleted once a day."
 msgstr "0 bewahrt die Daten unbegrenzt auf. Sonst werden ältere Einträge einmal am Tag gelöscht."
 
-#: includes/class-oneab-stats-admin.php:137
+#: includes/class-oneab-stats-admin.php:140
 msgid "Recognise returning visitors for"
 msgstr "Wiederkehrende Besucher erkennen für"
 
-#: includes/class-oneab-stats-admin.php:139
+#: includes/class-oneab-stats-admin.php:142
 msgid "After this time the random value behind the visitor identifier is replaced. Older identifiers can then no longer be matched. 1 is the most privacy-friendly choice."
 msgstr "Nach dieser Zeit wird der Zufallswert hinter der Besucher-Kennung ersetzt. Ältere Kennungen lassen sich dann nicht mehr zuordnen. 1 ist die datensparsamste Wahl."
 
-#: includes/class-oneab-stats-admin.php:141
+#: includes/class-oneab-stats-admin.php:144
 msgid "More affiliate link domains"
 msgstr "Weitere Domains für Partnerlinks"
 
-#: includes/class-oneab-stats-admin.php:143
+#: includes/class-oneab-stats-admin.php:146
 msgid "One domain per line. Clicks on links to Amazon and eBay are always counted."
 msgstr "Eine Domain je Zeile. Klicks auf Links zu Amazon und eBay werden immer gezählt."
 
-#: includes/class-oneab-stats-admin.php:145
-#: includes/class-oneab-stats-admin.php:242
+#: includes/class-oneab-stats-admin.php:148
+#: includes/class-oneab-stats-admin.php:245
 #: includes/class-oneab-stats-heat.php:199
 msgid "Heatmap"
 msgstr "Heatmap"
 
-#: includes/class-oneab-stats-admin.php:146
+#: includes/class-oneab-stats-admin.php:149
 msgid "Count reading depth, time spent and click positions per page"
 msgstr "Lesetiefe, Verweildauer und Klickpunkte je Seite zählen"
 
-#: includes/class-oneab-stats-admin.php:147
+#: includes/class-oneab-stats-admin.php:150
 msgid "Only totals per page, day and device class are stored, nothing about single visitors. Open a heatmap from the list of most viewed pages."
 msgstr "Gespeichert werden nur Summen je Seite, Tag und Geräteart, nichts über einzelne Besucher. Die Heatmap öffnest du aus der Liste der meistbesuchten Seiten."
 
-#: includes/class-oneab-stats-admin.php:149
+#: includes/class-oneab-stats-admin.php:152
 msgid "Proxy or CDN"
 msgstr "Proxy oder CDN"
 
-#: includes/class-oneab-stats-admin.php:150
+#: includes/class-oneab-stats-admin.php:153
 msgid "My site is behind a proxy or CDN that passes the visitor address in the X-Forwarded-For header"
 msgstr "Meine Seite liegt hinter einem Proxy oder CDN, der die Besucher-Adresse in der Kopfzeile X-Forwarded-For weitergibt"
 
-#: includes/class-oneab-stats-admin.php:151
+#: includes/class-oneab-stats-admin.php:154
 msgid "Only tick this if it is true for your site. Otherwise all visitors behind the proxy may be counted as one, or visitor numbers can be inflated by forged headers."
 msgstr "Nur ankreuzen, wenn das für deine Seite zutrifft. Sonst zählen womöglich alle Besucher hinter dem Proxy als einer, oder gefälschte Kopfzeilen treiben die Besucherzahl hoch."
 
-#: includes/class-oneab-stats-admin.php:153
+#: includes/class-oneab-stats-admin.php:156
 msgid "What is counted"
 msgstr "Was gezählt wird"
 
-#: includes/class-oneab-stats-admin.php:153
+#: includes/class-oneab-stats-admin.php:156
 msgid "Logged-in users, previews, robots and browsers that send \"Do Not Track\" are not counted. No cookie is set and nothing is stored in the visitor's browser. The visitor address is never stored."
 msgstr "Angemeldete Benutzer, Vorschauen, Roboter und Browser mit „Do Not Track“ werden nicht gezählt. Es wird kein Cookie gesetzt und nichts im Browser des Besuchers gespeichert. Die Adresse des Besuchers wird nie gespeichert."
 
-#: includes/class-oneab-stats-admin.php:203
+#: includes/class-oneab-stats-admin.php:206
 msgid "no data for the previous period"
 msgstr "keine Daten für den Vorzeitraum"
 
 #. translators: %s: change in percent with sign, e.g. +12 %
-#: includes/class-oneab-stats-admin.php:208
+#: includes/class-oneab-stats-admin.php:211
 #, php-format
 msgid "%s vs. previous period"
 msgstr "%s zum Vorzeitraum"
 
-#: includes/class-oneab-stats-admin.php:225
+#: includes/class-oneab-stats-admin.php:228
+#: includes/class-oneab-stats-products__premium_only.php:92
 msgid "Nothing counted yet."
 msgstr "Noch nichts gezählt."
 
-#: includes/class-oneab-stats-admin.php:232
+#: includes/class-oneab-stats-admin.php:235
 msgid "Count"
 msgstr "Anzahl"
 
-#: includes/class-oneab-stats-admin.php:234
-#: includes/class-oneab-stats-admin.php:339
+#: includes/class-oneab-stats-admin.php:237
+#: includes/class-oneab-stats-admin.php:342
 msgid "Visitors"
 msgstr "Besucher"
 
-#: includes/class-oneab-stats-admin.php:262
-#: includes/class-oneab-stats-admin.php:285
+#: includes/class-oneab-stats-admin.php:265
+#: includes/class-oneab-stats-admin.php:288
 msgid "Unknown"
 msgstr "Unbekannt"
 
-#: includes/class-oneab-stats-admin.php:281
+#: includes/class-oneab-stats-admin.php:284
 #: includes/class-oneab-stats-heat.php:209
 msgid "Phone"
 msgstr "Handy"
 
-#: includes/class-oneab-stats-admin.php:282
+#: includes/class-oneab-stats-admin.php:285
 msgid "Tablet"
 msgstr "Tablet"
 
-#: includes/class-oneab-stats-admin.php:283
+#: includes/class-oneab-stats-admin.php:286
 #: includes/class-oneab-stats-heat.php:208
 msgid "Computer"
 msgstr "Computer"
 
 #. translators: %d: number of days
-#: includes/class-oneab-stats-admin.php:332
+#: includes/class-oneab-stats-admin.php:335
 #, php-format
 msgid "%d day"
 msgid_plural "%d days"
 msgstr[0] "%d Tag"
 msgstr[1] "%d Tage"
 
-#: includes/class-oneab-stats-admin.php:338
-#: includes/class-oneab-stats-next.php:373
+#: includes/class-oneab-stats-admin.php:341
+#: includes/class-oneab-stats-next.php:306
 msgid "Page views"
 msgstr "Seitenaufrufe"
 
-#: includes/class-oneab-stats-admin.php:340
+#: includes/class-oneab-stats-admin.php:343
 msgid "Affiliate link clicks"
 msgstr "Klicks auf Partnerlinks"
 
-#: includes/class-oneab-stats-admin.php:353
+#: includes/class-oneab-stats-admin.php:356
 msgid "Most viewed pages"
 msgstr "Meistbesuchte Seiten"
 
-#: includes/class-oneab-stats-admin.php:353
-#: includes/class-oneab-stats-admin.php:357
+#: includes/class-oneab-stats-admin.php:356
+#: includes/class-oneab-stats-admin.php:360
 msgid "Page"
 msgstr "Seite"
 
-#: includes/class-oneab-stats-admin.php:354
+#: includes/class-oneab-stats-admin.php:357
 msgid "Where visitors come from"
 msgstr "Woher die Besucher kommen"
 
-#: includes/class-oneab-stats-admin.php:354
+#: includes/class-oneab-stats-admin.php:357
 msgid "Website"
 msgstr "Website"
 
-#: includes/class-oneab-stats-admin.php:355
+#: includes/class-oneab-stats-admin.php:358
 msgid "Countries"
 msgstr "Länder"
 
-#: includes/class-oneab-stats-admin.php:355
+#: includes/class-oneab-stats-admin.php:358
 msgid "Country"
 msgstr "Land"
 
-#: includes/class-oneab-stats-admin.php:356
+#: includes/class-oneab-stats-admin.php:359
 msgid "Devices"
 msgstr "Geräte"
 
-#: includes/class-oneab-stats-admin.php:356
+#: includes/class-oneab-stats-admin.php:359
 msgid "Device"
 msgstr "Gerät"
 
-#: includes/class-oneab-stats-admin.php:357
+#: includes/class-oneab-stats-admin.php:360
 msgid "Affiliate link clicks by page"
 msgstr "Klicks auf Partnerlinks je Seite"
 
-#: includes/class-oneab-stats-admin.php:358
+#: includes/class-oneab-stats-admin.php:361
 msgid "Affiliate link clicks by target"
 msgstr "Klicks auf Partnerlinks je Ziel"
 
-#: includes/class-oneab-stats-admin.php:358
+#: includes/class-oneab-stats-admin.php:361
 msgid "Target"
 msgstr "Ziel"
 
-#: includes/class-oneab-stats-admin.php:361
+#: includes/class-oneab-stats-admin.php:364
 msgid "Visitors are counted per day. Someone who comes on two days counts twice in the total. Countries are estimated from the time zone and language of the browser, not from the address."
 msgstr "Besucher werden je Tag gezählt. Wer an zwei Tagen kommt, zählt in der Summe zweimal. Länder werden aus Zeitzone und Sprache des Browsers geschätzt, nicht aus der Adresse."
 
-#: includes/class-oneab-stats-admin.php:379
+#: includes/class-oneab-stats-admin.php:386
 msgid "Direct or unknown"
 msgstr "Direkt oder unbekannt"
 
-#: includes/class-oneab-stats-admin.php:397
-#: includes/class-oneab-stats-admin.php:398
+#: includes/class-oneab-stats-admin.php:404
+#: includes/class-oneab-stats-admin.php:405
 msgid "Page views per day"
 msgstr "Seitenaufrufe je Tag"
 
 #. translators: 1: date, 2: page views, 3: visitors, 4: affiliate link clicks
-#: includes/class-oneab-stats-admin.php:404
+#: includes/class-oneab-stats-admin.php:411
 #, php-format
 msgid "%1$s: %2$s page views, %3$s visitors, %4$s affiliate link clicks"
 msgstr "%1$s: %2$s Seitenaufrufe, %3$s Besucher, %4$s Klicks auf Partnerlinks"
 
-#: includes/class-oneab-stats-admin.php:411
+#: includes/class-oneab-stats-admin.php:418
 msgid "at most per day"
 msgstr "höchstens je Tag"
 
@@ -280,138 +280,343 @@ msgid "Only little data so far."
 msgstr "Noch wenige Daten."
 
 #: includes/class-oneab-stats-next.php:59
-#: includes/class-oneab-stats-next.php:333
+#: includes/class-oneab-stats-next.php:364
 msgid "Read next"
 msgstr "Weiterlesen"
 
-#: includes/class-oneab-stats-next.php:273
+#: includes/class-oneab-stats-next.php:285
 msgid "Too early to say. Wait until each variant has at least 100 page views."
 msgstr "Noch zu früh. Warte, bis jede Variante mindestens 100 Seitenaufrufe hat."
 
-#: includes/class-oneab-stats-next.php:282
+#: includes/class-oneab-stats-next.php:294
 msgid "Variant B is ahead, and a difference this large is very unlikely to be chance."
 msgstr "Variante B liegt vorn, und ein so großer Unterschied ist sehr wahrscheinlich kein Zufall."
 
-#: includes/class-oneab-stats-next.php:283
+#: includes/class-oneab-stats-next.php:295
 msgid "Variant A is ahead, and a difference this large is very unlikely to be chance."
 msgstr "Variante A liegt vorn, und ein so großer Unterschied ist sehr wahrscheinlich kein Zufall."
 
-#: includes/class-oneab-stats-next.php:285
+#: includes/class-oneab-stats-next.php:297
 msgid "No clear winner yet. The difference could still be chance. Let the test run longer."
 msgstr "Noch kein klarer Sieger. Der Unterschied kann noch Zufall sein. Lass den Test länger laufen."
 
-#: includes/class-oneab-stats-next.php:333
+#: includes/class-oneab-stats-elements.php:467
+#: includes/class-oneab-stats-next.php:364
 msgid "Heading"
 msgstr "Überschrift"
 
-#: includes/class-oneab-stats-next.php:334
+#: includes/class-oneab-stats-next.php:365
 msgid "Look"
 msgstr "Aussehen"
 
-#: includes/class-oneab-stats-next.php:335
+#: includes/class-oneab-stats-next.php:366
 msgid "Cards with image"
 msgstr "Karten mit Bild"
 
-#: includes/class-oneab-stats-next.php:336
+#: includes/class-oneab-stats-next.php:367
 msgid "Plain list of links"
 msgstr "Einfache Linkliste"
 
-#: includes/class-oneab-stats-next.php:337
+#: includes/class-oneab-stats-next.php:368
 msgid "Place"
 msgstr "Platz"
 
-#: includes/class-oneab-stats-next.php:338
+#: includes/class-oneab-stats-next.php:369
 msgid "At the end of the article"
 msgstr "Am Ende des Artikels"
 
-#: includes/class-oneab-stats-next.php:339
+#: includes/class-oneab-stats-next.php:370
 msgid "In the middle of the article"
 msgstr "In der Mitte des Artikels"
 
-#: includes/class-oneab-stats-next.php:351
+#: includes/class-oneab-stats-next.php:382
 msgid "Read-next cards"
 msgstr "Weiterlesen-Karten"
 
-#: includes/class-oneab-stats-next.php:352
+#: includes/class-oneab-stats-next.php:383
 msgid "Show related articles below every post"
 msgstr "Verwandte Artikel unter jedem Beitrag zeigen"
 
-#: includes/class-oneab-stats-next.php:353
+#: includes/class-oneab-stats-next.php:384
 msgid "Number of articles"
 msgstr "Anzahl der Artikel"
 
-#: includes/class-oneab-stats-next.php:354
+#: includes/class-oneab-stats-next.php:385
 msgid "Articles are chosen by shared tags and categories. Search engines and visitors without JavaScript always get variant A at the end of the article."
 msgstr "Die Artikel werden nach gemeinsamen Schlagwörtern und Kategorien gewählt. Suchmaschinen und Besucher ohne JavaScript bekommen immer Variante A am Ende des Artikels."
 
-#: includes/class-oneab-stats-next.php:357
+#: includes/class-oneab-stats-elements.php:542
+#: includes/class-oneab-stats-next.php:388
 msgid "Variant A"
 msgstr "Variante A"
 
-#: includes/class-oneab-stats-next.php:359
+#: includes/class-oneab-stats-elements.php:544
+#: includes/class-oneab-stats-next.php:390
 msgid "Variant B"
 msgstr "Variante B"
 
-#: includes/class-oneab-stats-next.php:361
+#: includes/class-oneab-stats-elements.php:546
+#: includes/class-oneab-stats-next.php:392
 msgid "Run the A/B test: half of the page views get variant B"
 msgstr "A/B-Test laufen lassen: Die Hälfte der Seitenaufrufe bekommt Variante B"
 
-#: includes/class-oneab-stats-next.php:363
+#: includes/class-oneab-stats-next.php:394
 msgid "The variant is drawn by chance for every page view, in the visitor's browser. Nothing is stored there, and only daily totals reach your server."
 msgstr "Die Variante wird bei jedem Seitenaufruf im Browser des Besuchers ausgelost. Dort wird nichts gespeichert, und deinen Server erreichen nur Tagessummen."
 
-#: includes/class-oneab-stats-next.php:368
+#: includes/class-oneab-stats-elements.php:565
+#: includes/class-oneab-stats-next.php:399
 msgid "Test result"
 msgstr "Testergebnis"
 
 #. translators: %s: date
-#: includes/class-oneab-stats-next.php:371
+#: includes/class-oneab-stats-elements.php:568
+#: includes/class-oneab-stats-next.php:402
 #, php-format
 msgid "Counting since %s."
 msgstr "Gezählt wird seit %s."
 
 #. translators: %s: date
-#: includes/class-oneab-stats-next.php:371
+#: includes/class-oneab-stats-elements.php:568
+#: includes/class-oneab-stats-next.php:402
 msgid "The test is running."
 msgstr "Der Test läuft."
 
 #. translators: %s: date
-#: includes/class-oneab-stats-next.php:371
+#: includes/class-oneab-stats-elements.php:568
+#: includes/class-oneab-stats-next.php:402
 msgid "The test is stopped."
 msgstr "Der Test ist angehalten."
 
-#: includes/class-oneab-stats-next.php:373
+#: includes/class-oneab-stats-next.php:306
 msgid "Variant"
 msgstr "Variante"
 
-#: includes/class-oneab-stats-next.php:373
-msgid "Box seen"
-msgstr "Box gesehen"
-
-#: includes/class-oneab-stats-next.php:373
+#: includes/class-oneab-stats-next.php:306
+#: includes/class-oneab-stats-products__premium_only.php:95
 msgid "Clicks"
 msgstr "Klicks"
 
-#: includes/class-oneab-stats-next.php:373
+#: includes/class-oneab-stats-next.php:306
 msgid "Click rate"
 msgstr "Klickrate"
 
-#: includes/class-oneab-stats-next.php:373
+#: includes/class-oneab-stats-next.php:306
 msgid "Likely range"
 msgstr "Wahrscheinlicher Bereich"
 
-#: includes/class-oneab-stats-next.php:383
-msgid "Click rate = clicks on the box divided by page views. The likely range shows where the true rate lies with 95 % confidence; it narrows as more visitors come."
-msgstr "Klickrate = Klicks auf die Box geteilt durch Seitenaufrufe. Der wahrscheinliche Bereich zeigt, wo die wahre Rate mit 95 % Sicherheit liegt. Er wird enger, je mehr Besucher kommen."
-
-#: includes/class-oneab-stats-next.php:384
+#: includes/class-oneab-stats-elements.php:571
+#: includes/class-oneab-stats-next.php:405
 msgid "Keep A and end the test"
 msgstr "A behalten und Test beenden"
 
-#: includes/class-oneab-stats-next.php:385
+#: includes/class-oneab-stats-elements.php:572
+#: includes/class-oneab-stats-next.php:406
 msgid "Use B from now on and end the test"
 msgstr "Ab jetzt B verwenden und Test beenden"
 
-#: includes/class-oneab-stats-next.php:386
+#: includes/class-oneab-stats-elements.php:573
+#: includes/class-oneab-stats-next.php:407
 msgid "Start a new test from zero"
 msgstr "Neuen Test bei null starten"
+
+#: includes/class-oneab-stats-admin.php:107
+#: includes/class-oneab-stats-elements.php:488
+msgid "Buttons, images and cards"
+msgstr "Knöpfe, Bilder und Karten"
+
+#: includes/class-oneab-stats-admin.php:375
+msgid "The Pro version adds the clicks for every single product."
+msgstr "Die Pro-Version zeigt zusätzlich die Klicks für jedes einzelne Produkt."
+
+#: includes/class-oneab-stats-admin.php:375
+msgid "See what Pro offers"
+msgstr "Ansehen, was Pro bietet"
+
+#: includes/class-oneab-stats-element-widget.php:23
+#: includes/class-oneab-stats-elements.php:254
+#: includes/class-oneab-stats-elements.php:294
+msgid "1AB Stats element"
+msgstr "1AB-Stats-Baustein"
+
+#: includes/class-oneab-stats-element-widget.php:24
+#: includes/class-oneab-stats-elements.php:255
+msgid "A button, image or card with an A/B test."
+msgstr "Ein Knopf, ein Bild oder eine Karte mit A/B-Test."
+
+#: includes/class-oneab-stats-element-widget.php:53
+#: includes/class-oneab-stats-elements.php:296
+msgid "Choose one of your elements. You create them under 1AB Stats, tab \"Buttons, images and cards\"."
+msgstr "Wähle einen deiner Bausteine. Du legst sie unter 1AB Stats im Reiter „Knöpfe, Bilder und Karten“ an."
+
+#: includes/class-oneab-stats-element-widget.php:56
+#: includes/class-oneab-stats-elements.php:295
+msgid "Element"
+msgstr "Baustein"
+
+#: includes/class-oneab-stats-elements.php:119
+msgid "Button"
+msgstr "Knopf"
+
+#: includes/class-oneab-stats-elements.php:120
+#: includes/class-oneab-stats-elements.php:460
+msgid "Image"
+msgstr "Bild"
+
+#: includes/class-oneab-stats-elements.php:121
+msgid "Card"
+msgstr "Karte"
+
+#: includes/class-oneab-stats-elements.php:283
+msgid "Choose an element"
+msgstr "Baustein wählen"
+
+#: includes/class-oneab-stats-elements.php:298
+msgid "Create or edit elements"
+msgstr "Bausteine anlegen oder bearbeiten"
+
+#: includes/class-oneab-stats-elements.php:382
+#: includes/class-oneab-stats-elements.php:464
+msgid "Choose image"
+msgstr "Bild wählen"
+
+#: includes/class-oneab-stats-elements.php:383
+msgid "Use this image"
+msgstr "Dieses Bild verwenden"
+
+#: includes/class-oneab-stats-elements.php:465
+msgid "Remove"
+msgstr "Entfernen"
+
+#: includes/class-oneab-stats-elements.php:468
+msgid "Text"
+msgstr "Text"
+
+#: includes/class-oneab-stats-elements.php:469
+msgid "Button label"
+msgstr "Beschriftung des Knopfs"
+
+#: includes/class-oneab-stats-elements.php:470
+msgid "Button colour"
+msgstr "Farbe des Knopfs"
+
+#: includes/class-oneab-stats-elements.php:471
+msgid "Link target"
+msgstr "Linkziel"
+
+#: includes/class-oneab-stats-elements.php:489
+msgid "Build a button, an image or a card once and place it wherever you like: on the home page, inside any page or post, or in the sidebar. Give it a second variant, and the plugin shows you which one gets more clicks."
+msgstr "Baue einen Knopf, ein Bild oder eine Karte einmal und setze den Baustein ein, wo du möchtest: auf der Startseite, in jeder Seite, in jedem Beitrag oder in der Seitenleiste. Gib ihm eine zweite Variante, und das Plugin zeigt dir, welche öfter angeklickt wird."
+
+#: includes/class-oneab-stats-elements.php:490
+msgid "To place an element, add the block \"1AB Stats element\" in the editor or in a widget area, or paste its shortcode."
+msgstr "Zum Einsetzen fügst du im Editor oder in einem Widget-Bereich den Block „1AB-Stats-Baustein“ ein oder trägst den Shortcode ein."
+
+#: includes/class-oneab-stats-elements.php:491
+msgid "Add element"
+msgstr "Baustein hinzufügen"
+
+#: includes/class-oneab-stats-elements.php:497
+msgid "Name"
+msgstr "Name"
+
+#: includes/class-oneab-stats-elements.php:497
+#: includes/class-oneab-stats-elements.php:530
+msgid "Kind"
+msgstr "Art"
+
+#: includes/class-oneab-stats-elements.php:497
+msgid "Shortcode"
+msgstr "Shortcode"
+
+#: includes/class-oneab-stats-elements.php:497
+msgid "A/B test"
+msgstr "A/B-Test"
+
+#: includes/class-oneab-stats-elements.php:497
+msgid "Click rate A"
+msgstr "Klickrate A"
+
+#: includes/class-oneab-stats-elements.php:497
+msgid "Click rate B"
+msgstr "Klickrate B"
+
+#: includes/class-oneab-stats-elements.php:500
+msgid "No test"
+msgstr "Kein Test"
+
+#: includes/class-oneab-stats-elements.php:503
+msgid "Running"
+msgstr "Läuft"
+
+#: includes/class-oneab-stats-elements.php:503
+msgid "Stopped"
+msgstr "Angehalten"
+
+#: includes/class-oneab-stats-elements.php:523
+msgid "All elements"
+msgstr "Alle Bausteine"
+
+#: includes/class-oneab-stats-elements.php:528
+msgid "Edit element"
+msgstr "Baustein bearbeiten"
+
+#: includes/class-oneab-stats-elements.php:528
+msgid "New element"
+msgstr "Neuer Baustein"
+
+#: includes/class-oneab-stats-elements.php:529
+msgid "Name (only for you)"
+msgstr "Name (nur für dich)"
+
+#: includes/class-oneab-stats-elements.php:535
+msgid "Affiliate link: mark it as sponsored for search engines and open it in a new tab"
+msgstr "Affiliate-Link: für Suchmaschinen als gesponsert kennzeichnen und in neuem Tab öffnen"
+
+#: includes/class-oneab-stats-elements.php:537
+msgid "Shortcode:"
+msgstr "Shortcode:"
+
+#: includes/class-oneab-stats-elements.php:548
+msgid "The variant is drawn by chance for every page view, in the visitor's browser. Nothing is stored there, and only daily totals reach your server. Search engines always get variant A."
+msgstr "Die Variante wird bei jedem Seitenaufruf im Browser des Besuchers ausgelost. Dort wird nichts gespeichert, und auf deinem Server kommen nur Tagessummen an. Suchmaschinen bekommen immer Variante A."
+
+#: includes/class-oneab-stats-elements.php:549
+msgid "Save element"
+msgstr "Baustein speichern"
+
+#: includes/class-oneab-stats-elements.php:551
+msgid "Delete element"
+msgstr "Baustein löschen"
+
+#: includes/class-oneab-stats-elements.php:558
+msgid "Preview of variant A"
+msgstr "Vorschau der Variante A"
+
+#: includes/class-oneab-stats-next.php:306
+msgid "Seen"
+msgstr "Gesehen"
+
+#: includes/class-oneab-stats-next.php:316
+msgid "Click rate = clicks divided by page views. The likely range shows where the true rate lies with 95 % confidence; it narrows as more visitors come."
+msgstr "Klickrate = Klicks geteilt durch Seitenaufrufe. Der wahrscheinliche Bereich zeigt, wo die wahre Rate mit 95 % Sicherheit liegt; er wird enger, je mehr Besucher kommen."
+
+#: includes/class-oneab-stats-products__premium_only.php:90
+msgid "Affiliate link clicks by product"
+msgstr "Affiliate-Klicks nach Produkt"
+
+#: includes/class-oneab-stats-products__premium_only.php:95
+msgid "Product"
+msgstr "Produkt"
+
+#: includes/class-oneab-stats-products__premium_only.php:95
+msgid "Shop"
+msgstr "Shop"
+
+#: includes/class-oneab-stats-products__premium_only.php:95
+msgid "Pages"
+msgstr "Seiten"
+
+#: includes/class-oneab-stats-products__premium_only.php:95
+msgid "Most clicks on"
+msgstr "Die meisten Klicks auf"

@@ -25,6 +25,7 @@ Cookieless visitor statistics with affiliate click tracking, heatmaps and an A/B
 * Heatmap for every page: how far visitors read, where they spend time and where they click
 * Read-next cards below your posts, chosen by shared tags and categories
 * An A/B test for these cards: try another heading, look or place and see which variant gets more clicks, with a plain verdict
+* Buttons, images and cards you can place on the home page, in any page or post and in the sidebar (block, shortcode or classic widget), each with its own A/B test of two variants
 * A retention period you choose yourself
 
 **How it treats your visitors**
@@ -34,7 +35,7 @@ Cookieless visitor statistics with affiliate click tracking, heatmaps and an A/B
 * Browsers that send "Do Not Track" are not counted.
 * Logged-in users, previews and robots are not counted.
 * Heatmaps and A/B tests store plain totals only (per page, day and device class, or per variant and day), nothing about single visitors. The test variant is drawn by chance in the browser for every page view and is not remembered.
-* All data stays in your own WordPress database. The plugin never contacts another server.
+* All statistics stay in your own WordPress database. Nothing about your visitors is ever sent to another server.
 
 Whether you need a consent banner depends on the law that applies to you and on how you run your site. This plugin describes exactly what it does so that you can decide; it does not give legal advice.
 
@@ -47,6 +48,14 @@ English and German.
 1. Install and activate the plugin.
 2. Open "1AB Stats" in the dashboard menu. Counting starts right away, there is nothing to set up.
 3. Optional: under "Settings" choose a retention period and add the domains of further affiliate networks.
+
+== External services ==
+
+This plugin uses the Freemius SDK to offer the optional Pro version and, only if you agree, to send you update and security notices.
+
+After activation you are asked once whether you want to opt in. If you skip, nothing is sent and the plugin works just the same. If you opt in, Freemius receives your name and email address, your site address, the WordPress, PHP and plugin versions, and the events activation, deactivation and uninstall. Data about your visitors is never sent.
+
+Freemius: [Terms of Service](https://freemius.com/terms/), [Privacy Policy](https://freemius.com/privacy/).
 
 == Frequently Asked Questions ==
 
@@ -77,6 +86,10 @@ In the overview, click "Heatmap" next to a page in the list of most viewed pages
 = How does the A/B test work? =
 
 Under "Read next and A/B test" you set up variant A and variant B of the read-next box and tick "Run the A/B test". Half of the page views then get variant B. The result table shows page views, clicks and click rate for both, and tells you in plain words whether one of them is clearly ahead. Search engines always get variant A.
+
+= How do I test a button, an image or a card? =
+
+Open 1AB Stats, tab "Buttons, images and cards", and add an element. Fill in variant A and variant B and tick "Run the A/B test". Then place the element with the block "1AB Stats element" or with its shortcode. Half of the page views get variant B. Search engines and visitors without JavaScript always get variant A.
 
 = What happens to the data when I delete the plugin? =
 

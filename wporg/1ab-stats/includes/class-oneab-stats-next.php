@@ -198,26 +198,38 @@ final class OneAB_Stats_Next {
 	 * @param array $data Decoded report.
 	 */
 	public static function count( array $data ) {
-		global $wpdb;
 		$s = OneAB_Stats::settings();
 		if ( ! $s['next_on'] || ! $s['ab_on'] || ! isset( $data['id'] ) || (int) $data['id'] !== (int) $s['ab_id'] ) {
 			return;
 		}
+		self::add( (int) $s['ab_id'], $data );
+	}
+
+	/**
+	 * Adds one event to the daily counters of a test.
+	 *
+	 * @param int   $test Test number.
+	 * @param array $data Decoded report.
+	 */
+	public static function add( $test, array $data ) {
+		global $wpdb;
 		$variant = isset( $data['v'] ) && 'b' === $data['v'] ? 'b' : 'a';
 		$event   = isset( $data['e'] ) && is_string( $data['e'] ) ? $data['e'] : '';
 		if ( ! in_array( $event, array( 's', 'v', 'c' ), true ) ) {
 			return;
 		}
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Own table.
-		$wpdb->query( $wpdb->prepare( 'INSERT INTO %i (day, test, variant, event, n) VALUES (%s, %d, %s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1', self::table(), wp_date( 'Y-m-d' ), (int) $s['ab_id'], $variant, $event ) );
+		$wpdb->query( $wpdb->prepare( 'INSERT INTO %i (day, test, variant, event, n) VALUES (%s, %d, %s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1', self::table(), wp_date( 'Y-m-d' ), (int) $test, $variant, $event ) );
 	}
 
 	/**
-	 * Totals of the running test.
+	 * Totals of a test.
 	 *
+	 * @param int|null $test Test number; the read-next test when left out.
 	 * @return array Variant => event => count.
 	 */
-	public static function totals() {
+	public static function totals( $test = null ) {
+		$test = null === $test ? (int) OneAB_Stats::settings()['ab_id'] : (int) $test;
 		global $wpdb;
 		$out = array(
 			'a' => array(
@@ -232,7 +244,7 @@ final class OneAB_Stats_Next {
 			),
 		);
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Own table.
-		$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT variant, event, SUM(n) AS n FROM %i WHERE test = %d GROUP BY variant, event', self::table(), (int) OneAB_Stats::settings()['ab_id'] ), ARRAY_A );
+		$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT variant, event, SUM(n) AS n FROM %i WHERE test = %d GROUP BY variant, event', self::table(), $test ), ARRAY_A );
 		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
 			if ( isset( $out[ $row['variant'] ][ $row['event'] ] ) ) {
 				$out[ $row['variant'] ][ $row['event'] ] = (int) $row['n'];
@@ -283,6 +295,25 @@ final class OneAB_Stats_Next {
 				: __( 'Variant A is ahead, and a difference this large is very unlikely to be chance.', '1ab-stats' );
 		}
 		return __( 'No clear winner yet. The difference could still be chance. Let the test run longer.', '1ab-stats' );
+	}
+
+	/**
+	 * Prints the result table and the verdict of a test.
+	 *
+	 * @param array $totals Result of totals().
+	 */
+	public static function result( $totals ) {
+		echo '<table class="oneab-table"><thead><tr><th>' . esc_html__( 'Variant', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Page views', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Seen', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Clicks', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Click rate', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Likely range', '1ab-stats' ) . '</th></tr></thead><tbody>';
+		foreach ( array( 'a', 'b' ) as $v ) {
+			$t     = $totals[ $v ];
+			$rate  = $t['s'] > 0 ? 100 * $t['c'] / $t['s'] : 0;
+			$range = self::wilson( $t['c'], $t['s'] );
+			echo '<tr><td>' . esc_html( strtoupper( $v ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['s'] ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['v'] ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['c'] ) ) . '</td>';
+			echo '<td class="num">' . esc_html( number_format_i18n( $rate, 1 ) ) . ' %</td><td class="num">' . esc_html( number_format_i18n( 100 * $range[0], 1 ) . ' – ' . number_format_i18n( 100 * $range[1], 1 ) ) . ' %</td></tr>';
+		}
+		echo '</tbody></table>';
+		echo '<p><strong>' . esc_html( self::verdict( $totals ) ) . '</strong></p>';
+		echo '<p class="description">' . esc_html__( 'Click rate = clicks divided by page views. The likely range shows where the true rate lies with 95 % confidence; it narrows as more visitors come.', '1ab-stats' ) . '</p>';
 	}
 
 	/**
@@ -370,17 +401,7 @@ final class OneAB_Stats_Next {
 				/* translators: %s: date */
 				echo '<p>' . esc_html( sprintf( __( 'Counting since %s.', '1ab-stats' ), wp_date( get_option( 'date_format' ), strtotime( $s['ab_start'] . ' 12:00:00' ) ) ) ) . ' ' . esc_html( $s['ab_on'] ? __( 'The test is running.', '1ab-stats' ) : __( 'The test is stopped.', '1ab-stats' ) ) . '</p>';
 			}
-			echo '<table class="oneab-table"><thead><tr><th>' . esc_html__( 'Variant', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Page views', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Box seen', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Clicks', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Click rate', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Likely range', '1ab-stats' ) . '</th></tr></thead><tbody>';
-			foreach ( array( 'a', 'b' ) as $v ) {
-				$t     = $totals[ $v ];
-				$rate  = $t['s'] > 0 ? 100 * $t['c'] / $t['s'] : 0;
-				$range = self::wilson( $t['c'], $t['s'] );
-				echo '<tr><td>' . esc_html( strtoupper( $v ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['s'] ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['v'] ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['c'] ) ) . '</td>';
-				echo '<td class="num">' . esc_html( number_format_i18n( $rate, 1 ) ) . ' %</td><td class="num">' . esc_html( number_format_i18n( 100 * $range[0], 1 ) . ' – ' . number_format_i18n( 100 * $range[1], 1 ) ) . ' %</td></tr>';
-			}
-			echo '</tbody></table>';
-			echo '<p><strong>' . esc_html( self::verdict( $totals ) ) . '</strong></p>';
-			echo '<p class="description">' . esc_html__( 'Click rate = clicks on the box divided by page views. The likely range shows where the true rate lies with 95 % confidence; it narrows as more visitors come.', '1ab-stats' ) . '</p>';
+			self::result( $totals );
 			echo '<p><button class="button" name="oneab_step" value="use_a">' . esc_html__( 'Keep A and end the test', '1ab-stats' ) . '</button> ';
 			echo '<button class="button" name="oneab_step" value="use_b">' . esc_html__( 'Use B from now on and end the test', '1ab-stats' ) . '</button> ';
 			echo '<button class="button" name="oneab_step" value="restart">' . esc_html__( 'Start a new test from zero', '1ab-stats' ) . '</button></p></div>';
