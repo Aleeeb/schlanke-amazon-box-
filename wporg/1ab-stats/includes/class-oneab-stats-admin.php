@@ -72,17 +72,14 @@ final class OneAB_Stats_Admin {
 			wp_die( esc_html__( 'You are not allowed to change these settings.', '1ab-stats' ) );
 		}
 		check_admin_referer( 'oneab_stats_save' );
-		$domains = isset( $_POST['extra_domains'] ) ? sanitize_textarea_field( wp_unslash( $_POST['extra_domains'] ) ) : '';
-		update_option(
-			OneAB_Stats::OPTION,
-			array(
-				'keep_days'     => isset( $_POST['keep_days'] ) ? max( 0, min( 3650, absint( $_POST['keep_days'] ) ) ) : 0,
-				'salt_days'     => isset( $_POST['salt_days'] ) ? max( 1, min( 30, absint( $_POST['salt_days'] ) ) ) : 1,
-				'extra_domains' => $domains,
-				'trust_proxy'   => empty( $_POST['trust_proxy'] ) ? 0 : 1,
-			),
-			false
-		);
+		$domains                   = isset( $_POST['extra_domains'] ) ? sanitize_textarea_field( wp_unslash( $_POST['extra_domains'] ) ) : '';
+		$settings                  = OneAB_Stats::settings();
+		$settings['keep_days']     = isset( $_POST['keep_days'] ) ? max( 0, min( 3650, absint( $_POST['keep_days'] ) ) ) : 0;
+		$settings['salt_days']     = isset( $_POST['salt_days'] ) ? max( 1, min( 30, absint( $_POST['salt_days'] ) ) ) : 1;
+		$settings['extra_domains'] = $domains;
+		$settings['trust_proxy']   = empty( $_POST['trust_proxy'] ) ? 0 : 1;
+		$settings['heatmap']       = empty( $_POST['heatmap'] ) ? 0 : 1;
+		update_option( OneAB_Stats::OPTION, $settings, false );
 		wp_safe_redirect( admin_url( 'admin.php?page=' . self::SLUG . '&tab=settings&saved=1' ) );
 		exit;
 	}
@@ -95,7 +92,8 @@ final class OneAB_Stats_Admin {
 			return;
 		}
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only view parameters.
-		$tab  = isset( $_GET['tab'] ) && 'settings' === $_GET['tab'] ? 'settings' : 'report';
+		$tab  = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'report';
+		$tab  = in_array( $tab, array( 'next', 'settings' ), true ) ? $tab : 'report';
 		$days = isset( $_GET['days'] ) ? absint( $_GET['days'] ) : 30;
 		$days = in_array( $days, array( 7, 30, 90, 365 ), true ) ? $days : 30;
 		$done = ! empty( $_GET['saved'] );
@@ -105,14 +103,17 @@ final class OneAB_Stats_Admin {
 		echo '<div class="wrap oneab-stats"><h1>' . esc_html__( '1AB Stats', '1ab-stats' ) . '</h1>';
 		echo '<nav class="nav-tab-wrapper">';
 		echo '<a class="nav-tab' . ( 'report' === $tab ? ' nav-tab-active' : '' ) . '" href="' . esc_url( $base ) . '">' . esc_html__( 'Overview', '1ab-stats' ) . '</a>';
+		echo '<a class="nav-tab' . ( 'next' === $tab ? ' nav-tab-active' : '' ) . '" href="' . esc_url( $base . '&tab=next' ) . '">' . esc_html__( 'Read next and A/B test', '1ab-stats' ) . '</a>';
 		echo '<a class="nav-tab' . ( 'settings' === $tab ? ' nav-tab-active' : '' ) . '" href="' . esc_url( $base . '&tab=settings' ) . '">' . esc_html__( 'Settings', '1ab-stats' ) . '</a>';
 		echo '</nav>';
 
+		if ( $done && 'report' !== $tab ) {
+			echo '<div class="notice notice-success inline"><p>' . esc_html__( 'Settings saved.', '1ab-stats' ) . '</p></div>';
+		}
 		if ( 'settings' === $tab ) {
-			if ( $done ) {
-				echo '<div class="notice notice-success inline"><p>' . esc_html__( 'Settings saved.', '1ab-stats' ) . '</p></div>';
-			}
 			self::settings_form();
+		} elseif ( 'next' === $tab ) {
+			OneAB_Stats_Next::tab();
 		} else {
 			self::report( $days, $base );
 		}
@@ -140,6 +141,10 @@ final class OneAB_Stats_Admin {
 		echo '<tr><th scope="row"><label for="oneab-domains">' . esc_html__( 'More affiliate link domains', '1ab-stats' ) . '</label></th><td>';
 		echo '<textarea id="oneab-domains" name="extra_domains" rows="5" class="regular-text code" placeholder="awin1.com">' . esc_textarea( (string) $s['extra_domains'] ) . '</textarea>';
 		echo '<p class="description">' . esc_html__( 'One domain per line. Clicks on links to Amazon and eBay are always counted.', '1ab-stats' ) . '</p></td></tr>';
+
+		echo '<tr><th scope="row">' . esc_html__( 'Heatmap', '1ab-stats' ) . '</th><td><label>';
+		echo '<input type="checkbox" name="heatmap" value="1"' . checked( 1, (int) $s['heatmap'], false ) . '> ' . esc_html__( 'Count reading depth, time spent and click positions per page', '1ab-stats' );
+		echo '</label><p class="description">' . esc_html__( 'Only totals per page, day and device class are stored, nothing about single visitors. Open a heatmap from the list of most viewed pages.', '1ab-stats' ) . '</p></td></tr>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Proxy or CDN', '1ab-stats' ) . '</th><td><label>';
 		echo '<input type="checkbox" name="trust_proxy" value="1"' . checked( 1, (int) $s['trust_proxy'], false ) . '> ' . esc_html__( 'My site is behind a proxy or CDN that passes the visitor address in the X-Forwarded-For header', '1ab-stats' );
@@ -212,8 +217,9 @@ final class OneAB_Stats_Admin {
 	 * @param array[]  $rows   Rows from grouped().
 	 * @param callable $name   Turns a key into the text shown.
 	 * @param bool     $unique Show the visitors column.
+	 * @param bool     $heat   Add a link to the heatmap of each row's page.
 	 */
-	private static function table( $title, $label, $rows, $name = null, $unique = true ) {
+	private static function table( $title, $label, $rows, $name = null, $unique = true, $heat = false ) {
 		echo '<div class="oneab-card"><h2>' . esc_html( $title ) . '</h2>';
 		if ( ! $rows ) {
 			echo '<p class="oneab-empty">' . esc_html__( 'Nothing counted yet.', '1ab-stats' ) . '</p></div>';
@@ -231,7 +237,11 @@ final class OneAB_Stats_Admin {
 		foreach ( $rows as $r ) {
 			$text = $name ? call_user_func( $name, (string) $r['k'] ) : (string) $r['k'];
 			$pct  = (int) round( 100 * (int) $r['n'] / $max );
-			echo '<tr><td><span class="oneab-bar" style="width:' . esc_attr( (string) $pct ) . '%"></span><span class="oneab-label">' . esc_html( $text ) . '</span></td>';
+			echo '<tr><td><span class="oneab-bar" style="width:' . esc_attr( (string) $pct ) . '%"></span><span class="oneab-label">' . esc_html( $text );
+			if ( $heat ) {
+				echo ' <a class="oneab-heat" target="_blank" rel="noopener" href="' . esc_url( OneAB_Stats_Heat::link( (string) $r['k'] ) ) . '">' . esc_html__( 'Heatmap', '1ab-stats' ) . '</a>';
+			}
+			echo '</span></td>';
 			echo '<td class="num">' . esc_html( number_format_i18n( (int) $r['n'] ) ) . '</td>';
 			if ( $unique ) {
 				echo '<td class="num">' . esc_html( number_format_i18n( (int) $r['v'] ) ) . '</td>';
@@ -340,7 +350,7 @@ final class OneAB_Stats_Admin {
 		self::chart( $by_day );
 
 		echo '<div class="oneab-grid">';
-		self::table( __( 'Most viewed pages', '1ab-stats' ), __( 'Page', '1ab-stats' ), self::grouped( 'path', 'view', $from, $to ) );
+		self::table( __( 'Most viewed pages', '1ab-stats' ), __( 'Page', '1ab-stats' ), self::grouped( 'path', 'view', $from, $to ), null, true, (bool) OneAB_Stats::settings()['heatmap'] );
 		self::table( __( 'Where visitors come from', '1ab-stats' ), __( 'Website', '1ab-stats' ), self::grouped( 'ref', 'view', $from, $to, 16 ), array( __CLASS__, 'referrer_name' ) );
 		self::table( __( 'Countries', '1ab-stats' ), __( 'Country', '1ab-stats' ), self::grouped( 'cc', 'view', $from, $to ), array( __CLASS__, 'country_name' ) );
 		self::table( __( 'Devices', '1ab-stats' ), __( 'Device', '1ab-stats' ), self::grouped( 'device', 'view', $from, $to ), array( __CLASS__, 'device_name' ) );

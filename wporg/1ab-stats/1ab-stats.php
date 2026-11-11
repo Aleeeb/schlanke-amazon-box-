@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       1AB Stats
- * Description:       Cookieless visitor statistics with affiliate click tracking. No cookies, no stored IP addresses, all data stays on your own server.
+ * Description:       Cookieless visitor statistics with affiliate click tracking, heatmaps and an A/B test for read-next cards. No cookies, no stored IP addresses, all data stays on your own server.
  * Version:           1.0.0
  * Requires at least: 6.2
  * Requires PHP:      7.4
@@ -19,12 +19,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 define( 'ONEAB_STATS_VERSION', '1.0.0' );
-define( 'ONEAB_STATS_DB_VERSION', '1' );
+define( 'ONEAB_STATS_DB_VERSION', '2' );
 define( 'ONEAB_STATS_FILE', __FILE__ );
 define( 'ONEAB_STATS_DIR', plugin_dir_path( __FILE__ ) );
 
 require_once ONEAB_STATS_DIR . 'includes/class-oneab-stats.php';
 require_once ONEAB_STATS_DIR . 'includes/class-oneab-stats-tracker.php';
+require_once ONEAB_STATS_DIR . 'includes/class-oneab-stats-heat.php';
+require_once ONEAB_STATS_DIR . 'includes/class-oneab-stats-next.php';
 require_once ONEAB_STATS_DIR . 'includes/class-oneab-stats-admin.php';
 
 register_activation_hook( __FILE__, array( 'OneAB_Stats', 'activate' ) );
@@ -32,4 +34,6 @@ register_deactivation_hook( __FILE__, array( 'OneAB_Stats', 'deactivate' ) );
 
 OneAB_Stats::init();
 OneAB_Stats_Tracker::init();
+OneAB_Stats_Heat::init();
+OneAB_Stats_Next::init();
 OneAB_Stats_Admin::init();

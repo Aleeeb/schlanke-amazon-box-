@@ -43,6 +43,14 @@ final class OneAB_Stats {
 			'salt_days'     => 1,  // Days until the random value behind the visitor identifier is replaced.
 			'extra_domains' => '', // Additional affiliate link domains, one per line.
 			'trust_proxy'   => 0,  // Read the visitor address from X-Forwarded-For (only behind a trusted proxy).
+			'heatmap'       => 1,  // Collect heatmap counters.
+			'next_on'       => 0,  // Show read-next cards below posts.
+			'next_count'    => 3,
+			'next_a'        => array(),
+			'next_b'        => array(),
+			'ab_on'         => 0,  // A/B test of the read-next cards is running.
+			'ab_id'         => 0,  // Number of the current test; counts of earlier tests stay separate.
+			'ab_start'      => '',
 		);
 		return wp_parse_args( (array) get_option( self::OPTION, array() ), $defaults );
 	}
@@ -82,6 +90,31 @@ final class OneAB_Stats {
 			KEY day_kind (day, kind)
 			) $charset;"
 		);
+		$heat = OneAB_Stats_Heat::table();
+		dbDelta(
+			"CREATE TABLE $heat (
+			day DATE NOT NULL,
+			path VARCHAR(190) NOT NULL,
+			dev CHAR(1) NOT NULL,
+			kind CHAR(1) NOT NULL,
+			px SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+			py SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+			n INT UNSIGNED NOT NULL DEFAULT 0,
+			s INT UNSIGNED NOT NULL DEFAULT 0,
+			PRIMARY KEY  (day, path, dev, kind, px, py)
+			) $charset;"
+		);
+		$ab = OneAB_Stats_Next::table();
+		dbDelta(
+			"CREATE TABLE $ab (
+			day DATE NOT NULL,
+			test INT UNSIGNED NOT NULL,
+			variant CHAR(1) NOT NULL,
+			event CHAR(1) NOT NULL,
+			n INT UNSIGNED NOT NULL DEFAULT 0,
+			PRIMARY KEY  (day, test, variant, event)
+			) $charset;"
+		);
 		update_option( 'oneab_stats_db', ONEAB_STATS_DB_VERSION, false );
 		if ( ! wp_next_scheduled( 'oneab_stats_cleanup' ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'oneab_stats_cleanup' );
@@ -116,6 +149,8 @@ final class OneAB_Stats {
 		$limit = wp_date( 'Y-m-d', time() - $keep * DAY_IN_SECONDS );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Own table, clean-up job.
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE day < %s', self::table(), $limit ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Own table, clean-up job.
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE day < %s', OneAB_Stats_Heat::table(), $limit ) );
 	}
 
 	/**

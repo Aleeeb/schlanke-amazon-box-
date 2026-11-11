@@ -1,0 +1,14 @@
+.oneab-next { clear: both; margin: 2.5em 0 1.5em; padding: 1.25em 0 0; border-top: 1px solid rgba(0, 0, 0, .12); }
+.oneab-next__title { margin: 0 0 .75em; font-size: 1.25em; }
+.oneab-next__list { list-style: none; margin: 0; padding: 0; }
+.oneab-next__item { margin: 0; padding: 0; }
+.oneab-next__link { text-decoration: none; }
+.oneab-next__link:hover .oneab-next__text, .oneab-next__link:focus .oneab-next__text { text-decoration: underline; }
+.oneab-next--cards .oneab-next__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1em; }
+.oneab-next--cards .oneab-next__link { display: block; height: 100%; border: 1px solid rgba(0, 0, 0, .12); border-radius: 8px; overflow: hidden; background: #fff; color: inherit; }
+.oneab-next--cards .oneab-next__image { display: block; aspect-ratio: 16 / 9; overflow: hidden; background: rgba(0, 0, 0, .05); }
+.oneab-next--cards .oneab-next__image img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.oneab-next--cards .oneab-next__text { display: block; padding: .75em .9em; font-weight: 600; line-height: 1.35; }
+.oneab-next--list .oneab-next__image { display: none; }
+.oneab-next--list .oneab-next__list { list-style: disc; padding-left: 1.25em; }
+.oneab-next--list .oneab-next__item { margin: .35em 0; }

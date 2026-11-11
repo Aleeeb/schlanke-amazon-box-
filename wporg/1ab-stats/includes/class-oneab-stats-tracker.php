@@ -42,6 +42,7 @@ final class OneAB_Stats_Tracker {
 		$config = array(
 			'e' => esc_url_raw( rest_url( 'oneab-stats/v1/hit' ) ),
 			'd' => OneAB_Stats::extra_domains(),
+			'h' => OneAB_Stats::settings()['heatmap'] ? 1 : 0,
 		);
 		wp_add_inline_script( 'oneab-stats', 'window.oneabStats=' . wp_json_encode( $config ) . ';', 'before' );
 	}
@@ -171,6 +172,12 @@ final class OneAB_Stats_Tracker {
 				'target' => substr( $target, 0, 100 ),
 				'item'   => substr( preg_replace( '/[^A-Za-z0-9]/', '', isset( $data['i'] ) && is_string( $data['i'] ) ? $data['i'] : '' ), 0, 20 ),
 			);
+		} elseif ( 'm' === $type ) {
+			OneAB_Stats_Heat::store( $data, $path );
+			return $none;
+		} elseif ( 'ab' === $type ) {
+			OneAB_Stats_Next::count( $data );
+			return $none;
 		} else {
 			/**
 			 * Fires for report types this plugin does not store itself, so that add-ons can.

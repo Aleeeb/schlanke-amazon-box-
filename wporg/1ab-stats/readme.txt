@@ -8,7 +8,7 @@ Stable tag: 1.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Cookieless visitor statistics with affiliate click tracking. No cookies, no stored IP addresses, all data stays on your own server.
+Cookieless visitor statistics with affiliate click tracking, heatmaps and an A/B test for read-next cards. All data stays on your own server.
 
 == Description ==
 
@@ -22,6 +22,9 @@ Cookieless visitor statistics with affiliate click tracking. No cookies, no stor
 * Countries, estimated from the browser's time zone and language, without looking up the address
 * Device type (phone, tablet, computer)
 * Clicks on affiliate links per day, per page and per target. Links to Amazon and eBay are recognised automatically, and you can add the domains of other networks.
+* Heatmap for every page: how far visitors read, where they spend time and where they click
+* Read-next cards below your posts, chosen by shared tags and categories
+* An A/B test for these cards: try another heading, look or place and see which variant gets more clicks, with a plain verdict
 * A retention period you choose yourself
 
 **How it treats your visitors**
@@ -30,6 +33,7 @@ Cookieless visitor statistics with affiliate click tracking. No cookies, no stor
 * The visitor's address is never written to the database. It is used in memory only, together with the browser name and a random value, to form a short one-way identifier. The random value is replaced every day by default, so identifiers from earlier days can no longer be matched.
 * Browsers that send "Do Not Track" are not counted.
 * Logged-in users, previews and robots are not counted.
+* Heatmaps and A/B tests store plain totals only (per page, day and device class, or per variant and day), nothing about single visitors. The test variant is drawn by chance in the browser for every page view and is not remembered.
 * All data stays in your own WordPress database. The plugin never contacts another server.
 
 Whether you need a consent banner depends on the law that applies to you and on how you run your site. This plugin describes exactly what it does so that you can decide; it does not give legal advice.
@@ -66,14 +70,24 @@ They are an estimate from the time zone and language the browser reports. No add
 
 Tick "Proxy or CDN" in the settings. Otherwise all visitors may look like one.
 
+= How do I open a heatmap? =
+
+In the overview, click "Heatmap" next to a page in the list of most viewed pages. The page opens with coloured stripes and click dots laid over it. Only administrators can see this.
+
+= How does the A/B test work? =
+
+Under "Read next and A/B test" you set up variant A and variant B of the read-next box and tick "Run the A/B test". Half of the page views then get variant B. The result table shows page views, clicks and click rate for both, and tells you in plain words whether one of them is clearly ahead. Search engines always get variant A.
+
 = What happens to the data when I delete the plugin? =
 
-The table and all settings are removed.
+All tables and settings are removed.
 
 == Screenshots ==
 
 1. Overview with page views, visitors and affiliate link clicks.
-2. Settings.
+2. Heatmap laid over an article.
+3. Read-next cards with the result of an A/B test.
+4. Settings.
 
 == Changelog ==
 

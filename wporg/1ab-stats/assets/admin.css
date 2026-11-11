@@ -22,3 +22,5 @@
 .oneab-stats .oneab-bar { position: absolute; left: 0; top: 3px; bottom: 3px; background: #e5f0f8; border-radius: 3px; }
 .oneab-stats .oneab-label { position: relative; word-break: break-all; }
 .oneab-stats .oneab-empty { color: #50575e; margin: 0; }
+.oneab-stats .oneab-heat { margin-left: 8px; font-size: 12px; white-space: nowrap; }
+.oneab-stats .oneab-card select, .oneab-stats .oneab-card input[type="text"] { max-width: 100%; }
