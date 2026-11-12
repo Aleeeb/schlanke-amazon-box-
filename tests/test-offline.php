@@ -301,7 +301,7 @@ $GLOBALS['opt']['sab_mail_an'] = 'a@b.test'; unset($GLOBALS['opt']['sab_mail_zul
 $GLOBALS['opt']['sab_ausfall'] = ['B0AUS00001' => ['name' => 'Kaputtes Ding']]; $GLOBALS['opt']['sab_produkte'] = 'B0AUS00001 | Kaputtes Ding';
 $GLOBALS['mail'] = []; SAB::pruefen();
 ok(count($GLOBALS['mail']) === 1 && $GLOBALS['mail'][0][0] === 'a@b.test', 'Wochenmail wird gesendet');
-ok(strpos($GLOBALS['mail'][0][2] ?? '', 'Kaputtes Ding') !== false, 'Wochenmail nennt Ausfälle');
+ok(strpos($GLOBALS['mail'][0][2] ?? '', 'Kaputtes Ding') === false, 'Wochenmail: Ausfall ohne Fundstelle im Artikel (Testprodukt) wird nicht gemeldet');
 SAB::pruefen();
 ok(count($GLOBALS['mail']) === 1, 'Wochenmail nur einmal pro Woche');
 $GLOBALS['opt']['sab_mail_an'] = ''; unset($GLOBALS['opt']['sab_mail_zuletzt']); SAB::pruefen();
@@ -2260,6 +2260,19 @@ $wt = SAB::wochenmail_text_aus($wd); $wh = SAB::wochenmail_html($wd);
 ok($wd['summe'] === 15 && strpos($wt, '+50 %') !== false, 'Wochenmail: Summe 15 und +50 % zur Vorwoche');
 ok(strpos($wt, 'Keine ausgefallenen Produkte') !== false && strpos($wt, 'admin.php?page=sab-austausch') !== false, 'Wochenmail: Schnellzugriff Austausch, keine Ausfälle');
 ok(strpos($wh, '<a href=') !== false && strpos($wh, 'Meistgeklickte Artikel') !== false && strpos($wh, 'ausgefallen, bitte tauschen') === false, 'Wochenmail HTML: Links, Artikel, kein Ausfall-Kasten');
-$wd2 = SAB::wochenmail_daten([], 0, [], ['B000000009'=>['name'=>'Testnetz','ersatz'=>'B000000008']], []);
-ok(strpos(SAB::wochenmail_text_aus($wd2), 'ACHTUNG: 1 Produkt(e) ausgefallen') !== false && strpos(SAB::wochenmail_html($wd2), 'Testnetz') !== false, 'Wochenmail: Ausfall steht oben und mit Namen');
+$wbak = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 5, 'post_title' => 'Zaun-Artikel', 'post_content' => '<a href="https://www.amazon.es/dp/B000000009">x</a> B000000011 B0000001' . '01 B000000102 B000000103 B000000104 B000000105']]; } function prepare($q, ...$a) { return $q; } function esc_like($x) { return $x; } };
+$wd2 = SAB::wochenmail_daten([], 0, [], ['B000000009'=>['name'=>'Testnetz','ersatz'=>'B000000008'], 'B000000007'=>['name'=>'Testprodukt ohne Artikel']], []);
+$wt2 = SAB::wochenmail_text_aus($wd2); $wh2 = SAB::wochenmail_html($wd2);
+ok(strpos($wt2, 'ACHTUNG: 1 Produkt(e) zu prüfen') !== false && strpos($wh2, 'Testnetz') !== false && strpos($wh2, 'Testprodukt ohne Artikel') === false, 'Wochenmail: nur echte Fundstellen, Testprodukt fällt weg');
+ok(strpos($wh2, 'amazon.es/dp/B000000009') !== false && strpos($wh2, 'sab_zeige=B000000009') !== false && strpos($wh2, 'action=edit') !== false, 'Wochenmail: Amazon-Link, Frontend-Link und Editor-Link je Produkt');
+ok(strpos($wt2, 'Seiten mit') === false, 'Wochenmail: keine Liste mit Seiten voller Links mehr');
+// Score-Produkte nur bei weniger als 2 Ausfällen, höchstens 3
+$it = []; for ($i = 1; $i <= 5; $i++) { $it['B00000010' . $i] = ['titel' => 'Schwach ' . $i, 'bilder' => ['x.jpg']]; }
+$wd3 = SAB::wochenmail_daten([], 0, [], [], $it);
+ok(count($wd3['ausfaelle']) <= 3, 'Wochenmail: höchstens 3 schwache Produkte');
+$it['B000000011'] = ['titel' => 'Ohne Bild', 'bilder' => []];
+$wd4 = SAB::wochenmail_daten([], 0, [], [], $it);
+ok(count(array_filter($wd4['ausfaelle'], fn($z) => !empty($z['schwach']))) <= 3 && ($wd4['ausfaelle'][0]['grund'] ?? '') === 'ohne Bild', 'Wochenmail: Produkt ohne Bild steht vor schwachen');
+if ($wbak) { $GLOBALS['wpdb'] = $wbak; }
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
