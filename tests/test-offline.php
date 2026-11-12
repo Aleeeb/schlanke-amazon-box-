@@ -1327,6 +1327,9 @@ if (!function_exists('is_singular')) { function is_singular() { return true; } }
 $GLOBALS['admin'] = true; $GLOBALS['loggedin'] = true; ob_start(); SAB::stellen_skript(); $stj = ob_get_clean(); $GLOBALS['admin'] = false; $GLOBALS['loggedin'] = false;
 ok(strpos($stj, 'bearbeiten') !== false && strpos($stj, 'Im Bestand suchen') !== false && strpos($stj, 'action=edit') !== false, 'Frontend-Tauschfenster: Bestandssuche und Bearbeiten-Knopf');
 ok(strpos($stj, 'a[href]') !== false && strpos($stj, 'cn[as]') !== false, 'Frontend: auch fest eingetragene Textlinks bekommen Tauschen/Bearbeiten');
+ok(strpos($stj, 'Vorschau: was kommt in die Karte?') !== false && strpos($stj, 'So groß wird die Karte') !== false, 'Frontend: Vorschau zeigt, was in die Karte kommt und wie groß sie wird');
+$kcss = (new ReflectionClassConstant('SAB', 'KARTE_CSS'))->getValue();
+ok(strpos($kcss, 'sab-karten-einzel') !== false && strpos($kcss, ':has(.sab-karte-einzel)') !== false, 'CSS: einzelne Einzelkarte wird nicht auf 300 px begrenzt');
 $tmpj = tempnam(sys_get_temp_dir(), 'sj'); file_put_contents($tmpj . '.js', preg_replace('#^<script>|</script>$#', '', trim($stj))); exec('node --check ' . escapeshellarg($tmpj . '.js') . ' 2>&1', $nout, $nrc);
 ok($nrc === 0 && strpos($stj, 'bei Amazon ansehen') !== false && strpos($stj, 'Bei Amazon suchen') !== false, 'Frontend-Skript: JavaScript-Syntax ok, Amazon-Suche und -Ansehen im Tauschfenster ' . implode(' ', $nout));
 $GLOBALS['opt']['sab_kontrolle'] = ['2' => ['ts' => time(), 'alt' => 'B0A', 'neu' => 'B0AKKUNEU1', 'stellen' => [['pid' => 7, 'titel' => 'Zaun', 'satz' => '', 'n' => 2]]]];
