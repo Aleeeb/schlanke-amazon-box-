@@ -22,4 +22,9 @@ ok(abs($n['a']['lift'] - 1.0) < 0.01 && abs($n['b']['lift'] - 1.0) < 0.01, 'Glei
 $raw_a = 100/1000; $raw_b = 55/1000; ok($raw_a > $raw_b, 'Rohklickrate würde a fälschlich vorne sehen');
 $c2 = ['a'=>[10=>100], 'b'=>[10=>60, 20=>12]]; $n2 = AB1_Weiterlesen::normalisiere($s, $c2);
 ok($n2['b']['lift'] > $n2['a']['lift'], 'Echt bessere Variante b liegt bereinigt vorne');
+ok(AB1_Weiterlesen::thema_aus_zaehlung(10,1)==='maulwurf' && AB1_Weiterlesen::thema_aus_zaehlung(1,10)==='wuehlmaus' && AB1_Weiterlesen::thema_aus_zaehlung(5,4)==='beide' && AB1_Weiterlesen::thema_aus_zaehlung(1,1)==='', 'Themenerkennung Maulwurf/Wühlmaus/beide/unklar');
+ok(AB1_Weiterlesen::thema_passt('maulwurf','maulwurf') && !AB1_Weiterlesen::thema_passt('maulwurf','wuehlmaus') && AB1_Weiterlesen::thema_passt('beide','wuehlmaus') && AB1_Weiterlesen::thema_passt('','wuehlmaus') && AB1_Weiterlesen::thema_passt('wuehlmaus','alle'), 'Push-Platz mit Thema: passt nur zum richtigen Artikel');
+$M = $A; $M['thema']='maulwurf'; $W = $A; $W['id']=9; $W['thema']='wuehlmaus'; $G = $A; $G['id']=8; $G['thema']='';
+ok(!AB1_Weiterlesen::darf_verlinken($M,$W) && !AB1_Weiterlesen::darf_verlinken($W,$M), 'Maulwurf-Artikel verlinkt nie Wühlmaus-Artikel (und umgekehrt)');
+ok(AB1_Weiterlesen::darf_verlinken($M,$G) && AB1_Weiterlesen::darf_verlinken($G,$W), 'allgemeine Artikel bleiben mit beiden verlinkbar');
 echo $f ? "\n$f Fehler\n" : "\nAlles bestanden\n"; exit($f ? 1 : 0);
