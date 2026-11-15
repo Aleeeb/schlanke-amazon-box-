@@ -85,6 +85,8 @@ register_deactivation_hook( __FILE__, array( 'OneAB_Stats', 'deactivate' ) );
 if ( oneab_stats_fs()->is__premium_only() ) {
 	require_once ONEAB_STATS_DIR . 'includes/class-oneab-stats-products__premium_only.php';
 	OneAB_Stats_Products::init();
+	require_once ONEAB_STATS_DIR . 'includes/class-oneab-stats-tests__premium_only.php';
+	OneAB_Stats_Tests::init();
 }
 
 oneab_stats_fs()->add_action( 'after_uninstall', array( 'OneAB_Stats', 'uninstall' ) );

@@ -6,6 +6,7 @@ Der Hauptzweig, das Verzeichnis `statistik/` und die Live-Seiten sind davon nich
 
 ## Stand
 
+- Seit 15.11.2026: Pro ausgebaut (Alexanders Wahl „erst Pro ausbauen“). Neu in `includes/class-oneab-stats-tests__premium_only.php`: bis zu vier Varianten A bis D je Baustein und automatischer Sieger (tägliche Prüfung, mindestens 100 Seitenaufrufe je Variante, Vorsprung gegen jede andere Variante mit z ≥ 1,96; gilt auch für den Weiterlesen-Test). Die Gratis-Fassung rechnet allgemein mit beliebig vielen Varianten, bietet aber nur A und B an; Pro hängt sich über die Filter/Aktionen `oneab_stats_element_variants`, `oneab_stats_element_test_fields`, `oneab_stats_next_test_fields` ein. Test: 60 Browser-Besuche mit vier Varianten, Zähler stimmen; automatischer Sieger mit eingespielten Zahlen geprüft. Ohne Lizenz lässt sich Pro in der Testumgebung nur über ein kleines Hilfs-Plugin einschalten; der echte Lizenzweg über Freemius ist ungeprüft.
 - Seit 11.11.2026 (zweiter Schritt): Bausteine „Knopf, Bild, Karte“ mit eigenem A/B-Test je Baustein, einsetzbar als Block, Shortcode `[oneab_element id="1"]` oder klassisches Widget. Variante A kommt vom Server, B wird im Browser ausgelost, ohne Flackern und ohne Speicherung. Test mit 40 echten Browser-Besuchen: Zähler stimmen genau mit den ausgelosten Varianten und Klicks überein.
 - Freemius-SDK 2.13.5 ist eingebunden (`vendor/freemius`, Produkt 44600). Die Datei `uninstall.php` ist dafür entfallen; das Aufräumen hängt jetzt am Freemius-Ereignis `after_uninstall`. Erster Pro-Teil: Klicks je Produkt (`includes/class-oneab-stats-products__premium_only.php`, wird von Freemius aus der Gratis-Fassung entfernt).
 - Seit 11.11.2026 zusätzlich: Heatmap (Lesetiefe, Verweildauer, Klickpunkte als reine Summen) und Weiterlesen-Karten mit A/B-Test (Überschrift, Aussehen, Platz; Auslosung im Browser ohne Speicherung, Tageszähler).
@@ -22,6 +23,6 @@ Der Hauptzweig, das Verzeichnis `statistik/` und die Live-Seiten sind davon nich
 - Endgültiger Name. Bei einem anderen Namen ändern sich Ordner, Textdomain und Hauptdatei.
 - `Contributors` in `readme.txt` (Benutzername bei WordPress.org) eintragen.
 - Bildschirmfotos und Symbol für das Verzeichnis.
-- Festlegen, welche Teile Pro werden (bisher nur Klicks je Produkt). WordPress.org erlaubt in der Gratis-Fassung keine gesperrten Funktionen und keine künstlichen Obergrenzen; Pro muss also zusätzlicher Code sein.
+- Pro enthält jetzt: Klicks je Produkt, vier Varianten, automatischer Sieger. Weitere Ideen: mehrere Seiten in einer Übersicht, Test-Zeitplan. WordPress.org erlaubt in der Gratis-Fassung keine gesperrten Funktionen und keine künstlichen Obergrenzen; Pro muss also zusätzlicher Code sein.
 - Plan „Pro“ in Freemius fertig anlegen (Stand 11.11.: nur 4,90 € monatlich für 1 Seite gespeichert) und den Baustein in `1ab-stats.php` mit dem Schnipsel aus dem Freemius-Konto abgleichen.
 - Einwilligungsseite von Freemius auf einer echten Installation prüfen (in der Arbeitsumgebung ist Freemius nicht erreichbar).

@@ -51,6 +51,7 @@ final class OneAB_Stats {
 			'ab_on'         => 0,  // A/B test of the read-next cards is running.
 			'ab_id'         => 0,  // Number of the current test; counts of earlier tests stay separate.
 			'ab_start'      => '',
+			'ab_auto'       => 0,  // End the read-next test by itself once there is a clear winner.
 		);
 		return wp_parse_args( (array) get_option( self::OPTION, array() ), $defaults );
 	}

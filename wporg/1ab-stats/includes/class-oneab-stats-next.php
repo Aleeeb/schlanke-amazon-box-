@@ -213,7 +213,7 @@ final class OneAB_Stats_Next {
 	 */
 	public static function add( $test, array $data ) {
 		global $wpdb;
-		$variant = isset( $data['v'] ) && 'b' === $data['v'] ? 'b' : 'a';
+		$variant = isset( $data['v'] ) && in_array( $data['v'], array( 'b', 'c', 'd' ), true ) ? $data['v'] : 'a';
 		$event   = isset( $data['e'] ) && is_string( $data['e'] ) ? $data['e'] : '';
 		if ( ! in_array( $event, array( 's', 'v', 'c' ), true ) ) {
 			return;
@@ -226,28 +226,31 @@ final class OneAB_Stats_Next {
 	 * Totals of a test.
 	 *
 	 * @param int|null $test Test number; the read-next test when left out.
+	 * @param string[] $keys Variants to report.
 	 * @return array Variant => event => count.
 	 */
-	public static function totals( $test = null ) {
-		$test = null === $test ? (int) OneAB_Stats::settings()['ab_id'] : (int) $test;
+	public static function totals( $test = null, $keys = array( 'a', 'b' ) ) {
 		global $wpdb;
-		$out = array(
-			'a' => array(
+		$test = null === $test ? (int) OneAB_Stats::settings()['ab_id'] : (int) $test;
+		$out  = array();
+		foreach ( $keys as $key ) {
+			$out[ $key ] = array(
 				's' => 0,
 				'v' => 0,
 				'c' => 0,
-			),
-			'b' => array(
-				's' => 0,
-				'v' => 0,
-				'c' => 0,
-			),
-		);
+			);
+		}
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Own table.
 		$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT variant, event, SUM(n) AS n FROM %i WHERE test = %d GROUP BY variant, event', self::table(), $test ), ARRAY_A );
 		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
 			if ( isset( $out[ $row['variant'] ][ $row['event'] ] ) ) {
 				$out[ $row['variant'] ][ $row['event'] ] = (int) $row['n'];
+			}
+		}
+		// Variants that were never shown do not take part.
+		foreach ( array_slice( $keys, 2 ) as $key ) {
+			if ( 0 === $out[ $key ]['s'] ) {
+				unset( $out[ $key ] );
 			}
 		}
 		return $out;
@@ -273,26 +276,51 @@ final class OneAB_Stats_Next {
 	}
 
 	/**
+	 * The variant that is clearly ahead of every other one, or an empty string while that is open.
+	 *
+	 * @param array $totals Result of totals().
+	 * @return string Letter of the variant, '' for no clear winner yet, '?' for too few page views.
+	 */
+	public static function winner( $totals ) {
+		$best = '';
+		$rate = -1;
+		foreach ( $totals as $key => $t ) {
+			if ( $t['s'] < 100 ) {
+				return '?';
+			}
+			if ( min( 1, $t['c'] / $t['s'] ) > $rate ) {
+				$rate = min( 1, $t['c'] / $t['s'] );
+				$best = $key;
+			}
+		}
+		foreach ( $totals as $key => $t ) {
+			if ( $key === $best ) {
+				continue;
+			}
+			$n      = $totals[ $best ]['s'];
+			$pooled = min( 1, ( $totals[ $best ]['c'] + $t['c'] ) / ( $n + $t['s'] ) );
+			$error  = sqrt( $pooled * ( 1 - $pooled ) * ( 1 / $n + 1 / $t['s'] ) );
+			if ( $error <= 0 || ( $rate - min( 1, $t['c'] / $t['s'] ) ) / $error < 1.96 ) {
+				return '';
+			}
+		}
+		return $best;
+	}
+
+	/**
 	 * Plain verdict on the test.
 	 *
 	 * @param array $totals Result of totals().
 	 * @return string
 	 */
 	public static function verdict( $totals ) {
-		$na = $totals['a']['s'];
-		$nb = $totals['b']['s'];
-		if ( $na < 100 || $nb < 100 ) {
+		$winner = self::winner( $totals );
+		if ( '?' === $winner ) {
 			return __( 'Too early to say. Wait until each variant has at least 100 page views.', '1ab-stats' );
 		}
-		$pa     = min( 1, $totals['a']['c'] / $na );
-		$pb     = min( 1, $totals['b']['c'] / $nb );
-		$pooled = min( 1, ( $totals['a']['c'] + $totals['b']['c'] ) / ( $na + $nb ) );
-		$error  = sqrt( $pooled * ( 1 - $pooled ) * ( 1 / $na + 1 / $nb ) );
-		$z      = $error > 0 ? abs( $pa - $pb ) / $error : 0;
-		if ( $z >= 1.96 ) {
-			return $pb > $pa
-				? __( 'Variant B is ahead, and a difference this large is very unlikely to be chance.', '1ab-stats' )
-				: __( 'Variant A is ahead, and a difference this large is very unlikely to be chance.', '1ab-stats' );
+		if ( '' !== $winner ) {
+			/* translators: %s: letter of the variant */
+			return sprintf( __( 'Variant %s is ahead, and a difference this large is very unlikely to be chance.', '1ab-stats' ), strtoupper( $winner ) );
 		}
 		return __( 'No clear winner yet. The difference could still be chance. Let the test run longer.', '1ab-stats' );
 	}
@@ -304,8 +332,7 @@ final class OneAB_Stats_Next {
 	 */
 	public static function result( $totals ) {
 		echo '<table class="oneab-table"><thead><tr><th>' . esc_html__( 'Variant', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Page views', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Seen', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Clicks', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Click rate', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Likely range', '1ab-stats' ) . '</th></tr></thead><tbody>';
-		foreach ( array( 'a', 'b' ) as $v ) {
-			$t     = $totals[ $v ];
+		foreach ( $totals as $v => $t ) {
 			$rate  = $t['s'] > 0 ? 100 * $t['c'] / $t['s'] : 0;
 			$range = self::wilson( $t['c'], $t['s'] );
 			echo '<tr><td>' . esc_html( strtoupper( $v ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['s'] ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['v'] ) ) . '</td><td class="num">' . esc_html( number_format_i18n( $t['c'] ) ) . '</td>';
@@ -332,8 +359,9 @@ final class OneAB_Stats_Next {
 		$s['next_a'] = self::variant( isset( $_POST['next_a'] ) ? wp_unslash( $_POST['next_a'] ) : array() );
 		$s['next_b'] = self::variant( isset( $_POST['next_b'] ) ? wp_unslash( $_POST['next_b'] ) : array() );
 		// phpcs:enable
-		$was_on     = (int) $s['ab_on'];
-		$s['ab_on'] = empty( $_POST['ab_on'] ) ? 0 : 1;
+		$was_on       = (int) $s['ab_on'];
+		$s['ab_on']   = empty( $_POST['ab_on'] ) ? 0 : 1;
+		$s['ab_auto'] = empty( $_POST['ab_auto'] ) ? 0 : 1;
 
 		$step = isset( $_POST['oneab_step'] ) ? sanitize_key( wp_unslash( $_POST['oneab_step'] ) ) : '';
 		if ( 'use_b' === $step ) {
@@ -390,6 +418,12 @@ final class OneAB_Stats_Next {
 		echo '</div><div class="oneab-card"><h2>' . esc_html__( 'Variant B', '1ab-stats' ) . '</h2>';
 		self::variant_fields( 'next_b', $s['next_b'] );
 		echo '<p><label><input type="checkbox" name="ab_on" value="1"' . checked( 1, (int) $s['ab_on'], false ) . '> ' . esc_html__( 'Run the A/B test: half of the page views get variant B', '1ab-stats' ) . '</label></p>';
+		/**
+		 * Fires below the test switch of the read-next cards, for further test options.
+		 *
+		 * @param array $s Settings.
+		 */
+		do_action( 'oneab_stats_next_test_fields', $s );
 		echo '</div></div>';
 		echo '<p class="description">' . esc_html__( 'The variant is drawn by chance for every page view, in the visitor\'s browser. Nothing is stored there, and only daily totals reach your server.', '1ab-stats' ) . '</p>';
 		submit_button();

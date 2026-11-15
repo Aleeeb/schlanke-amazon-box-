@@ -28,6 +28,12 @@ Cookieless visitor statistics with affiliate click tracking, heatmaps and an A/B
 * Buttons, images and cards you can place on the home page, in any page or post and in the sidebar (block, shortcode or classic widget), each with its own A/B test of two variants
 * A retention period you choose yourself
 
+The Pro version adds:
+
+* Up to four variants (A to D) per button, image or card
+* Tests that end by themselves as soon as there is a clear winner, and show the winner to everyone from then on
+* Affiliate link clicks for every single product
+
 **How it treats your visitors**
 
 * It sets no cookie and stores nothing in the visitor's browser.

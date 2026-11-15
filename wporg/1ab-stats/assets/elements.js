@@ -14,13 +14,13 @@
 
 		// Normally the draw has already happened right behind the element. This is the fallback when that small script was held back.
 		if ( ! v ) {
-			var spare = box.querySelector( 'template' );
+			var spares = box.querySelectorAll( 'template' ), pick = Math.floor( Math.random() * ( spares.length + 1 ) );
 			v = 'a';
-			if ( spare && spare.content && Math.random() < 0.5 ) {
-				var copy = spare.content.cloneNode( true );
+			if ( pick && spares[ pick - 1 ].content ) {
+				var copy = spares[ pick - 1 ].content.cloneNode( true );
+				v = spares[ pick - 1 ].getAttribute( 'data-v' ) || 'b';
 				box.textContent = '';
 				box.appendChild( copy );
-				v = 'b';
 			}
 			box.setAttribute( 'data-oneab-v', v );
 		}

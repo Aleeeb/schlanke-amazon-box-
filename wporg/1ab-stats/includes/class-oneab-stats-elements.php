@@ -42,6 +42,21 @@ final class OneAB_Stats_Elements {
 	}
 
 	/**
+	 * Letters of the variants an element can have. A is always the first.
+	 *
+	 * @return string[]
+	 */
+	public static function keys() {
+		/**
+		 * Filters the variants an element can have.
+		 *
+		 * @param string[] $keys Letters a to d, starting with a.
+		 */
+		$keys = array_values( array_intersect( array( 'a', 'b', 'c', 'd' ), (array) apply_filters( 'oneab_stats_element_variants', array( 'a', 'b' ) ) ) );
+		return in_array( 'a', $keys, true ) && count( $keys ) > 1 ? $keys : array( 'a', 'b' );
+	}
+
+	/**
 	 * All elements, keyed by their number.
 	 *
 	 * @return array
@@ -97,16 +112,27 @@ final class OneAB_Stats_Elements {
 	public static function clean( $element ) {
 		$element = is_array( $element ) ? $element : array();
 		$type    = isset( $element['type'] ) ? $element['type'] : '';
-		return array(
+		$day     = function ( $key ) use ( $element ) {
+			return isset( $element[ $key ] ) && is_string( $element[ $key ] ) && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $element[ $key ] ) ? $element[ $key ] : '';
+		};
+		$out     = array(
 			'name'      => isset( $element['name'] ) && is_string( $element['name'] ) ? sanitize_text_field( $element['name'] ) : '',
 			'type'      => in_array( $type, array( 'button', 'image', 'card' ), true ) ? $type : 'button',
 			'sponsored' => empty( $element['sponsored'] ) ? 0 : 1,
-			'a'         => self::variant( isset( $element['a'] ) ? $element['a'] : array() ),
-			'b'         => self::variant( isset( $element['b'] ) ? $element['b'] : array() ),
 			'ab_on'     => empty( $element['ab_on'] ) ? 0 : 1,
+			'auto'      => empty( $element['auto'] ) ? 0 : 1,
 			'test'      => isset( $element['test'] ) ? absint( $element['test'] ) : 0,
-			'start'     => isset( $element['start'] ) && is_string( $element['start'] ) && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $element['start'] ) ? $element['start'] : '',
+			'start'     => $day( 'start' ),
+			'ended'     => $day( 'ended' ),
+			'winner'    => isset( $element['winner'] ) && in_array( $element['winner'], array( 'a', 'b', 'c', 'd' ), true ) ? $element['winner'] : '',
 		);
+		// Variants beyond the available ones stay stored, so nothing is lost when the set changes.
+		foreach ( array( 'a', 'b', 'c', 'd' ) as $key ) {
+			if ( isset( $element[ $key ] ) || in_array( $key, self::keys(), true ) ) {
+				$out[ $key ] = self::variant( isset( $element[ $key ] ) ? $element[ $key ] : array() );
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -197,14 +223,20 @@ final class OneAB_Stats_Elements {
 			return '';
 		}
 		$html    = '<div class="oneab-el oneab-el--' . esc_attr( $element['type'] ) . '"';
-		$b       = $element['ab_on'] && $element['test'] ? self::markup( $element, $element['b'] ) : '';
+		$spare   = '';
 		$preview = is_admin() || ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || is_feed();
-		if ( '' === $b || $preview ) {
+		if ( $element['ab_on'] && $element['test'] && ! $preview ) {
+			foreach ( array_slice( self::keys(), 1 ) as $key ) {
+				$other  = self::markup( $element, $element[ $key ] );
+				$spare .= '' !== $other ? '<template data-v="' . esc_attr( $key ) . '">' . $other . '</template>' : '';
+			}
+		}
+		if ( '' === $spare ) {
 			return $html . '>' . $a . '</div>';
 		}
-		$html .= ' data-oneab-el="' . esc_attr( (string) $element['test'] ) . '">' . $a . '<template>' . $b . '</template></div>';
+		$html .= ' data-oneab-el="' . esc_attr( (string) $element['test'] ) . '">' . $a . $spare . '</div>';
 		// The draw happens right here, before the element is painted, so nothing flickers.
-		$html .= wp_get_inline_script_tag( '(function(s){var e=s&&s.previousElementSibling,t=e&&e.querySelector("template");if(!t||e.dataset.oneabV)return;if(Math.random()<.5){var c=t.content.cloneNode(true);e.textContent="";e.appendChild(c);e.dataset.oneabV="b"}else{e.dataset.oneabV="a"}})(document.currentScript);' );
+		$html .= wp_get_inline_script_tag( '(function(s){var e=s&&s.previousElementSibling,t=e&&e.querySelector("template");if(!t||e.dataset.oneabV)return;var l=e.querySelectorAll("template"),i=Math.floor(Math.random()*(l.length+1));if(i){var x=l[i-1],c=x.content.cloneNode(true);e.textContent="";e.appendChild(c);e.dataset.oneabV=x.getAttribute("data-v")||"b"}else{e.dataset.oneabV="a"}})(document.currentScript);' );
 		if ( ! self::$loaded ) {
 			self::$loaded = true;
 			wp_enqueue_script(
@@ -419,25 +451,31 @@ final class OneAB_Stats_Elements {
 				'sponsored' => ! empty( $_POST['sponsored'] ),
 				'a'         => isset( $_POST['a'] ) ? wp_unslash( $_POST['a'] ) : array(),
 				'b'         => isset( $_POST['b'] ) ? wp_unslash( $_POST['b'] ) : array(),
+				'c'         => isset( $_POST['c'] ) ? wp_unslash( $_POST['c'] ) : ( $old && isset( $old['c'] ) ? $old['c'] : null ),
+				'd'         => isset( $_POST['d'] ) ? wp_unslash( $_POST['d'] ) : ( $old && isset( $old['d'] ) ? $old['d'] : null ),
 				'ab_on'     => ! empty( $_POST['ab_on'] ),
+				'auto'      => ! empty( $_POST['auto'] ),
 				'test'      => $old ? $old['test'] : 0,
 				'start'     => $old ? $old['start'] : '',
+				'ended'     => $old ? $old['ended'] : '',
+				'winner'    => $old ? $old['winner'] : '',
 			)
 		);
 		// phpcs:enable
 		$was_on = $old ? $old['ab_on'] : 0;
-		if ( 'use_b' === $step ) {
-			$element['a']     = $element['b'];
-			$element['ab_on'] = 0;
-		} elseif ( 'use_a' === $step ) {
+		$use    = 0 === strpos( $step, 'use_' ) ? substr( $step, 4 ) : '';
+		if ( in_array( $use, self::keys(), true ) ) {
+			$element['a']     = $element[ $use ];
 			$element['ab_on'] = 0;
 		}
 		// A new number separates the counts of a new test from those of earlier ones.
 		if ( 'restart' === $step || ( $element['ab_on'] && ! $was_on ) ) {
-			$next             = max( self::FIRST_TEST, (int) get_option( 'oneab_stats_test_seq', 0 ) + 1 );
-			$element['test']  = $next;
-			$element['start'] = wp_date( 'Y-m-d' );
-			$element['ab_on'] = 1;
+			$next              = max( self::FIRST_TEST, (int) get_option( 'oneab_stats_test_seq', 0 ) + 1 );
+			$element['test']   = $next;
+			$element['start']  = wp_date( 'Y-m-d' );
+			$element['ab_on']  = 1;
+			$element['ended']  = '';
+			$element['winner'] = '';
 			update_option( 'oneab_stats_test_seq', $next, false );
 		}
 		$all[ $id ] = $element;
@@ -494,20 +532,22 @@ final class OneAB_Stats_Elements {
 			return;
 		}
 		$types = self::types();
-		echo '<div class="oneab-card"><table class="oneab-table"><thead><tr><th>' . esc_html__( 'Name', '1ab-stats' ) . '</th><th>' . esc_html__( 'Kind', '1ab-stats' ) . '</th><th>' . esc_html__( 'Shortcode', '1ab-stats' ) . '</th><th>' . esc_html__( 'A/B test', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Click rate A', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Click rate B', '1ab-stats' ) . '</th></tr></thead><tbody>';
+		echo '<div class="oneab-card"><table class="oneab-table"><thead><tr><th>' . esc_html__( 'Name', '1ab-stats' ) . '</th><th>' . esc_html__( 'Kind', '1ab-stats' ) . '</th><th>' . esc_html__( 'Shortcode', '1ab-stats' ) . '</th><th>' . esc_html__( 'A/B test', '1ab-stats' ) . '</th><th class="num">' . esc_html__( 'Click rates', '1ab-stats' ) . '</th></tr></thead><tbody>';
 		foreach ( $all as $id => $element ) {
-			$rates = array( '–', '–' );
+			$rates = array();
 			$state = __( 'No test', '1ab-stats' );
 			if ( $element['test'] ) {
-				$totals = OneAB_Stats_Next::totals( $element['test'] );
+				$totals = OneAB_Stats_Next::totals( $element['test'], self::keys() );
 				$state  = $element['ab_on'] ? __( 'Running', '1ab-stats' ) : __( 'Stopped', '1ab-stats' );
-				foreach ( array( 'a', 'b' ) as $i => $v ) {
-					$rates[ $i ] = $totals[ $v ]['s'] > 0 ? number_format_i18n( 100 * $totals[ $v ]['c'] / $totals[ $v ]['s'], 1 ) . ' %' : '–';
+				foreach ( $totals as $v => $t ) {
+					if ( $t['s'] > 0 ) {
+						$rates[] = strtoupper( $v ) . ' ' . number_format_i18n( 100 * $t['c'] / $t['s'], 1 ) . ' %';
+					}
 				}
 			}
 			echo '<tr><td><a href="' . esc_url( $base . '&el=' . $id ) . '"><strong>' . esc_html( '' !== $element['name'] ? $element['name'] : '#' . $id ) . '</strong></a></td>';
 			echo '<td>' . esc_html( $types[ $element['type'] ] ) . '</td><td><code>[oneab_element id="' . esc_html( (string) $id ) . '"]</code></td>';
-			echo '<td>' . esc_html( $state ) . '</td><td class="num">' . esc_html( $rates[0] ) . '</td><td class="num">' . esc_html( $rates[1] ) . '</td></tr>';
+			echo '<td>' . esc_html( $state ) . '</td><td class="num">' . esc_html( $rates ? implode( ' · ', $rates ) : '–' ) . '</td></tr>';
 		}
 		echo '</tbody></table></div>';
 	}
@@ -539,13 +579,26 @@ final class OneAB_Stats_Elements {
 		echo '</div>';
 
 		echo '<div class="oneab-grid">';
-		echo '<div class="oneab-card"><h2>' . esc_html__( 'Variant A', '1ab-stats' ) . '</h2>';
-		self::variant_fields( 'a', $element['a'] );
-		echo '</div><div class="oneab-card"><h2>' . esc_html__( 'Variant B', '1ab-stats' ) . '</h2>';
-		self::variant_fields( 'b', $element['b'] );
-		echo '<p><label><input type="checkbox" name="ab_on" value="1"' . checked( 1, $element['ab_on'], false ) . '> ' . esc_html__( 'Run the A/B test: half of the page views get variant B', '1ab-stats' ) . '</label></p>';
-		echo '</div></div>';
+		foreach ( self::keys() as $key ) {
+			/* translators: %s: letter of the variant, A to D */
+			echo '<div class="oneab-card"><h2>' . esc_html( sprintf( __( 'Variant %s', '1ab-stats' ), strtoupper( $key ) ) ) . '</h2>';
+			self::variant_fields( $key, $element[ $key ] );
+			echo '</div>';
+		}
+		echo '</div>';
+		echo '<div class="oneab-card"><h2>' . esc_html__( 'A/B test', '1ab-stats' ) . '</h2>';
+		echo '<p><label><input type="checkbox" name="ab_on" value="1"' . checked( 1, $element['ab_on'], false ) . '> ' . esc_html__( 'Run the test: every filled-in variant gets the same share of the page views', '1ab-stats' ) . '</label></p>';
+		/**
+		 * Fires inside the test box of the element form, for further test options.
+		 *
+		 * @param array $element Element.
+		 */
+		do_action( 'oneab_stats_element_test_fields', $element );
+		echo '</div>';
 		echo '<p class="description">' . esc_html__( 'The variant is drawn by chance for every page view, in the visitor\'s browser. Nothing is stored there, and only daily totals reach your server. Search engines always get variant A.', '1ab-stats' ) . '</p>';
+		if ( oneab_stats_fs()->is_not_paying() ) {
+			echo '<p class="oneab-pro">' . esc_html__( 'The Pro version tests up to four variants at once and ends a test by itself as soon as there is a clear winner.', '1ab-stats' ) . ' <a href="' . esc_url( oneab_stats_fs()->get_upgrade_url() ) . '">' . esc_html__( 'See what Pro offers', '1ab-stats' ) . '</a></p>';
+		}
 		echo '<p class="submit"><button class="button button-primary">' . esc_html__( 'Save element', '1ab-stats' ) . '</button> ';
 		if ( $id ) {
 			echo '<button class="button-link oneab-delete" name="oneab_step" value="delete">' . esc_html__( 'Delete element', '1ab-stats' ) . '</button>';
@@ -561,15 +614,22 @@ final class OneAB_Stats_Elements {
 			}
 		}
 		if ( $id && $element['test'] ) {
-			$totals = OneAB_Stats_Next::totals( $element['test'] );
+			$totals = OneAB_Stats_Next::totals( $element['test'], self::keys() );
 			echo '<div class="oneab-card"><h2>' . esc_html__( 'Test result', '1ab-stats' ) . '</h2>';
 			if ( $element['start'] ) {
 				/* translators: %s: date */
 				echo '<p>' . esc_html( sprintf( __( 'Counting since %s.', '1ab-stats' ), wp_date( get_option( 'date_format' ), strtotime( $element['start'] . ' 12:00:00' ) ) ) ) . ' ' . esc_html( $element['ab_on'] ? __( 'The test is running.', '1ab-stats' ) : __( 'The test is stopped.', '1ab-stats' ) ) . '</p>';
 			}
+			if ( $element['ended'] && $element['winner'] ) {
+				/* translators: 1: date, 2: letter of the variant */
+				echo '<p><strong>' . esc_html( sprintf( __( 'The test ended by itself on %1$s. Variant %2$s won and is shown to everyone now.', '1ab-stats' ), wp_date( get_option( 'date_format' ), strtotime( $element['ended'] . ' 12:00:00' ) ), strtoupper( $element['winner'] ) ) ) . '</strong></p>';
+			}
 			OneAB_Stats_Next::result( $totals );
 			echo '<p><button class="button" name="oneab_step" value="use_a">' . esc_html__( 'Keep A and end the test', '1ab-stats' ) . '</button> ';
-			echo '<button class="button" name="oneab_step" value="use_b">' . esc_html__( 'Use B from now on and end the test', '1ab-stats' ) . '</button> ';
+			foreach ( array_slice( self::keys(), 1 ) as $key ) {
+				/* translators: %s: letter of the variant */
+				echo '<button class="button" name="oneab_step" value="use_' . esc_attr( $key ) . '">' . esc_html( sprintf( __( 'Use %s from now on and end the test', '1ab-stats' ), strtoupper( $key ) ) ) . '</button> ';
+			}
 			echo '<button class="button" name="oneab_step" value="restart">' . esc_html__( 'Start a new test from zero', '1ab-stats' ) . '</button></p></div>';
 		}
 		echo '</form>';
