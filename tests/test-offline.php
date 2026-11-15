@@ -791,7 +791,7 @@ $ek = '<hr /><p><strong>Kupferband</strong></p><p>[amz_bild asin="B0KUPFER01" la
 SAB::$umbau_abw = []; [$ec, $en] = SAB::umbau_text($ek);
 $GLOBALS['opt']['sab_paare_umbauen'] = '0'; [$ec0] = SAB::umbau_text($ek); unset($GLOBALS['opt']['sab_paare_umbauen']);
 ok(strpos($ec0, '[amz_link asin="B0KUPFER01" land="es"]oferta de Amazon[/amz_link]') !== false && strpos($ec0, 'link.amazon') === false, 'Umbau: nicht auflösbarer link.amazon-Link unter einem Einzelprodukt wird zu [amz_link] dieses Produkts');
-ok(strpos($ec, '[amz_karte asin="B0KUPFER01" land="es" stil="einzel"]') !== false && strpos($ec, 'link.amazon') === false && strpos($ec, 'Klick auf die') === false && strpos($ec, '<p><strong>Kupferband</strong></p>') !== false, 'Umbau: Bild + link.amazon-Textlink darunter wird gleich eine Einzelkarte (' . $ec . ')');
+ok(strpos($ec, '[amz_karte asin="B0KUPFER01" land="es" titel="Kupferband" stil="einzel"]') !== false && strpos($ec, 'link.amazon') === false && strpos($ec, 'Klick auf die') === false && strpos($ec, '<p><strong>Kupferband</strong></p>') === false && strpos($ec, 'titel="Kupferband"') !== false, 'Umbau: Bild + link.amazon-Textlink darunter wird gleich eine Einzelkarte (' . $ec . ')');
 $zwei = '<hr /><p>[amz_bild asin="B0KUPFER01" land="es"][/amz_bild] [amz_bild asin="B0KUPFER02" land="es"][/amz_bild]</p><p><a href="https://link.amazon/B0d8rrpd3">oferta</a></p>';
 SAB::$umbau_abw = []; [$zc] = SAB::umbau_text($zwei);
 ok(strpos($zc, 'link.amazon') !== false, 'Umbau: bei zwei Produkten im Abschnitt wird nichts geraten');
@@ -2152,7 +2152,7 @@ $pb = "<!-- wp:html -->\n<p>[amz_bild asin=\"B0PAAR0002\"]<a href=\"x\"><img src
 ok($pn2 === 1 && strpos($pb1, '[amz_karte asin="B0PAAR0002" stil="einzel"]') !== false && strpos($pb1, '[amz_link') === false && strpos($pb1, '[amz_bild') === false, 'Paare: Bild und Textlink im selben Absatz (' . $pb1 . ')');
 $pt = '<p>Vorher.</p><h3>Schneckenzaun Pro Set</h3><p>[amz_bild asin="B0PAAR0009" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0PAAR0009" land="es"]Schneckenzaun Pro[/amz_link]</p><p>Danach.</p>';
 [$pt1, $pnt] = SAB::paare_zu_einzelkarten($pt);
-ok($pnt === 1 && strpos($pt1, 'Schneckenzaun Pro Set') === false && strpos($pt1, '<p>Vorher.</p>[amz_karten]') === 0, 'Paare: alter Titel direkt über dem Bild wird entfernt (' . $pt1 . ')');
+ok($pnt === 1 && strpos($pt1, '<h3>') === false && strpos($pt1, 'titel="Schneckenzaun Pro Set"') !== false && strpos($pt1, '<p>Vorher.</p>[amz_karten]') === 0, 'Paare: alter Titel direkt über dem Bild wird entfernt und ist der Kartentitel (' . $pt1 . ')');
 $pv = '<p>[amz_bild asin="B0PAAR0011"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild führt zum [amz_link asin="B0PAAR0011"]Angebot bei Amazon[/amz_link]</p><p>.</p><p>Weiter.</p>';
 [$pv1] = SAB::paare_zu_einzelkarten($pv);
 ok($pv1 === '[amz_karten][amz_karte asin="B0PAAR0011" stil="einzel"][/amz_karten]<p>Weiter.</p>', 'Paare: übrig gebliebener Satzpunkt wird entfernt (' . $pv1 . ')');
@@ -2278,4 +2278,16 @@ $it['B000000011'] = ['titel' => 'Ohne Bild', 'bilder' => []];
 $wd4 = SAB::wochenmail_daten([], 0, [], [], $it);
 ok(count(array_filter($wd4['ausfaelle'], fn($z) => !empty($z['schwach']))) <= 3 && ($wd4['ausfaelle'][0]['grund'] ?? '') === 'ohne Bild', 'Wochenmail: Produkt ohne Bild steht vor schwachen');
 if ($wbak) { $GLOBALS['wpdb'] = $wbak; }
+// 0.92.75: Titel über dem Bild wird erkannt, auch ohne Wortgleichheit mit dem Linktext, und bleibt als Kartentitel
+foreach ([
+  ['<p style="text-align:center"><strong>Der beste Zaun für kleine Beete</strong></p>', 'Der beste Zaun für kleine Beete', 'fette zentrierte Zeile'],
+  ['<h4>Mein Favorit gegen Schnecken</h4>', 'Mein Favorit gegen Schnecken', 'Überschrift h4'],
+  ['<p class="has-text-align-center">Unser Tipp fürs Hochbeet</p>', 'Unser Tipp fürs Hochbeet', 'zentrierte Zeile ohne fett'],
+  ['<!-- wp:paragraph --><p><strong>Zaun mit Strom, 12 V</strong></p><!-- /wp:paragraph -->', 'Zaun mit Strom, 12 V', 'Block-Editor'],
+] as [$vorn, $titel, $name]) {
+  [$r] = SAB::paare_zu_einzelkarten('<p>Davor.</p>' . $vorn . '<p>[amz_bild asin="B0TITEL001" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0TITEL001" land="es"]Angebot[/amz_link]</p><p>Danach.</p>');
+  ok(strpos($r, 'titel="' . esc_attr($titel) . '"') !== false && strpos($r, '<strong>') === false && strpos($r, '<p>Davor.</p>[amz_karten]') === 0, 'Paare: Titel über dem Bild bleibt Kartentitel: ' . $name . ' (' . $r . ')');
+}
+[$r] = SAB::paare_zu_einzelkarten('<p>Ein ganz normaler Satz im Text, der mit einem Punkt endet.</p><p>[amz_bild asin="B0TITEL002" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0TITEL002" land="es"]Angebot[/amz_link]</p>', '', true);
+ok(strpos($r, 'Ein ganz normaler Satz') !== false && strpos($r, 'titel=') === false, 'Paare: normaler Satz über dem Bild wird nicht als Titel genommen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
