@@ -22,8 +22,11 @@ ok(abs($n['a']['lift'] - 1.0) < 0.01 && abs($n['b']['lift'] - 1.0) < 0.01, 'Glei
 $raw_a = 100/1000; $raw_b = 55/1000; ok($raw_a > $raw_b, 'Rohklickrate würde a fälschlich vorne sehen');
 $c2 = ['a'=>[10=>100], 'b'=>[10=>60, 20=>12]]; $n2 = AB1_Weiterlesen::normalisiere($s, $c2);
 ok($n2['b']['lift'] > $n2['a']['lift'], 'Echt bessere Variante b liegt bereinigt vorne');
-ok(AB1_Weiterlesen::thema_aus_zaehlung(10,1)==='maulwurf' && AB1_Weiterlesen::thema_aus_zaehlung(1,10)==='wuehlmaus' && AB1_Weiterlesen::thema_aus_zaehlung(5,4)==='beide' && AB1_Weiterlesen::thema_aus_zaehlung(1,1)==='', 'Themenerkennung Maulwurf/Wühlmaus/beide/unklar');
-ok(AB1_Weiterlesen::thema_passt('maulwurf','maulwurf') && !AB1_Weiterlesen::thema_passt('maulwurf','wuehlmaus') && AB1_Weiterlesen::thema_passt('beide','wuehlmaus') && AB1_Weiterlesen::thema_passt('','wuehlmaus') && AB1_Weiterlesen::thema_passt('wuehlmaus','alle'), 'Push-Platz mit Thema: passt nur zum richtigen Artikel');
+$gr = AB1_Weiterlesen::themen_parsen("Maulwurf: maulwurf, Maulwürf\nWühlmaus: wühlmaus, wühlmäus\nkaputt ohne doppelpunkt\n: leer");
+ok(array_keys($gr) === ['maulwurf','wuehlmaus'] && $gr['wuehlmaus']['name'] === 'Wühlmaus' && in_array('maulwürf', $gr['maulwurf']['woerter']), 'Themengruppen aus Text: Kürzel, Namen, Wörter');
+ok(AB1_Weiterlesen::themen_parsen('') === [], 'ohne Themengruppen: leer');
+ok(AB1_Weiterlesen::thema_aus_zaehlungen(['a'=>10,'b'=>1]) === 'a' && AB1_Weiterlesen::thema_aus_zaehlungen(['a'=>5,'b'=>4]) === 'mix' && AB1_Weiterlesen::thema_aus_zaehlungen(['a'=>1,'b'=>1]) === '' && AB1_Weiterlesen::thema_aus_zaehlungen(['a'=>4,'b'=>0,'c'=>0]) === 'a', 'Themenerkennung: klar / gemischt / unklar');
+ok(AB1_Weiterlesen::thema_passt('a','a') && !AB1_Weiterlesen::thema_passt('a','b') && AB1_Weiterlesen::thema_passt('mix','b') && AB1_Weiterlesen::thema_passt('','b') && AB1_Weiterlesen::thema_passt('b','alle'), 'Push-Platz mit Thema passt nur zur richtigen Gruppe');
 $M = $A; $M['thema']='maulwurf'; $W = $A; $W['id']=9; $W['thema']='wuehlmaus'; $G = $A; $G['id']=8; $G['thema']='';
 ok(!AB1_Weiterlesen::darf_verlinken($M,$W) && !AB1_Weiterlesen::darf_verlinken($W,$M), 'Maulwurf-Artikel verlinkt nie Wühlmaus-Artikel (und umgekehrt)');
 ok(AB1_Weiterlesen::darf_verlinken($M,$G) && AB1_Weiterlesen::darf_verlinken($G,$W), 'allgemeine Artikel bleiben mit beiden verlinkbar');
