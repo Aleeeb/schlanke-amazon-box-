@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.2.5
+ * Version: 0.3.0
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.2.5' );
+define( 'ABSPEED_VER', '0.3.0' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -24,6 +24,7 @@ function abspeed_defaults() {
 		'youtube'     => 1, // YouTube/Vimeo als Klickvorschau
 		'yt_thumb'    => 0, // Vorschaubild von YouTube laden (Datenschutz: nein)
 		'video'       => 1, // <video> preload=none
+		'dims'        => 1, // fehlende Breite/Höhe an Bildern aus der Mediathek ergänzen (damit natives Lazy Load greift, kein Layout-Sprung)
 		'exclude'     => 'no-lazy skip-lazy',
 	);
 }
@@ -78,6 +79,7 @@ function abspeed_img( $m ) {
 	if ( abspeed_excluded( $tag ) ) { return $tag; }
 	// a3 Lazy Load / andere Plugins am Werk: nicht anfassen
 	if ( preg_match( '/\b(data-src|data-lazy-src|data-lazy)=/i', $tag ) || preg_match( '/class=["\'][^"\']*\b(lazyload|lazyloaded|a3-lazy|lazy-hidden)\b/i', $tag ) ) { return $tag; }
+	if ( abspeed_opt( 'dims' ) ) { $tag = abspeed_add_dims( $tag ); }
 	$GLOBALS['abspeed_img_count']++;
 	$first = ( $GLOBALS['abspeed_img_count'] === 1 && abspeed_opt( 'skip_first' ) );
 	if ( $first ) {
@@ -90,6 +92,51 @@ function abspeed_img( $m ) {
 	if ( stripos( $tag, ' loading=' ) === false ) { $tag = preg_replace( '/<img\b/i', '<img loading="lazy"', $tag, 1 ); }
 	if ( stripos( $tag, ' decoding=' ) === false ) { $tag = preg_replace( '/<img\b/i', '<img decoding="async"', $tag, 1 ); }
 	return $tag;
+}
+
+
+/** Breite/Höhe aus der Datei lesen (nur Bilder aus dem Uploads-Ordner), 30 Tage zwischengespeichert. */
+function abspeed_dims( $src ) {
+	static $up = null;
+	if ( null === $up ) { $up = wp_upload_dir( null, false ); }
+	if ( empty( $up['baseurl'] ) || empty( $up['basedir'] ) ) { return false; }
+	$src = html_entity_decode( $src );
+	$src = preg_replace( '/^https?:/i', '', strtok( $src, '?#' ) );
+	$base = preg_replace( '/^https?:/i', '', $up['baseurl'] );
+	if ( strpos( $src, $base . '/' ) !== 0 ) { return false; }
+	$rel = rawurldecode( substr( $src, strlen( $base ) ) );
+	if ( strpos( $rel, '..' ) !== false || ! preg_match( '/\.(jpe?g|png|gif|webp)$/i', $rel ) ) { return false; }
+	$key = 'abspeed_d_' . md5( $rel );
+	$c   = get_transient( $key );
+	if ( is_array( $c ) ) { return $c; }
+	if ( 'none' === $c ) { return false; }
+	$file = $up['basedir'] . $rel;
+	$size = is_readable( $file ) ? @getimagesize( $file ) : false;
+	if ( $size && $size[0] > 0 && $size[1] > 0 ) {
+		$d = array( (int) $size[0], (int) $size[1] );
+		set_transient( $key, $d, 30 * DAY_IN_SECONDS );
+		return $d;
+	}
+	set_transient( $key, 'none', DAY_IN_SECONDS );
+	return false;
+}
+
+function abspeed_add_dims( $tag ) {
+	$hasw = preg_match( '/\swidth=["\']?(\d+)/i', $tag, $wm );
+	$hash = preg_match( '/\sheight=["\']?(\d+)/i', $tag, $hm );
+	if ( $hasw && $hash ) { return $tag; }
+	if ( ! preg_match( '/\ssrc=["\']([^"\']+)["\']/i', $tag, $sm ) ) { return $tag; }
+	$d = abspeed_dims( $sm[1] );
+	if ( ! $d ) { return $tag; }
+	if ( $hasw && ! $hash ) {
+		$h = (int) round( (int) $wm[1] * $d[1] / $d[0] );
+		return $h > 0 ? preg_replace( '/<img\b/i', '<img height="' . $h . '"', $tag, 1 ) : $tag;
+	}
+	if ( $hash && ! $hasw ) {
+		$w = (int) round( (int) $hm[1] * $d[0] / $d[1] );
+		return $w > 0 ? preg_replace( '/<img\b/i', '<img width="' . $w . '"', $tag, 1 ) : $tag;
+	}
+	return preg_replace( '/<img\b/i', '<img width="' . $d[0] . '" height="' . $d[1] . '"', $tag, 1 );
 }
 
 function abspeed_video( $m ) {
@@ -149,7 +196,7 @@ add_action( 'admin_init', function () {
 } );
 function abspeed_sanitize( $in ) {
 	$out = array();
-	foreach ( array( 'images', 'skip_first', 'iframes', 'youtube', 'yt_thumb', 'video' ) as $k ) { $out[ $k ] = empty( $in[ $k ] ) ? 0 : 1; }
+	foreach ( array( 'images', 'skip_first', 'iframes', 'youtube', 'yt_thumb', 'video', 'dims' ) as $k ) { $out[ $k ] = empty( $in[ $k ] ) ? 0 : 1; }
 	$out['exclude'] = isset( $in['exclude'] ) ? sanitize_text_field( $in['exclude'] ) : '';
 	delete_transient( 'abspeed_report' );
 	return $out;
@@ -177,6 +224,7 @@ function abspeed_settings_page() {
 		'youtube'    => 'YouTube/Vimeo erst nach Klick laden (youtube-nocookie, spart viel Ladezeit)',
 		'yt_thumb'   => 'YouTube-Vorschaubild laden (schöner, aber verbindet beim Seitenaufruf mit Google)',
 		'video'      => 'Eigene Videos: erst beim Abspielen laden (preload=none)',
+		'dims'       => 'Fehlende Breite/Höhe an Mediathek-Bildern ergänzen (damit Lazy Load sauber greift, weniger Layout-Sprung)',
 	);
 	echo '<form method="post" action="options.php">';
 	settings_fields( 'abspeed' );
