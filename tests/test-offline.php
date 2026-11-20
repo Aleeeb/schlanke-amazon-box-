@@ -2290,4 +2290,24 @@ foreach ([
 }
 [$r] = SAB::paare_zu_einzelkarten('<p>Ein ganz normaler Satz im Text, der mit einem Punkt endet.</p><p>[amz_bild asin="B0TITEL002" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0TITEL002" land="es"]Angebot[/amz_link]</p>', '', true);
 ok(strpos($r, 'Ein ganz normaler Satz') !== false && strpos($r, 'titel=') === false, 'Paare: normaler Satz über dem Bild wird nicht als Titel genommen');
+
+// Länder-Prüfung (ca / com.au): Ausfall erkennen, ohne Partner-ID „Handdaten fehlen“, Statusreste aufräumen
+$GLOBALS['opt']['sab_tags'] = "es=t-21\nco.uk=t-21\ncom=t-21\nca=t-20"; unset($GLOBALS['opt']['sab_laender_status']);
+$GLOBALS['opt']['sab_laender_map'] = ['B0UKUKUKUK' => ['com' => ['asin' => 'B0COMCOMCO'], 'ca' => ['asin' => 'B0CACACACA'], 'com.au' => ['asin' => 'B0AUAUAUAU']]];
+$GLOBALS['http']['B0COMCOMCO'] = item('B0COMCOMCO', [$money('$5')]);
+$GLOBALS['http']['B0CACACACA'] = item('B0CACACACA', []);   // nicht kaufbar
+$neu = SAB::laender_pruefen(10);
+$st = $GLOBALS['opt']['sab_laender_status']['B0UKUKUKUK'];
+ok(($st['com']['ok'] ?? null) === true, 'Länder: com in Ordnung');
+ok(($st['ca']['ok'] ?? null) === false && $st['ca']['grund'] === 'nicht kaufbar', 'Länder: ca nicht kaufbar = Ausfall');
+ok(array_key_exists('ok', $st['com.au']) && $st['com.au']['ok'] === null && strpos($st['com.au']['grund'], 'Handdaten fehlen') === 0, 'Länder: ohne Partner-ID Handdaten fehlen, kein Ausfall');
+ok(count($neu) === 1, 'Länder: genau ein neuer Ausfall gemeldet');
+ok(count(SAB::laender_pruefen(10)) === 0, 'Länder: derselbe Ausfall wird nicht erneut als neu gemeldet');
+$GLOBALS['http']['B0CACACACA'] = ['asin' => 'B0CACACACA'];   // Amazon kennt ASIN nicht
+unset($GLOBALS['http']['B0CACACACA']);
+SAB::laender_pruefen(10);
+ok(!empty($GLOBALS['opt']['sab_laender_status']['B0UKUKUKUK']['ca']['weg']), 'Länder: unbekannte ASIN wird als weg markiert');
+$GLOBALS['opt']['sab_laender_map'] = [];
+SAB::laender_pruefen(10);
+ok($GLOBALS['opt']['sab_laender_status'] === [] || !isset($GLOBALS['opt']['sab_laender_status']['B0UKUKUKUK']), 'Länder: ohne Zuordnung bleibt kein Status');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
