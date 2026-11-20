@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.2.1
+ * Version: 0.2.2
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.2.1' );
+define( 'ABSPEED_VER', '0.2.2' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -370,4 +370,19 @@ function abspeed_updates_page() {
 		echo '<p class="description">Letzte Abfrage bei GitHub vor ' . max( 0, (int) round( ( time() - (int) $st['ts'] ) / 60 ) ) . ' Min (Antwort: ' . esc_html( $st['code'] ) . ').</p>';
 	}
 	echo '<p>Automatische Updates: <strong>' . ( $auto ? 'an' : 'aus' ) . '</strong>. Einschalten unter <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Plugins</a> in der Zeile „1AB Speed“ (Link „Automatische Updates aktivieren“). Dann prüft das Plugin stündlich und spielt neue Versionen selbst ein.</p>';
+}
+
+
+/* Eigene Prüfsummen-Kontrolle: Läuft vor der von 1AB Affiliate Help (die sonst jedes ZIP aus diesem Repo gegen ihre eigene Summe prüft). */
+add_filter( 'upgrader_pre_download', 'abspeed_pre_download', 5, 3 );
+function abspeed_pre_download( $reply, $package ) {
+	if ( false !== $reply || ! is_string( $package ) || strpos( $package, ABSPEED_REPO ) !== 0 || substr( $package, -13 ) !== '/1ab-speed.zip' ) { return $reply; }
+	$m = abspeed_update_json();
+	$h = strtolower( isset( $m['sha256'] ) ? (string) $m['sha256'] : '' );
+	if ( ! preg_match( '/^[a-f0-9]{64}$/', $h ) ) { return new WP_Error( 'abspeed_summe', 'Keine Prüfsumme in der Update-Datei. Es wurde nichts installiert.' ); }
+	if ( ! function_exists( 'download_url' ) ) { require_once ABSPATH . 'wp-admin/includes/file.php'; }
+	$file = download_url( $package, 300 );
+	if ( is_wp_error( $file ) ) { return $file; }
+	if ( ! hash_equals( $h, (string) hash_file( 'sha256', $file ) ) ) { @unlink( $file ); return new WP_Error( 'abspeed_summe', 'Prüfsumme des Updates stimmt nicht. Es wurde nichts installiert.' ); }
+	return $file;
 }
