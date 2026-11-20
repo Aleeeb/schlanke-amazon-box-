@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.75
+ * Version: 0.92.76
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -44,12 +44,17 @@ final class SAB {
         'co.uk' => ['www.amazon.co.uk', 'https://api.amazon.co.uk/auth/o2/token'],
         'com'   => ['www.amazon.com',   'https://api.amazon.com/auth/o2/token'],
     ];
+    // Nur für die Länder-Zuordnung (Reiter „Länder“): Kanada gehört zur Region NA, Australien zu FE (andere Zugangsdaten-Version möglich)
+    const LAENDER_EXTRA = [
+        'ca'     => ['www.amazon.ca',     'https://api.amazon.com/auth/o2/token'],
+        'com.au' => ['www.amazon.com.au', 'https://api.amazon.co.jp/auth/o2/token'],
+    ];
     const PARTNER_SHOPS = ['de' => 'Amazon.de', 'co.uk' => 'Amazon.co.uk', 'com' => 'Amazon.com (USA)', 'ca' => 'Amazon.ca (Kanada)', 'com.au' => 'Amazon.com.au (Australien)', 'fr' => 'Amazon.fr', 'es' => 'Amazon.es', 'it' => 'Amazon.it'];
     const API      = 'https://creatorsapi.amazon/catalog/v1/getItems';
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.75';
+    const VERSION = '0.92.76';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -229,10 +234,14 @@ final class SAB {
         return self::tags()[$land] ?? (self::slughelp_ids()[$land] ?? '');
     }
 
+    private static function mp_info(string $land): array {
+        return self::LAENDER[$land] ?? self::LAENDER_EXTRA[$land] ?? self::LAENDER['de'];
+    }
+
     private static function token(string $land): string {
         [$id, $secret] = self::zugang();
         if (!$id || !$secret) { return ''; }
-        $server = self::LAENDER[$land][1];
+        $server = self::mp_info($land)[1];
         $key    = 'sab_token_' . md5($server);
         $t      = get_transient($key);
         if ($t) { return $t; }
@@ -857,7 +866,7 @@ final class SAB {
         $token = self::token($land);
         $tag   = self::tag($land);
         if (!$token || !$tag) { return null; }
-        $mp = self::LAENDER[$land][0];
+        $mp = self::mp_info($land)[0];
 
         $r = self::api_post([
             'timeout' => 10,
@@ -1707,6 +1716,7 @@ final class SAB {
         $gesamt = count($lauf['liste']);
         if ($lauf['neu']) { self::alarm('ausfall', 'Neue Produkte nicht mehr verfügbar', "Seit dem letzten Lauf ausgefallen:\n  " . implode("\n  ", $lauf['neu']) . "\n\nDas Plugin setzt, wo eine Ersatzliste hinterlegt ist, automatisch den nächsten Ersatz ein.\nÜbersicht: Seitenleiste > " . self::NAME . " > Ausfälle und Wartung"); }
         if ($gesamt > 0 && $lauf['unerreichbar'] === $gesamt) { self::alarm('api', 'Amazon-Schnittstelle antwortet nicht', "Beim täglichen Lauf konnte kein einziges Produkt von Amazon abgerufen werden.\nMögliche Ursachen: Zugangsdaten (Credentials) abgelaufen, Amazon-Konto gesperrt oder Amazon vorübergehend nicht erreichbar.\nDie Seiten zeigen weiter die zwischengespeicherten Daten, solange sie vorhanden sind.\nPrüfen: Seitenleiste > " . self::NAME . " > Übersicht."); }
+        try { self::laender_pruefen(30); } catch (\Throwable $e) { /* optional, darf den Lauf nie stören */ }
         self::auto_tausch();
         self::wochenmail();
     }
@@ -1832,6 +1842,7 @@ final class SAB {
             }
             echo '</ul></div>';
         }
+        echo self::laender_probleme_html();
         echo '<h2>Ausgefallene Produkte</h2>';
         $liste = (array) get_option('sab_ausfall', []);
         $st = get_option('sab_uebersicht_stand_' . self::land('')); $nm = self::produkte();
@@ -2110,7 +2121,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $gt = '';
         $nm = (string) (self::produkte()[$asin] ?? ''); if ($nm === '') { $pp = self::produkt($asin, self::land('')); $nm = (string) ($pp['titel'] ?? ''); }
         if ($nm !== '') { $tn = esc_attr(mb_substr(trim(preg_replace('/\s*\|\s*/u', ' ', $nm)), 0, 80)); $gt = ' data-sab-t="' . $tn . '" data-aawp-product-title="' . $tn . '"'; }   // Suchbegriff für die Länder-Umschaltung; das zweite Attribut kennt auch die ältere, fremde Umschaltung (sonst sucht sie nach „dp“)
-        if (get_option('sab_geo') === '1') { $lmap = (array) get_option('sab_laender_map', []); $lm = (array) ($lmap[$asin] ?? []); $lz = []; foreach ($lm as $l_ => $e_) { if (!empty($e_['asin'])) { $lz[] = $l_ . ':' . $e_['asin']; } } if ($lz) { $gt .= ' data-sab-l="' . esc_attr(implode(',', $lz)) . '"'; } }   // freigegebene ASINs in den anderen Ländern
+        if (get_option('sab_geo') === '1') { $lmap = (array) get_option('sab_laender_map', []); $lm = (array) ($lmap[$asin] ?? []); $lz = []; $lst_ = (array) get_option('sab_laender_status', []); foreach ($lm as $l_ => $e_) { if (!empty($e_['asin']) && empty($lst_[$asin][$l_]['weg'])) { $lz[] = $l_ . ':' . $e_['asin']; } } if ($lz) { $gt .= ' data-sab-l="' . esc_attr(implode(',', $lz)) . '"'; } }   // freigegebene ASINs in den anderen Ländern
         if (array_key_exists($asin, self::heimat_liste()) || isset(((array) get_option('sab_asin_land', []))[$asin])) { $gt .= ' data-sab-fix="1"'; }   // Heimat-Store ist ein anderer: die Länder-Umschaltung lässt den Link in Ruhe
         return ' data-sab-asin="' . esc_attr($asin) . '"' . ($slot ? ' data-sab-slot="' . esc_attr($slot) . '"' : '') . ($var ? ' data-sab-var="' . esc_attr($var) . '"' : '') . $gt
              . ' target="_blank" rel="nofollow sponsored noopener"';
@@ -2256,6 +2267,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     public static function update_summe_pruefen($reply, $package) {
         if ($reply !== false || !is_string($package) || strpos($package, self::UPDATE_REPO) !== 0) { return $reply; }
         $m = get_transient('sab_update_json');
+        if (!is_array($m) || $package !== (string) ($m['zip'] ?? '')) { return $reply; }   // nur das eigene Paket prüfen, fremde ZIPs aus dem Repo (z. B. 1ab-speed.zip) unberührt lassen
         $h = is_array($m) ? strtolower((string) ($m['sha256'] ?? '')) : '';
         if (!preg_match('/^[a-f0-9]{64}$/', $h)) { return $reply; }   // ohne Summe wie bisher
         if (!function_exists('download_url')) { require_once ABSPATH . 'wp-admin/includes/file.php'; }
@@ -9480,7 +9492,7 @@ JS;
         return 'https://www.amazon.' . $land . '/s?k=' . rawurlencode(trim(preg_replace('/\s+/u', ' ', str_replace('|', ' ', $text))));
     }
 
-    /** Eine Zeile je Vorschlag: UK-ASIN | Land | ASIN | Titel | Sterne | Anzahl | Prime (ja/nein) | Lieferung | Preis. Neue Vorschläge warten auf die Freigabe, nichts wirkt vorher. */
+    /** Eine Zeile je Vorschlag: UK-ASIN | Land | ASIN | Titel | Sterne | Anzahl | Prime (ja/nein) | Lieferung | Preis | Hinweis (Bauart/Material). Neue Vorschläge warten auf die Freigabe, nichts wirkt vorher. */
     private static function laender_import(string $text): string {
         $v = (array) get_option('sab_laender_vorschlag', []); $n = 0; $skip = 0;
         foreach (preg_split('/\R/', $text) as $z) {
@@ -9488,7 +9500,7 @@ JS;
             $uk = self::asin($t[0]); $land = self::land_schluessel($t[1]); $a = self::asin_aus_text($t[2]);
             if (strlen($uk) !== 10 || strlen($a) !== 10 || !isset(self::LAND_ZIELE[$land]) || $a === $uk) { $skip++; continue; }
             foreach ((array) ($v[$uk][$land] ?? []) as $e) { if (($e['asin'] ?? '') === $a) { continue 2; } }
-            $v[$uk][$land][] = ['asin' => $a, 'titel' => mb_substr($t[3] ?? '', 0, 140), 'sterne' => $t[4] ?? '', 'anzahl' => $t[5] ?? '', 'prime' => strtolower($t[6] ?? ''), 'liefer' => mb_substr($t[7] ?? '', 0, 60), 'preis' => mb_substr($t[8] ?? '', 0, 30), 'ts' => time()];
+            $v[$uk][$land][] = ['asin' => $a, 'titel' => mb_substr($t[3] ?? '', 0, 140), 'sterne' => $t[4] ?? '', 'anzahl' => $t[5] ?? '', 'prime' => strtolower($t[6] ?? ''), 'liefer' => mb_substr($t[7] ?? '', 0, 60), 'preis' => mb_substr($t[8] ?? '', 0, 30), 'hinweis' => mb_substr($t[9] ?? '', 0, 200), 'ts' => time()];
             $n++;
         }
         update_option('sab_laender_vorschlag', $v, false);
@@ -9519,7 +9531,7 @@ JS;
         return '';
     }
 
-    private static function laender_zeile(string $uk, array $x, string $name, array $map, array $vor): string {
+    private static function laender_zeile(string $uk, array $x, string $name, array $map, array $vor, array $sta = []): string {
         $such = $name !== '' ? $name : (string) ($x['titel'] ?? '');
         $sc = isset($x['titel']) ? self::score(array_merge($x, ['trotz' => false]))[0] : null;
         $prime = isset($x['prime']) && $x['prime'] !== null ? ($x['prime'] ? 'Prime ja' : 'Prime nein') : 'Prime unbekannt';
@@ -9529,13 +9541,13 @@ JS;
            . ($sc !== null ? ' · Score ' . (int) $sc : '') . ' · ' . esc_html($prime) . ($st !== '' ? ' · ' . esc_html($st) : '') . (!empty($x['preis']) ? ' · ' . esc_html((string) $x['preis']) : '') . '</small></div></div>'
            . '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">';
         foreach (self::LAND_ZIELE as $land => $lname) {
-            $m = $map[$land] ?? null; $vl = (array) ($vor[$land] ?? []);
-            $h .= '<form method="post" style="flex:1 1 320px;min-width:280px;border:1px solid ' . ($m ? '#8fd19e' : '#dcdcde') . ';border-radius:6px;padding:8px 10px;background:' . ($m ? '#f3fbf5' : '#fafafa') . '">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false)
+            $m = $map[$land] ?? null; $vl = (array) ($vor[$land] ?? []); usort($vl, fn($p, $q) => self::laender_vorschlag_wert($q) <=> self::laender_vorschlag_wert($p));
+            $h .= '<form method="post" style="flex:1 1 320px;min-width:280px;border:1px solid ' . (($sta[$land]['ok'] ?? null) === false && $m ? '#d63638' : ($m ? '#8fd19e' : '#dcdcde')) . ';border-radius:6px;padding:8px 10px;background:' . (($sta[$land]['ok'] ?? null) === false && $m ? '#fcf0f1' : ($m ? '#f3fbf5' : '#fafafa')) . '">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false)
                . '<input type="hidden" name="sab_tab" value="laender"><input type="hidden" name="sab_form" value="laender"><input type="hidden" name="sab_uk" value="' . esc_attr($uk) . '"><input type="hidden" name="sab_land" value="' . esc_attr($land) . '">'
                . '<strong>' . esc_html($lname) . '</strong>';
             if ($m) {
                 $h .= '<div style="margin:4px 0"><span style="color:#1a7f37;font-weight:600">freigegeben:</span> <a href="' . esc_url('https://www.amazon.' . $land . '/dp/' . $m['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($m['asin']) . '</code> ansehen ↗</a>'
-                   . self::laender_details($m) . ' <button class="button button-small" name="sab_la" value="weg">entfernen</button></div>';
+                   . self::laender_details($m) . self::laender_status_text((array) ($sta[$land] ?? []), (string) $m['asin']) . '<br><button class="button button-small" name="sab_la" value="weg">entfernen</button></div>';
             } else { $h .= '<div style="margin:4px 0;color:#8a5a00">noch keine ASIN: Besucher bekommen nur die Suche in diesem Land.</div>'; }
             foreach ($vl as $e) {
                 $h .= '<div style="margin:6px 0;padding:6px;background:#fff8e1;border-radius:4px"><small>Vorschlag:</small> <a href="' . esc_url('https://www.amazon.' . $land . '/dp/' . $e['asin']) . '" target="_blank" rel="noopener"><code>' . esc_html($e['asin']) . '</code> ansehen ↗</a>'
@@ -9554,7 +9566,91 @@ JS;
         if (($e['prime'] ?? '') !== '') { $t[] = in_array($e['prime'], ['ja', 'yes', '1'], true) ? 'Prime ja' : 'Prime ' . esc_html($e['prime']); }
         if (($e['liefer'] ?? '') !== '') { $t[] = esc_html($e['liefer']); }
         if (($e['preis'] ?? '') !== '') { $t[] = esc_html($e['preis']); }
-        return $t ? ' <small>· ' . implode(' · ', $t) . '</small>' : '';
+        $h = $t ? ' <small>· ' . implode(' · ', $t) . '</small>' : '';
+        if (($e['hinweis'] ?? '') !== '') { $h .= '<br><small style="color:#50575e">Bauart/Material: ' . esc_html($e['hinweis']) . '</small>'; }
+        $w = self::laender_warnungen($e);
+        if ($w) { $h .= '<br><small style="color:#b32d2e">⚠ ' . esc_html(implode(' · ', $w)) . '</small>'; }
+        return $h;
+    }
+
+    /** Regeln von Shogen als Hinweise (keine Sperre): ab ca. 4 Sternen, ab ca. 30 Bewertungen, Prime/schnelle Lieferung, nichts Tötendes, kein Kieselgur/Eierschalen. */
+    private static function laender_warnungen(array $e): array {
+        $w = []; $st = (float) str_replace(',', '.', (string) ($e['sterne'] ?? '')); $n = (int) preg_replace('/\D/', '', (string) ($e['anzahl'] ?? ''));
+        if (($e['sterne'] ?? '') !== '' && $st < 4.0) { $w[] = 'unter 4 Sterne'; }
+        if (($e['anzahl'] ?? '') !== '' && $n < 30) { $w[] = 'unter 30 Bewertungen (ok, wenn sehr gut)'; }
+        if (($e['prime'] ?? '') !== '' && !in_array(strtolower((string) $e['prime']), ['ja', 'yes', '1'], true)) { $w[] = 'kein Prime'; }
+        if (preg_match('/schneckenkorn|gift|falle|k[öo]der|kieselgur|diatom|eierschal|egg\s?shell|pellet|poison|killer|\btrap|\bbait/iu', (string) ($e['titel'] ?? '') . ' ' . (string) ($e['hinweis'] ?? ''))) { $w[] = 'tötend/wirkungslos laut Regeln? bitte prüfen'; }
+        return $w;
+    }
+
+    /** Reihenfolge der Vorschläge: Prime, Sterne, Anzahl der Bewertungen (beste zuerst). */
+    private static function laender_vorschlag_wert(array $e): float {
+        $st = (float) str_replace(',', '.', (string) ($e['sterne'] ?? '')); $n = (int) preg_replace('/\D/', '', (string) ($e['anzahl'] ?? ''));
+        return (in_array(strtolower((string) ($e['prime'] ?? '')), ['ja', 'yes', '1'], true) ? 100 : 0) + $st * 10 + min(30, $n) / 10 - 5 * count(self::laender_warnungen($e));
+    }
+
+    /** Stand der Prüfung einer freigegebenen Länder-ASIN (Zeile im Länder-Kasten). */
+    private static function laender_status_text(array $s, string $asin): string {
+        if (empty($s) || ($s['asin'] ?? '') !== $asin) { return '<br><small style="color:#646970">noch nicht geprüft (täglicher Lauf oder „Länder jetzt prüfen“)</small>'; }
+        $d = esc_html(wp_date('d.m. H:i', (int) ($s['ts'] ?? 0)));
+        if (($s['ok'] ?? null) === true) { return '<br><small style="color:#1a7f37">✓ bei Amazon geprüft (' . $d . '): kaufbar, Bild da</small>'; }
+        if (($s['ok'] ?? null) === false) { return '<br><small style="color:#b32d2e;font-weight:600">⚠ Ausfall (' . $d . '): ' . esc_html((string) ($s['grund'] ?? '')) . '</small>'; }
+        return '<br><small style="color:#8a5a00">' . esc_html((string) ($s['grund'] ?? 'nicht geprüft')) . ' (' . $d . ')</small>';
+    }
+
+    /** Anzahl und Liste der Länder-ASINs mit Ausfall: [[uk, land, asin, grund, ts], …]. */
+    private static function laender_probleme(): array {
+        $map = (array) get_option('sab_laender_map', []); $st = (array) get_option('sab_laender_status', []); $o = [];
+        foreach ($map as $uk => $ls) { foreach ((array) $ls as $land => $e) {
+            $s = (array) ($st[$uk][$land] ?? []);
+            if (($s['ok'] ?? null) === false && ($s['asin'] ?? '') === ($e['asin'] ?? '#')) { $o[] = [(string) $uk, (string) $land, (string) $e['asin'], (string) ($s['grund'] ?? ''), (int) ($s['ts'] ?? 0)]; }
+        } }
+        return $o;
+    }
+
+    public static function laender_probleme_html(): string {
+        $p = self::laender_probleme(); if (!$p) { return ''; }
+        $nm = self::produkte(); $h = '<div class="notice notice-error inline"><p><strong>Länder-ASINs mit Ausfall (' . count($p) . '):</strong> Besucher aus diesem Land bekommen weiter den Link, solange Amazon die ASIN noch kennt; bitte im Reiter „Länder“ eine neue ASIN eintragen.</p><ul>';
+        foreach ($p as [$uk, $land, $a, $g, $ts]) { $h .= '<li>' . esc_html(($nm[$uk] ?? '') ?: $uk) . ' (<code>' . esc_html($uk) . '</code>) · amazon.' . esc_html($land) . ' <a href="' . esc_url('https://www.amazon.' . $land . '/dp/' . $a) . '" target="_blank" rel="noopener"><code>' . esc_html($a) . '</code> ↗</a>: ' . esc_html($g) . '</li>'; }
+        return $h . '</ul></div>';
+    }
+
+    /**
+     * Prüft die freigegebenen Länder-ASINs (ältester Stand zuerst, höchstens $max je Lauf) bei Amazon: Produkt bekannt, kaufbar, Bild vorhanden.
+     * Gespeichert wird nur das Ergebnis (ja/nein, Grund, Zeit), nie ein Bild, Titel oder Preis (Amazon-Regel). Fehlt Partner-ID oder Zugang für das Land: „Handdaten fehlen“, kein Ausfall.
+     * @return array Neue Ausfälle als Textzeilen
+     */
+    public static function laender_pruefen(int $max = 30): array {
+        $map = (array) get_option('sab_laender_map', []);
+        if (!$map) { if (get_option('sab_laender_status')) { update_option('sab_laender_status', [], false); } return []; }
+        $st = (array) get_option('sab_laender_status', []); $jobs = [];
+        foreach ($map as $uk => $ls) { foreach ((array) $ls as $land => $e) {
+            $a = (string) ($e['asin'] ?? ''); if (strlen($a) !== 10 || !isset(self::LAND_ZIELE[$land])) { continue; }
+            $jobs[] = [(int) ((($st[$uk][$land]['asin'] ?? '') === $a) ? ($st[$uk][$land]['ts'] ?? 0) : 0), (string) $uk, (string) $land, $a];
+        } }
+        usort($jobs, fn($x, $y) => $x[0] <=> $y[0]);
+        $neu = [];
+        foreach (array_slice($jobs, 0, max(1, $max)) as [, $uk, $land, $a]) {
+            $alt = (array) ($st[$uk][$land] ?? []); if (($alt['asin'] ?? '') !== $a) { $alt = []; }
+            $s = ['asin' => $a, 'ts' => time(), 'ok' => null, 'grund' => ''];
+            if (self::tag($land) === '') { $s['grund'] = 'Handdaten fehlen: keine Partner-ID für amazon.' . $land; }
+            elseif (self::token($land) === '') { $s['grund'] = 'Handdaten fehlen: Amazon-Zugang für die Region von amazon.' . $land . ' nicht möglich' . (self::$token_fehler !== '' ? ' (' . self::$token_fehler . ')' : ''); }
+            else {
+                $p = self::abrufen($a, $land, []);
+                if ($p === null) { $s['ok'] = $alt['ok'] ?? null; $s['grund'] = ($alt['grund'] ?? '') !== '' ? (string) $alt['grund'] : 'Amazon nicht erreichbar'; }
+                elseif (!empty($p['weg'])) { $s['ok'] = false; $s['weg'] = 1; $s['grund'] = 'Amazon kennt die ASIN in diesem Land nicht'; }
+                elseif (empty($p['verfuegbar'])) { $s['ok'] = false; $s['grund'] = 'nicht kaufbar'; }
+                elseif (empty($p['bild']) || empty($p['link'])) { $s['ok'] = false; $s['grund'] = 'kein Bild'; }
+                else { $s['ok'] = true; }
+            }
+            if ($s['ok'] === false && ($alt['ok'] ?? null) !== false) { $neu[] = $uk . ' → amazon.' . $land . ' ' . $a . ': ' . $s['grund']; }
+            $st[$uk][$land] = $s;
+        }
+        // Reste gelöschter oder geänderter Zuordnungen entfernen
+        foreach ($st as $uk => $ls) { foreach ((array) $ls as $land => $x) { if (($map[$uk][$land]['asin'] ?? '') !== ($x['asin'] ?? '#')) { unset($st[$uk][$land]); } } if (empty($st[$uk])) { unset($st[$uk]); } }
+        update_option('sab_laender_status', $st, false);
+        if ($neu) { self::alarm('laender', 'Länder-Produkte ausgefallen', "Bei Amazon nicht mehr kaufbar oder ohne Bild:\n  " . implode("\n  ", $neu) . "\n\nBitte im Reiter „Länder“ eine neue ASIN eintragen.\nÜbersicht: Seitenleiste > " . self::NAME . " > Länder"); }
+        return $neu;
     }
 
     private static function laender_html(): string {
@@ -9573,11 +9669,30 @@ JS;
             if ($q !== '' && stripos($nm . ' ' . $a . ' ' . (string) ($items[$a]['titel'] ?? ''), $q) === false) { continue; }
             $liste[] = [$a, $nm, (int) isset($vor[$a]) * 2 + (int) isset($map[$a])];
         }
-        usort($liste, fn($x, $y) => [$y[2], $x[1]] <=> [$x[2], $y[1]]);   // zuerst mit offenen Vorschlägen, dann mit Zuordnung
-        foreach (array_slice($liste, 0, 30) as [$a, $nm]) { $h .= self::laender_zeile($a, (array) $items[$a], $nm, (array) ($map[$a] ?? []), (array) ($vor[$a] ?? [])); }
-        if (count($liste) > 30) { $h .= '<p class="description">… und ' . (count($liste) - 30) . ' weitere: oben nach Name oder ASIN suchen.</p>'; }
+        $sta = (array) get_option('sab_laender_status', []);
+        // Erledigt = in allen drei Ländern freigegeben und kein Ausfall gemeldet: nach unten, aufklappbar
+        $offen = []; $fertig = [];
+        foreach ($liste as $r) {
+            $m_ = (array) ($map[$r[0]] ?? []); $ok_ = true;
+            foreach (self::LAND_ZIELE as $l_ => $ln_) { if (empty($m_[$l_]['asin']) || (($sta[$r[0]][$l_]['ok'] ?? null) === false)) { $ok_ = false; } }
+            if ($ok_) { $fertig[] = $r; } else { $offen[] = $r; }
+        }
+        // zuerst Ausfälle, dann offene Vorschläge, dann Rest (nach Name)
+        usort($offen, function ($x, $y) use ($sta) { $px = (int) !empty(array_filter((array) ($sta[$x[0]] ?? []), fn($z) => ($z['ok'] ?? null) === false)); $py = (int) !empty(array_filter((array) ($sta[$y[0]] ?? []), fn($z) => ($z['ok'] ?? null) === false)); return [$py, $y[2], $x[1]] <=> [$px, $x[2], $y[1]]; });
+        usort($fertig, fn($x, $y) => strcmp($x[1], $y[1]));
+        $h .= self::laender_probleme_html();
+        $h .= '<form method="post" style="margin:0 0 12px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="laender"><input type="hidden" name="sab_form" value="laender_pruefen"><button class="button">Länder jetzt prüfen</button> <span class="description">Fragt die freigegebenen ASINs bei Amazon ab (Produkt bekannt, kaufbar, Bild da). Gespeichert wird nur das Ergebnis, kein Bild. Läuft auch im täglichen Lauf.</span></form>';
+        if (!$offen && $fertig) { $h .= '<p><strong>Alles erledigt:</strong> alle Produkte haben in allen drei Ländern eine ASIN.</p>'; }
+        foreach (array_slice($offen, 0, 30) as [$a, $nm]) { $h .= self::laender_zeile($a, (array) $items[$a], $nm, (array) ($map[$a] ?? []), (array) ($vor[$a] ?? []), (array) ($sta[$a] ?? [])); }
+        if (count($offen) > 30) { $h .= '<p class="description">… und ' . (count($offen) - 30) . ' weitere offene: oben nach Name oder ASIN suchen.</p>'; }
+        if ($fertig) {
+            $h .= '<details style="margin:1.5em 0"><summary style="cursor:pointer;font-weight:600">Erledigt (' . count($fertig) . '): in USA, Kanada und Australien freigegeben</summary><div style="margin-top:12px">';
+            foreach (array_slice($fertig, 0, 60) as [$a, $nm]) { $h .= self::laender_zeile($a, (array) $items[$a], $nm, (array) ($map[$a] ?? []), (array) ($vor[$a] ?? []), (array) ($sta[$a] ?? [])); }
+            if (count($fertig) > 60) { $h .= '<p class="description">… und ' . (count($fertig) - 60) . ' weitere: oben suchen.</p>'; }
+            $h .= '</div></details>';
+        }
         $h .= '<h3 style="margin-top:2em">Vorschläge einer Mac/PC-Sitzung einfügen</h3><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="laender"><input type="hidden" name="sab_form" value="laender_import">'
-            . '<p class="description">Eine Zeile je Vorschlag: <code>UK-ASIN | Land (com, ca oder com.au) | ASIN im Land | Titel | Sterne | Anzahl Bewertungen | Prime (ja/nein) | Lieferung | Preis</code>. Die letzten Felder dürfen leer sein. Vorschläge wirken erst nach deiner Freigabe oben.</p>'
+            . '<p class="description">Eine Zeile je Vorschlag: <code>UK-ASIN | Land (com, ca oder com.au) | ASIN im Land | Titel | Sterne | Anzahl Bewertungen | Prime (ja/nein) | Lieferung | Preis | Hinweis (Bauart, Material, Größe)</code>. Die letzten Felder dürfen leer sein. Vorschläge wirken erst nach deiner Freigabe oben.</p>'
             . '<textarea name="sab_la_text" rows="5" class="large-text code"></textarea><p><button class="button">Vorschläge aufnehmen</button></p></form>';
         return $h;
     }
@@ -9630,6 +9745,9 @@ JS;
                 $meldung = self::kd_speichern();
             } elseif ($form === 'laender') {
                 $meldung = self::laender_speichern();
+            } elseif ($form === 'laender_pruefen') {
+                $nn_ = self::laender_pruefen(60); $pp_ = count(self::laender_probleme());
+                $meldung = 'Länder-ASINs geprüft: ' . ($pp_ ? $pp_ . ' mit Ausfall (unten rot markiert)' : 'kein Ausfall') . ($nn_ ? ', davon neu: ' . count($nn_) : '') . '.';
             } elseif ($form === 'laender_import') {
                 $meldung = self::laender_import((string) wp_unslash($_POST['sab_la_text'] ?? ''));
             } elseif ($form === 'kontrolle_ok') {
