@@ -84,4 +84,6 @@ ok($r instanceof WP_Error && !file_exists($tmp), 'Update-Summe: falsche Summe br
 $GLOBALS['tr']['sab_update_json'] = ['version' => '9', 'zip' => $zip];
 ok(SAB::update_summe_pruefen(false, $zip) === false, 'Update-Summe: ohne Summe in der JSON läuft es wie bisher');
 ok(SAB::update_summe_pruefen(false, 'https://evil.example/x.zip') === false, 'Update-Summe: fremde Adresse wird nicht angefasst');
+$GLOBALS['tr']['sab_update_json'] = ['version' => '9', 'zip' => $zip, 'sha256' => str_repeat('0', 64)];
+ok(SAB::update_summe_pruefen(false, SAB::UPDATE_REPO . 'raw/main/1ab-speed.zip') === false, 'Update-Summe: fremdes ZIP aus demselben Repo (1ab-speed.zip) wird nicht geprüft');
 echo $fail ? "$fail FEHLER\n" : "Alles bestanden\n";
