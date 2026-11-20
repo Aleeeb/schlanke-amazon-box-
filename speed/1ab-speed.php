@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.2.2
+ * Version: 0.2.3
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.2.2' );
+define( 'ABSPEED_VER', '0.2.3' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -296,8 +296,17 @@ add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), function ( $l 
 } );
 add_action( 'abspeed_update_cron', 'abspeed_update_cron' );
 add_action( 'admin_init', function () {
-	if ( current_user_can( 'update_plugins' ) && ! wp_next_scheduled( 'abspeed_update_cron' ) ) { wp_schedule_single_event( time() + 3600, 'abspeed_update_cron' ); }
+	if ( ! current_user_can( 'update_plugins' ) ) { return; }
+	if ( ! wp_next_scheduled( 'abspeed_update_cron' ) ) { wp_schedule_single_event( time() + 3600, 'abspeed_update_cron' ); }
+	// Frisch installiert: Eintrag bei WordPress anlegen, damit der Schalter „Automatische Updates“ sofort erscheint
+	$key = plugin_basename( __FILE__ );
+	$t   = get_site_transient( 'update_plugins' );
+	if ( is_object( $t ) && ! isset( $t->no_update[ $key ] ) && ! isset( $t->response[ $key ] ) && time() > (int) get_option( 'abspeed_try', 0 ) ) {
+		update_option( 'abspeed_try', time() + 3600, false );
+		abspeed_update_check();
+	}
 } );
+register_activation_hook( __FILE__, function () { abspeed_update_check(); } );
 
 function abspeed_update_json( $force = false ) {
 	$m = $force ? false : get_transient( 'abspeed_update_json' );
@@ -369,7 +378,7 @@ function abspeed_updates_page() {
 	if ( ! empty( $st['ts'] ) ) {
 		echo '<p class="description">Letzte Abfrage bei GitHub vor ' . max( 0, (int) round( ( time() - (int) $st['ts'] ) / 60 ) ) . ' Min (Antwort: ' . esc_html( $st['code'] ) . ').</p>';
 	}
-	echo '<p>Automatische Updates: <strong>' . ( $auto ? 'an' : 'aus' ) . '</strong>. Einschalten unter <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Plugins</a> in der Zeile „1AB Speed“ (Link „Automatische Updates aktivieren“). Dann prüft das Plugin stündlich und spielt neue Versionen selbst ein.</p>';
+	echo '<p>Automatische Updates: <strong>' . ( $auto ? 'an' : 'aus' ) . '</strong>. ' . ( $auto ? 'Das Plugin prüft stündlich und spielt neue Versionen selbst ein.' : 'Einschalten unter <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Plugins</a> in der Zeile „1AB Speed“ (Link „Automatische Updates aktivieren“).' ) . '</p>';
 }
 
 
