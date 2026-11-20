@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.2.4
+ * Version: 0.2.5
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.2.4' );
+define( 'ABSPEED_VER', '0.2.5' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -385,7 +385,7 @@ function abspeed_updates_page() {
 /* Eigene Prüfsummen-Kontrolle: Läuft vor der von 1AB Affiliate Help (die sonst jedes ZIP aus diesem Repo gegen ihre eigene Summe prüft). */
 add_filter( 'upgrader_pre_download', 'abspeed_pre_download', 5, 3 );
 function abspeed_pre_download( $reply, $package ) {
-	if ( false !== $reply || ! is_string( $package ) || strpos( $package, ABSPEED_REPO ) !== 0 || substr( $package, -13 ) !== '/1ab-speed.zip' ) { return $reply; }
+	if ( false !== $reply || ! is_string( $package ) || strpos( $package, ABSPEED_REPO ) !== 0 || ! preg_match( '#/1ab-speed[^/]*\.zip$#', $package ) ) { return $reply; }
 	$m = abspeed_update_json( true ); // immer frisch: Summe muss zum aktuellen ZIP passen, nicht zum Zwischenspeicher
 	$h = strtolower( isset( $m['sha256'] ) ? (string) $m['sha256'] : '' );
 	if ( ! preg_match( '/^[a-f0-9]{64}$/', $h ) ) { return new WP_Error( 'abspeed_summe', 'Keine Prüfsumme in der Update-Datei. Es wurde nichts installiert.' ); }
