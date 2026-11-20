@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.2.0' );
+define( 'ABSPEED_VER', '0.2.1' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -253,11 +253,11 @@ function abspeed_build_report() {
 	$r[] = abspeed_check( 'Stylesheets (extern geladen)', $css <= 8 ? 'ok' : 'warn', (string) $css, $css > 8 ? 'Zusammenfassen/Plugins entfernen, die eigene CSS laden.' : '' );
 	$r[] = abspeed_check( 'Skripte (extern geladen)', $js <= 10 ? 'ok' : 'warn', (string) $js, $js > 10 ? 'Nicht benötigte Skripte/Plugins entfernen, Rest mit defer laden.' : '' );
 	$ext = array();
-	if ( preg_match_all( '#(?:src|href)=["\'](https?://([^/"\']+)[^"\']*)["\']#i', $body, $mm ) ) {
+	if ( preg_match_all( '#(?:<(?:script|img|iframe|source|video|audio)\b[^>]*\ssrc|<link\b[^>]*\shref)=["\'](https?://([^/"\']+)[^"\']*)["\']#i', $body, $mm ) ) {
 		$home = wp_parse_url( home_url(), PHP_URL_HOST );
 		foreach ( $mm[2] as $d ) { if ( strcasecmp( $d, $home ) !== 0 && stripos( $d, preg_replace( '/^www\./', '', $home ) ) === false ) { $ext[ strtolower( $d ) ] = 1; } }
 	}
-	$r[] = abspeed_check( 'Fremde Domains im HTML', count( $ext ) <= 5 ? 'ok' : 'warn', (string) count( $ext ) . ( $ext ? ': ' . implode( ', ', array_slice( array_keys( $ext ), 0, 8 ) ) : '' ), count( $ext ) > 5 ? 'Jede fremde Domain kostet Verbindungszeit. Unnötiges entfernen.' : '' );
+	$r[] = abspeed_check( 'Fremde Domains (geladene Dateien, ohne Links)', count( $ext ) <= 5 ? 'ok' : 'warn', (string) count( $ext ) . ( $ext ? ': ' . implode( ', ', array_slice( array_keys( $ext ), 0, 8 ) ) : '' ), count( $ext ) > 5 ? 'Jede fremde Domain kostet Verbindungszeit. Unnötiges entfernen.' : '' );
 	$fonts = preg_match_all( '#fonts\.googleapis\.com|fonts\.gstatic\.com#i', $body ) + preg_match_all( '#\.(woff2?|ttf)\b#i', $body );
 	$r[] = abspeed_check( 'Schrift-Verweise (Fonts)', $fonts === 0 ? 'ok' : 'info', (string) $fonts, preg_match( '#fonts\.googleapis\.com#i', $body ) ? 'Google Fonts lokal hosten (schneller, besser für Datenschutz).' : '' );
 	$ga = preg_match( '#googletagmanager\.com|google-analytics\.com#i', $body );
