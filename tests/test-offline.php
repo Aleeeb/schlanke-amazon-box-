@@ -2310,4 +2310,17 @@ ok(!empty($GLOBALS['opt']['sab_laender_status']['B0UKUKUKUK']['ca']['weg']), 'L�
 $GLOBALS['opt']['sab_laender_map'] = [];
 SAB::laender_pruefen(10);
 ok($GLOBALS['opt']['sab_laender_status'] === [] || !isset($GLOBALS['opt']['sab_laender_status']['B0UKUKUKUK']), 'Länder: ohne Zuordnung bleibt kein Status');
+// 0.92.77: Länder-Reiter sortiert nach Häufigkeit des Vorkommens (häufigste zuerst), mit Anzeige der Zahl
+$lbak = $GLOBALS['wpdb'] ?? null; $obak = $GLOBALS['opt'];
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0HAEUF001' => ['titel' => 'Selten Zaun'], 'B0HAEUF002' => ['titel' => 'Oft Zaun'], 'B0HAEUF003' => ['titel' => 'Mittel Zaun']], 'ts' => time()];
+$GLOBALS['opt']['sab_produkte'] = "B0HAEUF001 | Selten\nB0HAEUF002 | Oft\nB0HAEUF003 | Mittel"; unset($GLOBALS['opt']['sab_laender_map'], $GLOBALS['opt']['sab_laender_vorschlag'], $GLOBALS['opt']['sab_laender_status']);
+unset($GLOBALS['tr']['sab_alle_asins'], $GLOBALS['tr']['sab_haeufigkeit']);
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [
+  ['ID' => 1, 'post_title' => 'A1', 'post_content' => '<a href="https://www.amazon.es/dp/B0HAEUF001">x</a> <a href="https://www.amazon.es/dp/B0HAEUF002">x</a>'],
+  ['ID' => 2, 'post_title' => 'A2', 'post_content' => '<a href="https://www.amazon.es/dp/B0HAEUF002">x</a> <a href="https://www.amazon.es/dp/B0HAEUF003">x</a>'],
+  ['ID' => 3, 'post_title' => 'A3', 'post_content' => '<a href="https://www.amazon.es/dp/B0HAEUF002">x</a> <a href="https://www.amazon.es/dp/B0HAEUF003">x</a>']]; } function prepare($q, ...$a) { return $q; } function esc_like($x) { return $x; } };
+$mLh = new ReflectionMethod('SAB', 'laender_html'); $mLh->setAccessible(true); $lh = $mLh->invoke(null);
+$p2 = strpos($lh, 'B0HAEUF002'); $p3 = strpos($lh, 'B0HAEUF003'); $p1 = strpos($lh, 'B0HAEUF001');
+ok($p2 !== false && $p2 < $p3 && $p3 < $p1 && strpos($lh, '3×') !== false, 'Länder: Produkte nach Häufigkeit sortiert (3× vor 2× vor 1×) und mit Zahl');
+$GLOBALS['opt'] = $obak; if ($lbak) { $GLOBALS['wpdb'] = $lbak; } unset($GLOBALS['tr']['sab_alle_asins'], $GLOBALS['tr']['sab_haeufigkeit']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

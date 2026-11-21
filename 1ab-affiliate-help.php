@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.76
+ * Version: 0.92.77
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.76';
+    const VERSION = '0.92.77';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -9531,13 +9531,24 @@ JS;
         return '';
     }
 
-    private static function laender_zeile(string $uk, array $x, string $name, array $map, array $vor, array $sta = []): string {
+    /** Wie oft jede ASIN in veröffentlichten Artikeln vorkommt (Stellen, nicht Artikel); 10 Minuten zwischengespeichert. @return array<string,int> */
+    private static function haeufigkeiten(array $asins): array {
+        $z = get_transient('sab_haeufigkeit');
+        if (!is_array($z)) {
+            $z = [];
+            foreach (self::fundstellen(array_values(array_map('strval', $asins))) as $a => $posts) { $z[(string) $a] = array_sum(array_map(fn($f) => (int) ($f['n'] ?? 0), (array) $posts)); }
+            set_transient('sab_haeufigkeit', $z, 10 * MINUTE_IN_SECONDS);
+        }
+        return $z;
+    }
+
+    private static function laender_zeile(string $uk, array $x, string $name, array $map, array $vor, array $sta = [], int $vorkommen = 0): string {
         $such = $name !== '' ? $name : (string) ($x['titel'] ?? '');
         $sc = isset($x['titel']) ? self::score(array_merge($x, ['trotz' => false]))[0] : null;
         $prime = isset($x['prime']) && $x['prime'] !== null ? ($x['prime'] ? 'Prime ja' : 'Prime nein') : 'Prime unbekannt';
         $st = isset($x['sterne']) && $x['sterne'] !== null ? str_replace('.', ',', (string) $x['sterne']) . ' ★ (' . (int) ($x['anzahl'] ?? 0) . ')' : '';
         $h = '<div style="border:1px solid #c3c4c7;border-radius:8px;background:#fff;padding:12px 14px;margin:0 0 14px;max-width:1150px"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">' . self::mini_bild($uk, $x)
-           . '<div style="flex:1;min-width:220px"><strong>' . esc_html($such !== '' ? mb_substr($such, 0, 80) : $uk) . '</strong> <small>(Hauptstore)</small><br><small><a href="' . esc_url('https://' . self::LAENDER[self::land('')][0] . '/dp/' . $uk) . '" target="_blank" rel="noopener"><code>' . esc_html($uk) . '</code></a>'
+           . '<div style="flex:1;min-width:220px"><strong>' . esc_html($such !== '' ? mb_substr($such, 0, 80) : $uk) . '</strong> <small>(Hauptstore)</small>' . ($vorkommen > 0 ? ' · <small><strong>' . $vorkommen . '×</strong> in Artikeln</small>' : '') . '<br><small><a href="' . esc_url('https://' . self::LAENDER[self::land('')][0] . '/dp/' . $uk) . '" target="_blank" rel="noopener"><code>' . esc_html($uk) . '</code></a>'
            . ($sc !== null ? ' · Score ' . (int) $sc : '') . ' · ' . esc_html($prime) . ($st !== '' ? ' · ' . esc_html($st) : '') . (!empty($x['preis']) ? ' · ' . esc_html((string) $x['preis']) : '') . '</small></div></div>'
            . '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">';
         foreach (self::LAND_ZIELE as $land => $lname) {
@@ -9662,12 +9673,12 @@ JS;
         $h .= '<p><strong>' . count($map) . '</strong> Produkte mit Zuordnung · <strong>' . $n_vor . '</strong> Vorschläge warten auf Freigabe</p>';
         $q = isset($_GET['q']) ? trim(sanitize_text_field(wp_unslash($_GET['q']))) : '';
         $h .= '<form method="get" style="margin:0 0 12px"><input type="hidden" name="page" value="sab-laender"><input type="search" name="q" value="' . esc_attr($q) . '" placeholder="Produkt suchen (Name oder ASIN)" style="min-width:260px"> <button class="button">Suchen</button></form>';
-        $liste = [];
+        $liste = []; $hf = self::haeufigkeiten(array_map('strval', self::alle_asins()));
         foreach (self::alle_asins() as $a) {
             $a = (string) $a; if (!isset($items[$a])) { continue; }
             $nm = (string) ($namen[$a] ?? '') ?: self::kurzname_aus_titel((string) ($items[$a]['titel'] ?? ''));
             if ($q !== '' && stripos($nm . ' ' . $a . ' ' . (string) ($items[$a]['titel'] ?? ''), $q) === false) { continue; }
-            $liste[] = [$a, $nm, (int) isset($vor[$a]) * 2 + (int) isset($map[$a])];
+            $liste[] = [$a, $nm, (int) isset($vor[$a]) * 2 + (int) isset($map[$a]), (int) ($hf[$a] ?? 0)];
         }
         $sta = (array) get_option('sab_laender_status', []);
         // Erledigt = in allen drei Ländern freigegeben und kein Ausfall gemeldet: nach unten, aufklappbar
@@ -9678,16 +9689,16 @@ JS;
             if ($ok_) { $fertig[] = $r; } else { $offen[] = $r; }
         }
         // zuerst Ausfälle, dann offene Vorschläge, dann Rest (nach Name)
-        usort($offen, function ($x, $y) use ($sta) { $px = (int) !empty(array_filter((array) ($sta[$x[0]] ?? []), fn($z) => ($z['ok'] ?? null) === false)); $py = (int) !empty(array_filter((array) ($sta[$y[0]] ?? []), fn($z) => ($z['ok'] ?? null) === false)); return [$py, $y[2], $x[1]] <=> [$px, $x[2], $y[1]]; });
-        usort($fertig, fn($x, $y) => strcmp($x[1], $y[1]));
+        usort($offen, function ($x, $y) use ($sta) { $px = (int) !empty(array_filter((array) ($sta[$x[0]] ?? []), fn($z) => ($z['ok'] ?? null) === false)); $py = (int) !empty(array_filter((array) ($sta[$y[0]] ?? []), fn($z) => ($z['ok'] ?? null) === false)); return [$py, $y[3], $y[2], $x[1]] <=> [$px, $x[3], $x[2], $y[1]]; });   // zuerst Ausfälle, dann nach Häufigkeit in Artikeln (häufigste zuerst), dann Vorschläge, dann Name
+        usort($fertig, fn($x, $y) => [$y[3], $x[1]] <=> [$x[3], $y[1]]);
         $h .= self::laender_probleme_html();
         $h .= '<form method="post" style="margin:0 0 12px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="laender"><input type="hidden" name="sab_form" value="laender_pruefen"><button class="button">Länder jetzt prüfen</button> <span class="description">Fragt die freigegebenen ASINs bei Amazon ab (Produkt bekannt, kaufbar, Bild da). Gespeichert wird nur das Ergebnis, kein Bild. Läuft auch im täglichen Lauf.</span></form>';
         if (!$offen && $fertig) { $h .= '<p><strong>Alles erledigt:</strong> alle Produkte haben in allen drei Ländern eine ASIN.</p>'; }
-        foreach (array_slice($offen, 0, 30) as [$a, $nm]) { $h .= self::laender_zeile($a, (array) $items[$a], $nm, (array) ($map[$a] ?? []), (array) ($vor[$a] ?? []), (array) ($sta[$a] ?? [])); }
+        foreach (array_slice($offen, 0, 30) as [$a, $nm]) { $h .= self::laender_zeile($a, (array) $items[$a], $nm, (array) ($map[$a] ?? []), (array) ($vor[$a] ?? []), (array) ($sta[$a] ?? []), (int) ($hf[$a] ?? 0)); }
         if (count($offen) > 30) { $h .= '<p class="description">… und ' . (count($offen) - 30) . ' weitere offene: oben nach Name oder ASIN suchen.</p>'; }
         if ($fertig) {
             $h .= '<details style="margin:1.5em 0"><summary style="cursor:pointer;font-weight:600">Erledigt (' . count($fertig) . '): in USA, Kanada und Australien freigegeben</summary><div style="margin-top:12px">';
-            foreach (array_slice($fertig, 0, 60) as [$a, $nm]) { $h .= self::laender_zeile($a, (array) $items[$a], $nm, (array) ($map[$a] ?? []), (array) ($vor[$a] ?? []), (array) ($sta[$a] ?? [])); }
+            foreach (array_slice($fertig, 0, 60) as [$a, $nm]) { $h .= self::laender_zeile($a, (array) $items[$a], $nm, (array) ($map[$a] ?? []), (array) ($vor[$a] ?? []), (array) ($sta[$a] ?? []), (int) ($hf[$a] ?? 0)); }
             if (count($fertig) > 60) { $h .= '<p class="description">… und ' . (count($fertig) - 60) . ' weitere: oben suchen.</p>'; }
             $h .= '</div></details>';
         }
