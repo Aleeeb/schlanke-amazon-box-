@@ -8,7 +8,7 @@
  * 0.5.0: inkrementell (nur geänderte/neue Dateien, Index je Sicherung), Aufbewahrung (neueste, ca. 1 Woche, optional ca. 1 Monat).
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
-define( 'ABBK_VER', '0.6.1' );
+define( 'ABBK_VER', '0.6.2' );
 define( 'ABBK_TMP', 'abt_' );
 define( 'ABBK_OLD', 'abo_' );
 
@@ -188,7 +188,13 @@ function abbk_site_size( $force = false ) {
 		}
 	}
 	arsort( $by );
-	$c = array( 't' => time(), 'size' => $sum, 'partial' => $partial, 'comp' => $bc, 'top' => array_slice( $by, 0, 6, true ) );
+	$dbs = 0;
+	global $wpdb;
+	if ( isset( $wpdb ) && method_exists( $wpdb, 'get_results' ) ) {
+		$rows = $wpdb->get_results( $wpdb->prepare( 'SHOW TABLE STATUS LIKE %s', $wpdb->esc_like( $wpdb->base_prefix ) . '%' ), ARRAY_A );
+		foreach ( (array) $rows as $r ) { $dbs += (int) ( isset( $r['Data_length'] ) ? $r['Data_length'] : 0 ) + (int) ( isset( $r['Index_length'] ) ? $r['Index_length'] : 0 ); }
+	}
+	$c = array( 't' => time(), 'size' => $sum, 'db' => $dbs, 'partial' => $partial, 'comp' => $bc, 'top' => array_slice( $by, 0, 6, true ) );
 	update_option( 'abbk_site_size', $c, false );
 	return $c;
 }
@@ -207,7 +213,7 @@ function abbk_space() {
 	if ( $q > 0 ) {
 		$site = abbk_site_size();
 		$total = (int) ( $q * 1073741824 );
-		$free = max( 0, $total - (int) $site['size'] - $mod );
+		$free = max( 0, $total - (int) $site['size'] - ( isset( $site['db'] ) ? (int) $site['db'] : 0 ) - $mod );
 		$src = 'quota';
 	} elseif ( $r && function_exists( 'disk_free_space' ) ) {
 		$f = @disk_free_space( $r ); $t = @disk_total_space( $r );
@@ -217,6 +223,7 @@ function abbk_space() {
 }
 /* Ampel: grün/gelb/rot/grau. Rot: frei < 2x volle Sicherung oder Modul > 1/3; Gelb: frei < 4x oder Modul > 1/5. */
 function abbk_light( $sp, $est ) {
+	if ( $sp['src'] === 'disk' && $sp['total'] > 200 * 1073741824 ) { return array( 'grau', 'PHP meldet nur die ganze Festplatte des Hosters (' . round( $sp['total'] / 1073741824 ) . ' GB), nicht das Limit Deines Tarifs. Bitte das Speicherlimit des Tarifs eintragen (z. B. 2 GB), sonst ist die Ampel nicht aussagekräftig.' ); }
 	if ( $sp['total'] === null || $sp['free'] === null ) { return array( 'grau', 'Freier Speicher nicht ermittelbar (der Hoster gibt ihn nicht heraus). Tipp: Speicherlimit des Tarifs eintragen.' ); }
 	if ( $sp['free'] < 2 * $est ) { return array( 'rot', 'Weniger als das Doppelte einer vollen Sicherung ist frei.' ); }
 	if ( $sp['module'] > $sp['total'] / 3 ) { return array( 'rot', 'Die Sicherungen belegen mehr als ein Drittel des Speichers.' ); }
@@ -225,14 +232,28 @@ function abbk_light( $sp, $est ) {
 	return array( 'gruen', 'Genug Platz.' );
 }
 /* Vor dem Start: genug Platz? Gibt Fehlertext oder '' */
+function abbk_need( $full_needed, $kind ) {
+	if ( $kind === 'pre' ) { return 100 * 1048576; }
+	if ( $full_needed ) { return (int) ( abbk_est_full() * 1.1 ); }
+	return max( 100 * 1048576, 2 * abbk_last_new() );
+}
+/* Vorabprüfung für die Oberfläche: ok / warn / block / unknown */
+function abbk_precheck( $full ) {
+	$need = abbk_need( $full || ! abbk_last_full_size(), '' );
+	$sp = abbk_space(); $light = abbk_light( $sp, max( $need, 1 ) );
+	$lv = 'ok'; $why = '';
+	if ( $sp['free'] === null ) { $lv = 'unknown'; $why = 'Der freie Speicher ist nicht ermittelbar.'; }
+	elseif ( $sp['free'] < $need ) { $lv = 'block'; $why = 'Es ist nicht genug Platz frei.'; }
+	elseif ( $sp['total'] && ( $sp['free'] - $need < 0.2 * $sp['total'] || $sp['module'] + $need > $sp['total'] / 3 ) ) { $lv = 'warn'; $why = 'Danach wäre der Speicher fast voll oder die Sicherungen würden mehr als ein Drittel belegen.'; }
+	elseif ( $light[0] === 'grau' ) { $lv = 'unknown'; $why = $light[1]; }
+	return array( 'level' => $lv, 'why' => $why, 'need' => $need, 'free' => $sp['free'], 'total' => $sp['total'], 'module' => $sp['module'], 'src' => $sp['src'], 'zeus' => abbk_zeus() );
+}
 function abbk_space_check( $full_needed, $kind ) {
 	if ( $kind !== 'pre' ) { abbk_zeus_clean(); }
 	abbk_enforce_cap(); abbk_gc();
 	$sp = abbk_space();
 	if ( $sp['free'] === null ) { return ''; }
-	if ( $kind === 'pre' ) { $need = 100 * 1048576; }
-	elseif ( $full_needed ) { $need = (int) ( abbk_est_full() * 1.1 ); }
-	else { $need = max( 100 * 1048576, 2 * ( function_exists( 'abbk_last_new' ) ? abbk_last_new() : 0 ) ); }
+	$need = abbk_need( $full_needed, $kind );
 	if ( $sp['free'] >= $need ) { return ''; }
 	return 'Nicht genug freier Speicher auf dem Server: frei ' . round( $sp['free'] / 1048576 ) . ' MB, für diese Sicherung nötig ca. ' . round( $need / 1048576 ) . ' MB. Lösung: zuerst die letzte Sicherung auf den Computer kopieren und alte Sicherungen löschen („Jetzt aufräumen“ oder „Vom Server löschen“), die Höchstzahl der Sicherungen senken oder beim Hoster mehr Speicher buchen.';
 }
@@ -1109,6 +1130,8 @@ function abbk_ajax() {
 			$ok( abbk_backup_step( $id ) );
 		case 'status':
 				wp_send_json_success( abbk_status() );
+			case 'precheck':
+				wp_send_json_success( abbk_precheck( ! empty( $_POST['full'] ) && $_POST['full'] !== '0' ) );
 			case 'cfg':
 				$f = isset( $_POST['freq'] ) ? sanitize_key( $_POST['freq'] ) : 'off';
 				update_option( 'abbk_freq', in_array( $f, array( 'daily', 'weekly' ), true ) ? $f : 'off', false );
@@ -1262,7 +1285,10 @@ async function post(d,tries){var fd=new FormData();fd.append('action','abbk');fd
 function mb(b){return (b/1048576).toFixed(1)+' MB'}
 async function drive(op,id,prog){var last='';$('abbk-err').style.display='none';while(true){var r=await post({op:op,id:id});if(r.msg!==last){last=r.msg;log(r.msg);var h=human(r.msg);if(h[0]!=='fin'&&h[0]!=='st'&&!/^p/.test(h[0])||(/^p/.test(h[0])&&PH.k!==h[0]&&false))phase(h[0],h[1]);bar(r.pct,h[1]);}prog.textContent=r.pct+' %';if(r.done){bar(100,'Fertig');(r.log||[]).forEach(function(l){var t=humanLog(l);if(t)say(t);});return r;}}}
 $('abbk-go').onclick=async function(){if(COPYING){alert('Es wird gerade auf den Computer kopiert. Bitte warten, bis das fertig ist.');return;}if(RUNNING){return;}var c=[].slice.call(document.querySelectorAll('.abbk-c:checked')).map(function(x){return x.value});if(!c.length){alert('Bitte Teile wählen.');return;}
- RUNNING=true;this.disabled=true;try{var id=await post({op:'start',comps:c,label:$('abbk-label').value,chunk:$('abbk-chunk').value,full:$('abbk-full').checked?1:0,month:$('abbk-month').checked?1:0,autoprune:$('abbk-auto').checked?1:0});$('abbk-story').innerHTML='';PH={};log('Sicherung '+id+' gestartet');say('Sicherung gestartet','wait');await drive('step',id,$('abbk-prog'));log('Sicherung fertig.');$('abbk-prog').textContent='Fertig';await showStatus();if(ST&&ST.last)say('Sicherung fertig ('+(ST.last.mode==='inc'?'nur Änderungen'+(ST.last.new!==null?', '+mb(ST.last.new)+' neu':''):'voll')+'). Insgesamt auf dem Server: '+mb(ST.total));$('abbk-label').value='';$('abbk-full').checked=false;RUNNING=false;showStatus();if(ST&&ST.zeus){say('Jetzt wird auf den Computer kopiert; danach wird die Sicherung vom Server gelöscht.','wait');try{await autoCopy(true);}catch(e2){}}}catch(e){log('FEHLER: '+e.message);$('abbk-prog').textContent='Fehler: '+e.message;}RUNNING=false;this.disabled=false;load();};
+ RUNNING=true;this.disabled=true;try{var pc0=await post({op:'precheck',full:$('abbk-full').checked?1:0});
+ if(pc0.level==='block'){showErr('Nicht genug freier Speicher auf dem Server: frei '+mb(pc0.free)+', nötig ca. '+mb(pc0.need)+'.');RUNNING=false;this.disabled=false;return;}
+ if(pc0.level!=='ok'||!pc0.zeus){var q='Achtung: Diese Sicherung wird auf dem Server angelegt und braucht dort ca. '+mb(pc0.need)+(pc0.zeus?' (nur bis sie auf dem Computer liegt)':'')+'.\n'+(pc0.free!==null?'Frei sind '+mb(pc0.free)+(pc0.total?' von '+mb(pc0.total):'')+'.':'Der freie Speicher ist nicht ermittelbar.')+(pc0.why?'\n'+pc0.why:'')+'\n\nTrotzdem anlegen?';if(!confirm(q)){RUNNING=false;this.disabled=false;return;}}
+ var id=await post({op:'start',comps:c,label:$('abbk-label').value,chunk:$('abbk-chunk').value,full:$('abbk-full').checked?1:0,month:$('abbk-month').checked?1:0,autoprune:$('abbk-auto').checked?1:0});$('abbk-story').innerHTML='';PH={};log('Sicherung '+id+' gestartet');say('Sicherung gestartet','wait');await drive('step',id,$('abbk-prog'));log('Sicherung fertig.');$('abbk-prog').textContent='Fertig';await showStatus();if(ST&&ST.last)say('Sicherung fertig ('+(ST.last.mode==='inc'?'nur Änderungen'+(ST.last.new!==null?', '+mb(ST.last.new)+' neu':''):'voll')+'). Insgesamt auf dem Server: '+mb(ST.total));$('abbk-label').value='';$('abbk-full').checked=false;RUNNING=false;showStatus();if(ST&&ST.zeus){say('Jetzt wird auf den Computer kopiert; danach wird die Sicherung vom Server gelöscht.','wait');try{await autoCopy(true);}catch(e2){}}}catch(e){log('FEHLER: '+e.message);$('abbk-prog').textContent='Fehler: '+e.message;}RUNNING=false;this.disabled=false;load();};
 async function load(){var L=await post({op:'list'});var h='';if(!L.length)h='<p>Noch keine Sicherung.</p>';
  L.forEach(function(s){var d=new Date(s.created*1000).toLocaleString();h+='<div style="background:#fff;border:1px solid #ccd0d4;padding:8px;margin:6px 0"><strong>'+d+'</strong> '+(s.label?'– '+s.label+' ':'')+' <em>'+mb(s.size)+'</em>'+(s.inc?' <span style="color:#555">(nur Änderungen)</span>':'')+' <span style="color:#555">neu: '+Object.keys(s.by||{}).map(function(k){return (COMPS[k]||k)+' '+mb(s.by[k])}).join(', ')+'</span>'+(s.pinned?' <strong>(behalten)</strong>':'')+(s.complete?'':' <span style="color:#b32d2e">(unvollständig)</span>')+'<br>';
  if(s.complete){h+='Enthält: '+s.comps.map(function(c){return COMPS[c]||c}).join(', ')+' · Quelle: '+s.home+'<br>';
