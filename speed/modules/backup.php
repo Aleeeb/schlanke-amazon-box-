@@ -8,7 +8,7 @@
  * 0.5.0: inkrementell (nur geänderte/neue Dateien, Index je Sicherung), Aufbewahrung (neueste, ca. 1 Woche, optional ca. 1 Monat).
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
-define( 'ABBK_VER', '0.6.2' );
+define( 'ABBK_VER', '0.6.3' );
 define( 'ABBK_TMP', 'abt_' );
 define( 'ABBK_OLD', 'abo_' );
 
@@ -1245,6 +1245,7 @@ function abbk_page() {
 	$comps = abbk_components();
 	$u     = wp_get_upload_dir();
 	echo '<div class="wrap" id="abbk"><h1>Sicherung &amp; Umzug <small>v' . esc_html( ABBK_VER ) . '</small></h1>';
+	if ( function_exists( 'abspeed_update_box' ) ) { abspeed_update_box(); }
 	if ( ! class_exists( 'ZipArchive' ) ) { echo '<div class="notice notice-error"><p>PHP-Erweiterung ZipArchive fehlt – Sicherung nicht möglich.</p></div>'; }
 	echo '<h2>Stand</h2><div id="abbk-status" style="background:#fff;border:1px solid #ccd0d4;padding:10px;max-width:900px">Lade …</div>';
 	echo '<p><label>Automatisch sichern: <select id="abbk-freq"><option value="off">aus</option><option value="daily">täglich</option><option value="weekly">wöchentlich</option></select></label> <span class="description">läuft auf dem Server über den WordPress-Zeitplaner (startet bei Seitenaufrufen, kein offener Browser nötig).</span></p>';

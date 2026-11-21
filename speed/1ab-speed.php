@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.6.2
+ * Version: 0.6.3
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.6.2' );
+define( 'ABSPEED_VER', '0.6.3' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -218,6 +218,10 @@ function abspeed_page() {
 	$tab = 'settings';
 	if ( isset( $_GET['tab'] ) && in_array( $_GET['tab'], array( 'report', 'updates' ), true ) ) { $tab = $_GET['tab']; }
 	if ( ! empty( $_GET['abspeed_update_now'] ) && check_admin_referer( 'abspeed_update_now' ) ) { abspeed_update_check( true ); }
+	if ( ! empty( $_POST['abspeed_install_now'] ) && check_admin_referer( 'abspeed_install_now' ) ) {
+		$r = abspeed_install_now();
+		echo '<div class="notice notice-' . ( $r['ok'] ? 'success' : 'error' ) . '"><p>' . esc_html( $r['msg'] ) . '</p></div>';
+	}
 	if ( ! empty( $_POST['abspeed_upd_save'] ) && check_admin_referer( 'abspeed_upd_save' ) ) {
 		update_option( 'abspeed_auto', empty( $_POST['abspeed_auto'] ) ? 0 : 1, false );
 		$mo = isset( $_POST['abspeed_upd_mode'] ) ? sanitize_key( $_POST['abspeed_upd_mode'] ) : 'adaptive';
@@ -231,6 +235,7 @@ function abspeed_page() {
 	echo '<a class="nav-tab ' . ( $tab === 'settings' ? 'nav-tab-active' : '' ) . '" href="' . esc_url( admin_url( 'admin.php?page=abspeed' ) ) . '">Einstellungen</a>';
 	echo '<a class="nav-tab ' . ( $tab === 'report' ? 'nav-tab-active' : '' ) . '" href="' . esc_url( admin_url( 'admin.php?page=abspeed&tab=report' ) ) . '">Auswertung</a>';
 	echo '<a class="nav-tab ' . ( $tab === 'updates' ? 'nav-tab-active' : '' ) . '" href="' . esc_url( admin_url( 'admin.php?page=abspeed&tab=updates' ) ) . '">Updates</a></h2>';
+	abspeed_update_box();
 	if ( defined( 'ABSPEED_OFF' ) && ABSPEED_OFF ) { echo '<div class="notice notice-warning"><p>Notaus aktiv (ABSPEED_OFF in wp-config.php). Das Plugin verändert nichts.</p></div>'; }
 	if ( $tab === 'report' ) { abspeed_report_page(); } elseif ( $tab === 'updates' ) { abspeed_updates_page(); } else { abspeed_settings_page(); }
 	echo '</div>';
@@ -497,18 +502,62 @@ function abspeed_updates_page() {
 }
 
 
-/* Eigene Prüfsummen-Kontrolle: Läuft vor der von 1AB Affiliate Help (die sonst jedes ZIP aus diesem Repo gegen ihre eigene Summe prüft). */
+/* Eigene Prüfsummen-Kontrolle: Läuft vor der von 1AB Affiliate Help (die sonst jedes ZIP aus diesem Repo gegen ihre eigene Summe prüft).
+   GitHub (raw.githubusercontent.com) hält Dateien bis zu 5 Minuten im Zwischenspeicher. Darum: ZIP mit Zufallsanhang direkt von raw laden;
+   bei falscher Summe noch einmal frisch versuchen; danach automatisch in 10 Minuten erneut (klare Meldung). */
 add_filter( 'upgrader_pre_download', 'abspeed_pre_download', 5, 3 );
+function abspeed_raw_url( $url, $bust ) {
+	$p = ABSPEED_REPO . 'raw/';
+	if ( strpos( $url, $p ) === 0 ) { $url = 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/' . substr( $url, strlen( $p ) ); }
+	return $bust ? $url . ( strpos( $url, '?' ) === false ? '?' : '&' ) . 't=' . time() . wp_rand( 100, 999 ) : $url;
+}
 function abspeed_pre_download( $reply, $package ) {
 	if ( false !== $reply || ! is_string( $package ) || strpos( $package, ABSPEED_REPO ) !== 0 || ! preg_match( '#/1ab-speed[^/]*\.zip$#', $package ) ) { return $reply; }
-	$m = abspeed_update_json( true ); // immer frisch: Summe muss zum aktuellen ZIP passen, nicht zum Zwischenspeicher
-	$h = strtolower( isset( $m['sha256'] ) ? (string) $m['sha256'] : '' );
-	if ( ! preg_match( '/^[a-f0-9]{64}$/', $h ) ) { return new WP_Error( 'abspeed_summe', 'Keine Prüfsumme in der Update-Datei. Es wurde nichts installiert.' ); }
 	if ( ! function_exists( 'download_url' ) ) { require_once ABSPATH . 'wp-admin/includes/file.php'; }
-	$file = download_url( $package, 300 );
-	if ( is_wp_error( $file ) ) { return $file; }
-	if ( ! hash_equals( $h, (string) hash_file( 'sha256', $file ) ) ) { @unlink( $file ); return new WP_Error( 'abspeed_summe', 'Prüfsumme des Updates stimmt nicht. Es wurde nichts installiert.' ); }
-	return $file;
+	$last = '';
+	for ( $try = 1; $try <= 2; $try++ ) {
+		$m = abspeed_update_json( true ); // immer frisch: Summe muss zum aktuellen ZIP passen, nicht zum Zwischenspeicher
+		$h = strtolower( isset( $m['sha256'] ) ? (string) $m['sha256'] : '' );
+		if ( ! preg_match( '/^[a-f0-9]{64}$/', $h ) ) { return new WP_Error( 'abspeed_summe', 'Keine Prüfsumme in der Update-Datei. Es wurde nichts installiert.' ); }
+		$zip = ( isset( $m['zip'] ) && strpos( (string) $m['zip'], ABSPEED_REPO ) === 0 ) ? (string) $m['zip'] : $package;
+		$file = download_url( abspeed_raw_url( $zip, true ), 300 );
+		if ( is_wp_error( $file ) ) { $last = $file->get_error_message(); }
+		elseif ( hash_equals( $h, (string) hash_file( 'sha256', $file ) ) ) { update_option( 'abspeed_upd_err', '', false ); return $file; }
+		else { @unlink( $file ); $last = 'Prüfsumme stimmt nicht'; }
+		if ( $try === 1 ) { sleep( 3 ); }
+	}
+	update_option( 'abspeed_upd_err', array( 'ts' => time(), 'msg' => $last ), false );
+	if ( function_exists( 'wp_schedule_single_event' ) ) { wp_clear_scheduled_hook( 'abspeed_update_cron' ); wp_schedule_single_event( time() + 600, 'abspeed_update_cron' ); }
+	return new WP_Error( 'abspeed_summe', 'Das Update konnte nicht geprüft werden (' . $last . '). Meist liegt es daran, dass GitHub eine alte Datei bis zu 5 Minuten zwischenspeichert. Es wurde nichts installiert; das Plugin versucht es in 10 Minuten automatisch erneut.' );
+}
+
+/* Knopf „Jetzt aktualisieren“: prüft sofort bei GitHub und installiert, wenn es eine neue Version gibt */
+function abspeed_install_now() {
+	$neu = abspeed_update_check( true );
+	if ( $neu === '' ) { return array( 'ok' => true, 'msg' => 'Du hast die neueste Version (' . ABSPEED_VER . ').' ); }
+	if ( abspeed_busy() ) { return array( 'ok' => false, 'msg' => 'Gerade läuft eine Sicherung oder Wiederherstellung. Bitte danach noch einmal klicken.' ); }
+	require_once ABSPATH . 'wp-admin/includes/file.php'; require_once ABSPATH . 'wp-admin/includes/misc.php'; require_once ABSPATH . 'wp-admin/includes/plugin.php'; require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+	$key  = plugin_basename( __FILE__ );
+	$skin = new Automatic_Upgrader_Skin();
+	$up   = new Plugin_Upgrader( $skin );
+	$res  = $up->upgrade( $key );
+	update_option( 'abspeed_upd_log', array( 'from' => ABSPEED_VER, 'to' => $neu, 'start' => time(), 'done' => 0, 'ok' => false ), false );
+	if ( is_wp_error( $res ) ) { return array( 'ok' => false, 'msg' => 'Update auf ' . $neu . ' nicht möglich: ' . $res->get_error_message() ); }
+	if ( $res === false ) { $e = $skin->get_errors(); return array( 'ok' => false, 'msg' => 'Update auf ' . $neu . ' nicht möglich' . ( is_wp_error( $e ) && $e->has_errors() ? ': ' . $e->get_error_message() : ' (Dateirechte? Bitte unter Plugins von Hand aktualisieren).' ) ); }
+	return array( 'ok' => true, 'msg' => 'Aktualisiert auf Version ' . $neu . '. Bitte die Seite neu laden.' );
+}
+/* Sichtbarer Kasten mit Version und Knopf (Plugin-Seiten und Sicherung) */
+function abspeed_update_box() {
+	$key = plugin_basename( __FILE__ );
+	$t   = get_site_transient( 'update_plugins' );
+	$neu = ( is_object( $t ) && isset( $t->response[ $key ] ) ) ? $t->response[ $key ]->new_version : '';
+	$err = (array) get_option( 'abspeed_upd_err', array() );
+	echo '<form method="post" action="' . esc_url( admin_url( 'admin.php?page=abspeed&tab=updates' ) ) . '" style="background:#fff;border-left:4px solid ' . ( $neu ? '#dba617' : '#00a32a' ) . ';padding:8px 12px;margin:10px 0;max-width:900px">';
+	wp_nonce_field( 'abspeed_install_now' );
+	echo '1AB Speed Version <strong>' . esc_html( ABSPEED_VER ) . '</strong>' . ( $neu ? ' – <strong>neu: ' . esc_html( $neu ) . '</strong>' : ' – aktuell' ) . ' <button class="button ' . ( $neu ? 'button-primary' : '' ) . '" name="abspeed_install_now" value="1">Jetzt aktualisieren</button>';
+	echo ' <a class="button" href="' . esc_url( admin_url( 'admin.php?page=abspeed' ) ) . '">1AB-Dashboard</a> <a class="button" href="' . esc_url( admin_url( 'admin.php?page=abspeed-backup' ) ) . '">Sicherung</a> <a class="button" href="' . esc_url( admin_url( 'index.php' ) ) . '">WordPress-Dashboard</a>';
+	if ( ! empty( $err['msg'] ) ) { echo '<br><span style="color:#b32d2e">Letzter Versuch fehlgeschlagen (' . esc_html( $err['msg'] ) . '), nächster Versuch automatisch.</span>'; }
+	echo '</form>';
 }
 
 /* Modul Sicherung/Wiederherstellung (eigene Datei, legt Untermenü „Sicherung“ an) */
