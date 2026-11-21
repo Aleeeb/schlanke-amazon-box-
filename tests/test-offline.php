@@ -2323,4 +2323,11 @@ $mLh = new ReflectionMethod('SAB', 'laender_html'); $mLh->setAccessible(true); $
 $p2 = strpos($lh, 'B0HAEUF002'); $p3 = strpos($lh, 'B0HAEUF003'); $p1 = strpos($lh, 'B0HAEUF001');
 ok($p2 !== false && $p2 < $p3 && $p3 < $p1 && strpos($lh, '3×') !== false, 'Länder: Produkte nach Häufigkeit sortiert (3× vor 2× vor 1×) und mit Zahl');
 $GLOBALS['opt'] = $obak; if ($lbak) { $GLOBALS['wpdb'] = $lbak; } unset($GLOBALS['tr']['sab_alle_asins'], $GLOBALS['tr']['sab_haeufigkeit']);
+// 0.92.78: Wochenmail mit Ersatzvorschlägen (wie im Frontend), Klickrate, Seiten mit höchster Klickrate, Herkunft
+$GLOBALS['opt']['sab_produkte'] = "B000000009 | Gartennetz Schutz\nB000000021 | Gartennetz Schutz Eins\nB000000022 | Gartennetz Schutz Zwei";
+$wd5 = SAB::wochenmail_daten([['asin'=>'B000000021','n'=>20]], 10, [], ['B000000009'=>['name'=>'Gartennetz Schutz']], ['B000000021' => ['titel' => 'Gartennetz Schutz Eins', 'bilder' => ['x.jpg'], 'preis' => '12,99 €', 'lieferbar' => true, 'prime' => true], 'B000000022' => ['titel' => 'Gartennetz Schutz Zwei', 'bilder' => ['y.jpg'], 'preis' => '9,99 €', 'lieferbar' => true, 'prime' => true]], ['aufrufe' => 400, 'aufrufe_vor' => 300, 'mail_stand' => ['klicks' => 12], 'seitenrate' => [['pfad' => '/a/', 'c' => 9, 'v' => 100]], 'herkunft' => [['herkunft' => 'de', 'n' => 15], ['herkunft' => 'es', 'n' => 5]], 'bild' => 12]);
+$wt5 = SAB::wochenmail_text_aus($wd5); $wh5 = SAB::wochenmail_html($wd5);
+ok(strpos($wt5, 'Seitenweite Klickrate: 5 %') !== false && strpos($wt5, 'Seit der letzten Mail: +8 Klicks') !== false && strpos($wt5, 'DE 15') !== false && strpos($wt5, '9 % (9 Klicks bei 100 Aufrufen)') !== false && strpos($wt5, 'Anteil Klicks auf Bild') !== false, 'Wochenmail: Klickrate, Vergleich zur letzten Mail, Herkunft, Seite mit höchster Klickrate (' . $wt5 . ')');
+ok(strpos($wh5, 'Seiten mit der höchsten Klickrate') !== false && strpos($wh5, 'Meistgeklickte Produkte') !== false, 'Wochenmail HTML: Klickrate-Seiten und Top-Produkte');
+ok(count($wd5['ausfaelle'][0]['ersatz_liste'] ?? []) >= 1 && count($wd5['ausfaelle'][0]['ersatz_liste']) <= 3 && strpos($wh5, 'amazon.es/dp/B000000021') !== false && strpos($wt5, 'Ersatz: ') !== false, 'Wochenmail: 1 bis 3 Ersatzvorschläge je Ausfall, mit Amazon-Link');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

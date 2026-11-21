@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.77
+ * Version: 0.92.78
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.77';
+    const VERSION = '0.92.78';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -1906,20 +1906,29 @@ final class SAB {
         }
         $st = get_option('sab_uebersicht_stand_' . self::land(''));
         $items = is_array($st) ? (array) ($st['items'] ?? []) : [];
-        $d = self::wochenmail_daten($k, $vor, $seiten, (array) get_option('sab_ausfall', []), $items);
+        $x = ['mail_stand' => (array) get_option('sab_mail_stand', [])];
+        if (isset($wpdb)) {
+            $t = self::klicktabelle(); $tp = self::seiten_tabelle(); $v7 = gmdate('Y-m-d', time() - 7 * DAY_IN_SECONDS); $z7 = gmdate('Y-m-d H:i:s', time() - 7 * DAY_IN_SECONDS);
+            $x['aufrufe'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COALESCE(SUM(n),0) FROM $tp WHERE tag >= %s", $v7));
+            $x['aufrufe_vor'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COALESCE(SUM(n),0) FROM $tp WHERE tag >= %s AND tag < %s", gmdate('Y-m-d', time() - 14 * DAY_IN_SECONDS), $v7));
+            $x['seitenrate'] = (array) $wpdb->get_results($wpdb->prepare("SELECT a.pfad, a.c, s.v FROM (SELECT pfad, COUNT(*) c FROM $t WHERE ts >= %s AND asin <> 'STARTSEITE' AND pfad <> '' GROUP BY pfad) a JOIN (SELECT pfad, SUM(n) v FROM $tp WHERE tag >= %s GROUP BY pfad) s ON s.pfad = a.pfad WHERE s.v >= 20 ORDER BY a.c / s.v DESC LIMIT 3", $z7, $v7), ARRAY_A);
+            $x['herkunft'] = (array) $wpdb->get_results($wpdb->prepare("SELECT herkunft, COUNT(*) n FROM $t WHERE ts >= %s AND asin <> 'STARTSEITE' AND herkunft <> '' GROUP BY herkunft ORDER BY n DESC LIMIT 4", $z7), ARRAY_A);
+            $x['bild'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $t WHERE ts >= %s AND asin <> 'STARTSEITE' AND typ = 'bild'", $z7));
+        }
+        $d = self::wochenmail_daten($k, $vor, $seiten, (array) get_option('sab_ausfall', []), $items, $x);
         $text = self::wochenmail_text_aus($d);
         $html = self::wochenmail_html($d);
         $alt = function ($m) use ($text) { $m->AltBody = $text; };
         add_action('phpmailer_init', $alt);
         $ok = wp_mail($an, self::NAME . ': Wochenbericht' . ($d['ausfaelle'] ? ' (' . count($d['ausfaelle']) . ' zu prüfen)' : ''), $html, ['Content-Type: text/html; charset=UTF-8']);
         remove_action('phpmailer_init', $alt);
-        if ($ok) { update_option('sab_mail_zuletzt', time(), false); }
+        if ($ok) { update_option('sab_mail_zuletzt', time(), false); update_option('sab_mail_stand', ['ts' => time(), 'klicks' => $d['summe'], 'aufrufe' => (int) ($x['aufrufe'] ?? 0)], false); }
     }
 
     /** Baut aus den Rohzahlen alles, was die Mail braucht (Namen, Links); eine Stelle für Text und HTML.
      *  Handlungsliste: ausgefallene Produkte und Produkte ohne Bild, die in Artikeln stehen (Testprodukte ohne Fundstelle fallen weg).
      *  Nur wenn das weniger als 2 sind, kommen bis zu 3 Produkte mit sehr schlechtem Score (unter 40) dazu. */
-    public static function wochenmail_daten(array $klicks, int $vorwoche, array $seiten, array $ausfall, array $items = []): array {
+    public static function wochenmail_daten(array $klicks, int $vorwoche, array $seiten, array $ausfall, array $items = [], array $extra = []): array {
         $namen = self::produkte();
         $summe = array_sum(array_map(fn($r) => (int) $r['n'], $klicks));
         $top = [];
@@ -1959,11 +1968,31 @@ final class SAB {
                 if (count(array_filter($aus, fn($z) => !empty($z['schwach']))) >= 3) { break; }
             }
         }
+        $trotz = (array) get_option('sab_trotz', []);
+        foreach ($aus as $i => $a) {   // dieselben Ersatzvorschläge wie im Austausch-Fenster im Frontend (austausch_kandidaten), die ersten drei lieferbaren
+            if (!empty($a['schwach']) || $i >= 5) { continue; }
+            $kd = self::austausch_kandidaten($a['asin'], $a['name'], ['items' => $items], $trotz, [$a['asin'] => (array) ($fs[$a['asin']] ?? [])], 6);
+            $er = [];
+            foreach ((array) ($kd['liste'] ?? []) as $c) {
+                if (empty($c['ok']) || count($er) >= 3) { continue; }
+                $cx = (array) ($c['x'] ?? []);
+                $er[] = ['asin' => (string) $c['asin'], 'name' => ($namen[$c['asin']] ?? '') ?: self::kurzname_aus_titel((string) ($cx['titel'] ?? '')), 'preis' => (string) ($cx['preis'] ?? ''), 'score' => $c['score'], 'amazon' => 'https://' . $host . '/dp/' . $c['asin']];
+            }
+            $aus[$i]['ersatz_liste'] = $er;
+        }
+        $mv = (array) ($extra['mail_stand'] ?? []); $auf = (int) ($extra['aufrufe'] ?? 0);
+        $rate = $auf > 0 ? $summe / $auf : null; $rate_vor = (int) ($extra['aufrufe_vor'] ?? 0) > 0 && $vorwoche > 0 ? $vorwoche / (int) $extra['aufrufe_vor'] : null;
+        $stat = ['aufrufe' => $auf, 'rate' => $rate, 'rate_vor' => $rate_vor, 'seit_mail' => !empty($mv['klicks']) ? (int) $mv['klicks'] : null, 'seitenrate' => [], 'herkunft' => [], 'bild_anteil' => $summe > 0 && isset($extra['bild']) ? (int) round((int) $extra['bild'] / $summe * 100) : null];
+        foreach (array_slice((array) ($extra['seitenrate'] ?? []), 0, 3) as $r) {
+            $pfad = (string) ($r['pfad'] ?? ''); $pid = function_exists('url_to_postid') ? (int) url_to_postid(home_url($pfad)) : 0;
+            $stat['seitenrate'][] = ['titel' => $pid && function_exists('get_the_title') ? (string) get_the_title($pid) : $pfad, 'url' => home_url($pfad), 'rate' => (int) $r['v'] > 0 ? (int) $r['c'] / (int) $r['v'] : 0, 'c' => (int) $r['c'], 'v' => (int) $r['v']];
+        }
+        foreach (array_slice((array) ($extra['herkunft'] ?? []), 0, 4) as $r) { $stat['herkunft'][] = [strtoupper((string) $r['herkunft']), (int) $r['n']]; }
         $lk = [];
         foreach (['austausch' => 'Austausch', 'statistik' => 'Statistik', 'uebersicht' => 'Übersicht', 'problem' => 'Ausfälle und Wartung', 'umbau' => 'Umbau'] as $k => $n) {
             $lk[] = [$n, admin_url('admin.php?page=' . ($k === 'uebersicht' ? 'sab' : 'sab-' . $k))];
         }
-        return ['summe' => $summe, 'vorwoche' => $vorwoche, 'top' => $top, 'artikel' => $arts, 'ausfaelle' => $aus, 'links' => $lk];
+        return ['summe' => $summe, 'vorwoche' => $vorwoche, 'top' => $top, 'artikel' => $arts, 'ausfaelle' => $aus, 'stat' => $stat, 'links' => $lk];
     }
 
     private static function wochenmail_trend(array $d): string {
@@ -1972,11 +2001,25 @@ final class SAB {
         return $diff > 0 ? ' (+' . $pz . ' % zur Vorwoche, schön!)' : ($diff < 0 ? ' (-' . $pz . ' % zur Vorwoche)' : ' (wie in der Vorwoche)');
     }
 
+    /** Zeilen mit Klickrate, Vergleich zur letzten Mail, besten Seiten und Herkunft (für Text und HTML). @return string[] */
+    private static function wochenmail_statzeilen(array $d): array {
+        $st = (array) ($d['stat'] ?? []); $z = []; $pz = fn(float $x): string => str_replace('.', ',', (string) round($x * 100, 1)) . ' %';
+        if (!empty($st['aufrufe'])) {
+            $z[] = 'Seitenweite Klickrate: ' . ($st['rate'] !== null ? $pz((float) $st['rate']) : '–') . ' (' . $d['summe'] . ' Klicks bei ' . $st['aufrufe'] . ' Seitenaufrufen mit Produkten)' . ($st['rate_vor'] !== null ? ', Vorwoche ' . $pz((float) $st['rate_vor']) : '');
+        }
+        if (!empty($st['seit_mail'])) { $diff = $d['summe'] - (int) $st['seit_mail']; $z[] = 'Seit der letzten Mail: ' . ($diff >= 0 ? '+' : '') . $diff . ' Klicks (damals ' . (int) $st['seit_mail'] . ', jetzt ' . $d['summe'] . ')'; }
+        if (($st['bild_anteil'] ?? null) !== null) { $z[] = 'Anteil Klicks auf Bild oder Titel: ' . (int) $st['bild_anteil'] . ' %, auf Knopf oder Textlink: ' . (100 - (int) $st['bild_anteil']) . ' %'; }
+        if (!empty($st['herkunft'])) { $z[] = 'Klicks nach Herkunftsland: ' . implode(', ', array_map(fn($r) => $r[0] . ' ' . $r[1], $st['herkunft'])); }
+        return $z;
+    }
+
     public static function wochenmail_text_aus(array $d): string {
         $z = [self::NAME . ': die letzten 7 Tage', ''];
         if ($d['ausfaelle']) { $z[] = 'ACHTUNG: ' . count($d['ausfaelle']) . ' Produkt(e) zu prüfen und zu tauschen. Direktlinks unten.'; $z[] = ''; }
         $z[] = 'Klicks auf Amazon-Links: ' . $d['summe'] . self::wochenmail_trend($d);
+        foreach (self::wochenmail_statzeilen($d) as $l) { $z[] = $l; }
         foreach ($d['top'] as $r) { $z[] = '  ' . $r['n'] . ' x ' . $r['name']; }
+        if (!empty($d['stat']['seitenrate'])) { $z[] = ''; $z[] = 'Seiten mit der höchsten Klickrate:'; foreach ($d['stat']['seitenrate'] as $r) { $z[] = '  ' . round($r['rate'] * 100, 1) . ' % (' . $r['c'] . ' Klicks bei ' . $r['v'] . ' Aufrufen): ' . $r['titel'] . ' ' . $r['url']; } }
         if ($d['artikel']) { $z[] = ''; $z[] = 'Meistgeklickte Artikel:'; foreach ($d['artikel'] as $r) { $z[] = '  ' . $r['n'] . ' Klicks: ' . $r['titel'] . ' ' . $r['url']; } }
         $z[] = '';
         if ($d['ausfaelle']) {
@@ -1984,6 +2027,7 @@ final class SAB {
             foreach ($d['ausfaelle'] as $a) {
                 $z[] = '  ' . $a['name'] . ' (' . $a['asin'] . ', ' . $a['grund'] . ')' . ($a['ersatz'] !== '' ? ', Ersatz vorgesehen: ' . $a['ersatz'] : '') . ' – bei Amazon: ' . $a['amazon'];
                 foreach ($a['stellen'] as $s) { $z[] = '    ' . $s['titel'] . ': tauschen ' . $s['url'] . ' | Editor ' . $s['editor']; }
+                foreach ((array) ($a['ersatz_liste'] ?? []) as $e) { $z[] = '    Ersatz: ' . $e['name'] . ($e['preis'] !== '' ? ' (' . $e['preis'] . ')' : '') . ' – ' . $e['amazon']; }
             }
         } else { $z[] = 'Keine ausgefallenen Produkte.'; }
         $z[] = ''; $z[] = 'Schnellzugriff:';
@@ -1996,6 +2040,9 @@ final class SAB {
         $h = '<div style="font-family:Arial,sans-serif;max-width:640px;font-size:15px;line-height:1.5;color:#222"><h2 style="margin:0 0 8px">' . $e(self::NAME) . ': die letzten 7 Tage</h2>';
         if ($d['ausfaelle']) { $h .= '<p style="background:#fde8e8;border-left:4px solid #c00;padding:8px 12px"><strong>' . count($d['ausfaelle']) . ' Produkt(e) zu prüfen und zu tauschen.</strong> Die Links unten springen direkt zur Stelle.</p>'; }
         $h .= '<p style="background:#e8f6ec;border-left:4px solid #2a8a4a;padding:8px 12px"><strong>' . (int) $d['summe'] . ' Klicks</strong> auf Amazon-Links' . $e(self::wochenmail_trend($d)) . '</p>';
+        $sz = self::wochenmail_statzeilen($d);
+        if ($sz) { $h .= '<ul style="margin:0 0 12px 20px">'; foreach ($sz as $l) { $h .= '<li>' . $e($l) . '</li>'; } $h .= '</ul>'; }
+        if (!empty($d['stat']['seitenrate'])) { $h .= '<p><strong>Seiten mit der höchsten Klickrate</strong></p><ol style="margin:0 0 12px 20px">'; foreach ($d['stat']['seitenrate'] as $r) { $h .= '<li>' . $e(str_replace('.', ',', (string) round($r['rate'] * 100, 1))) . ' % (' . (int) $r['c'] . ' Klicks bei ' . (int) $r['v'] . ' Aufrufen): <a href="' . $u($r['url']) . '">' . $e($r['titel']) . '</a></li>'; } $h .= '</ol>'; }
         if ($d['top']) { $h .= '<p><strong>Meistgeklickte Produkte</strong></p><ol style="margin:0 0 12px 20px">'; foreach ($d['top'] as $r) { $h .= '<li>' . (int) $r['n'] . ' × ' . $e($r['name']) . '</li>'; } $h .= '</ol>'; }
         if ($d['artikel']) { $h .= '<p><strong>Meistgeklickte Artikel</strong></p><ol style="margin:0 0 12px 20px">'; foreach ($d['artikel'] as $r) { $h .= '<li>' . (int) $r['n'] . ' Klicks: <a href="' . $u($r['url']) . '">' . $e($r['titel']) . '</a></li>'; } $h .= '</ol>'; }
         if ($d['ausfaelle']) {
@@ -2003,6 +2050,7 @@ final class SAB {
             foreach ($d['ausfaelle'] as $a) {
                 $h .= '<li><strong>' . $e($a['name']) . '</strong> <small>(' . $e($a['grund']) . ')</small> · <a href="' . $u($a['amazon']) . '">bei Amazon ansehen</a>' . ($a['ersatz'] !== '' ? ', Ersatz vorgesehen: ' . $e($a['ersatz']) : '');
                 foreach ($a['stellen'] as $s) { $h .= '<br>' . $e($s['titel']) . ': <a href="' . $u($s['url']) . '"><strong>direkt tauschen</strong></a> · <a href="' . $u($s['editor']) . '">Editor</a>'; }
+                foreach ((array) ($a['ersatz_liste'] ?? []) as $er) { $h .= '<br><span style="color:#555">Ersatz:</span> ' . $e($er['name']) . ($er['preis'] !== '' ? ' <small>(' . $e($er['preis']) . ')</small>' : '') . ' · <a href="' . $u($er['amazon']) . '">bei Amazon ansehen</a>'; }
                 $h .= '</li>';
             }
             $h .= '</ul>';
