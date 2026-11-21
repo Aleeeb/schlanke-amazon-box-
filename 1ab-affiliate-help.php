@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.78
+ * Version: 0.92.79
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.78';
+    const VERSION = '0.92.79';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -9260,12 +9260,83 @@ JS;
      * [amz_widget typ="liste" titel="Beliebt diese Woche"]Text|https://…  (eine Zeile je Eintrag, Link ist optional)[/amz_widget]
      * Buch-Karte: Bild und Knopf sind EIN Affiliate-Link (das Bild ist kein eigener Link, der Knopf deckt die ganze Karte ab).
      */
+    /** Beliebteste Produkte (Klicks der letzten Tage, seitenweit) für die Rotation: nur lieferbare Produkte mit Bild, die in Artikeln stehen, nie tötende, nie die Ausgeschlossenen. @param array<int,array{asin:string,n:int}> $klicks @return string[] */
+    public static function rot_top_auswahl(array $klicks, array $items, array $fund, array $aus, int $n): array {
+        $namen = self::produkte(); $out = [];
+        foreach ($klicks as $r) {
+            $a = strtoupper((string) ($r['asin'] ?? '')); if (strlen($a) !== 10 || in_array($a, $aus, true) || in_array($a, $out, true)) { continue; }
+            $x = (array) ($items[$a] ?? []); if (!$x || empty($x['bilder']) || ($x['preis'] ?? '') === '' || empty($x['lieferbar']) || ($x['status'] ?? '') === 'OUT_OF_STOCK') { continue; }
+            if (self::toetend(($namen[$a] ?? '') . ' ' . (string) ($x['titel'] ?? ''))) { continue; }
+            if (empty($fund[$a])) { continue; }   // nur Produkte, die wirklich in Artikeln stehen
+            $out[] = $a; if (count($out) >= $n) { break; }
+        }
+        return $out;
+    }
+
+    private static function rot_top(int $n, array $aus, int $tage): array {
+        $z = get_transient('sab_rot_top_' . $tage);
+        if (!is_array($z)) {
+            global $wpdb; $z = ['k' => [], 'f' => []];
+            if (isset($wpdb)) {
+                $t = self::klicktabelle();
+                $z['k'] = (array) $wpdb->get_results($wpdb->prepare("SELECT asin, COUNT(*) n FROM $t WHERE ts >= %s AND asin <> 'STARTSEITE' GROUP BY asin ORDER BY n DESC LIMIT 40", gmdate('Y-m-d H:i:s', time() - $tage * DAY_IN_SECONDS)), ARRAY_A);
+                foreach (self::fundstellen(array_map(fn($r) => (string) $r['asin'], $z['k'])) as $a => $p) { $z['f'][$a] = 1; }
+            }
+            set_transient('sab_rot_top_' . $tage, $z, 6 * HOUR_IN_SECONDS);
+        }
+        $st = get_option('sab_uebersicht_stand_' . self::land(''));
+        return self::rot_top_auswahl((array) $z['k'], is_array($st) ? (array) ($st['items'] ?? []) : [], (array) $z['f'], $aus, $n);
+    }
+
+    /**
+     * Rotierendes Seitenleisten-Widget: feste Produkte (Bücher, eigener Planer) mit höherem Gewicht, dazu die beliebtesten Produkte der Seite.
+     * Besucher sehen zufällig eines (feste Produkte öfter), Crawler und Roboter immer nur das Produkt des Tages (ein Link, wechselt täglich).
+     * [amz_widget typ="rotation" asins="B0..,B0.." top="5" gewicht="3" marke="Empfehlung"]optional je Zeile: ASIN | Etikett | Titel | Text | Knopf[/amz_widget]; höchstens 10 Plätze.
+     */
+    private static function rot_widget_html(array $a, string $inhalt): string {
+        $land = self::land((string) $a['land']); $slots = []; $fest = max(1, min(9, (int) ($a['gewicht'] !== '' ? $a['gewicht'] : 3)));
+        $zeilen = [];
+        foreach (preg_split('/\R/', trim(strip_tags($inhalt))) as $z) {
+            $t = array_map('trim', explode('|', $z)); $as = self::asin($t[0] ?? '');
+            if (strlen($as) === 10) { $zeilen[$as] = ['marke' => (string) ($t[1] ?? ''), 'titel' => (string) ($t[2] ?? ''), 'text' => (string) ($t[3] ?? ''), 'knopf' => (string) ($t[4] ?? '')]; }
+        }
+        $liste = array_merge(preg_split('/[\s,;]+/', (string) $a['asins'], -1, PREG_SPLIT_NO_EMPTY) ?: [], array_keys($zeilen));
+        foreach ($liste as $r) {
+            $as = self::getauscht(self::asin((string) $r)); if (strlen($as) !== 10 || isset($slots[$as])) { continue; }
+            $slots[$as] = ['asin' => $as, 'gew' => $fest] + ($zeilen[self::asin((string) $r)] ?? []) + ['marke' => '', 'titel' => '', 'text' => '', 'knopf' => ''];
+            if ($slots[$as]['marke'] === '') { $slots[$as]['marke'] = (string) $a['marke']; }
+        }
+        $slots = array_slice($slots, 0, 10, true);
+        $nt = max(0, min(10 - count($slots), (int) $a['top']));
+        if ($nt > 0) {
+            foreach (self::rot_top($nt, array_keys($slots), max(7, (int) ($a['tage'] !== '' ? $a['tage'] : 30))) as $as) { $slots[$as] = ['asin' => $as, 'gew' => 1, 'marke' => 'Beliebt auf dieser Seite', 'titel' => '', 'text' => '', 'knopf' => '']; }
+        }
+        if (!$slots) { return ''; }
+        $slots = array_values($slots); $panes = []; $gew = []; $id = substr(md5(implode(',', array_column($slots, 'asin'))), 0, 8);
+        self::$ab_in = true;
+        foreach ($slots as $i => $sl) {
+            $v = chr(65 + $i); self::$ab_ctx = ['slot' => 'wr-' . $id, 'var' => $v];
+            $h = self::sc_widget(['typ' => 'buch', 'asin' => $sl['asin'], 'land' => $land, 'marke' => $sl['marke'], 'titel' => $sl['titel'], 'text' => $sl['text'], 'knopf' => $sl['knopf'], 'tag' => $a['tag']]);
+            if ($h !== '') { $panes[$v] = $h; $gew[$v] = $sl['gew']; }
+        }
+        self::$ab_ctx = null; self::$ab_in = false;
+        if (!$panes) { return ''; }
+        $o = ++self::$ab_n; $ks = array_keys($panes); $tv = $ks[self::ab_tagesvariante(count($ks))]; $h = '';
+        foreach ($panes as $v => $x) { $h .= $v === $tv ? '<div class="sab-rot-ep" data-v="' . $v . '" style="display:contents">' . $x . '</div>' : '<template data-v="' . $v . '">' . $x . '</template>'; }
+        if (count($panes) < 2) { return '<div class="sab-rot" style="display:contents">' . $h . '</div>'; }
+        return '<div class="sab-rot" data-sab-rot="' . $o . '" style="display:contents">' . $h . '</div><script>(function(o,W){var w=document.querySelector(\'.sab-rot[data-sab-rot="\'+o+\'"]\');if(!w)return;var f=(location.search.match(/[?&]sab_rot=([A-J])/)||[])[1];if(' . self::AB_BOT_JS . '&&!f)return;'
+            . 'var vis=w.querySelector(".sab-rot-ep"),L=[vis].concat([].slice.call(w.querySelectorAll("template"))),s=0,k,i=0;for(k=0;k<L.length;k++){s+=W[L[k].getAttribute("data-v")]||1}var r=Math.random()*s;'
+            . 'for(k=0;k<L.length;k++){r-=W[L[k].getAttribute("data-v")]||1;if(r<0){i=k;break}}if(f){for(k=0;k<L.length;k++){if(L[k].getAttribute("data-v")===f){i=k}}}'
+            . 'if(i>0){var t=L[i],d=document.createElement("div");d.className="sab-rot-ep";d.setAttribute("data-v",t.getAttribute("data-v"));d.style.display="contents";d.appendChild(t.content.cloneNode(true));w.replaceChild(d,vis)}})(' . $o . ',' . wp_json_encode($gew) . ');</script>';
+    }
+
     public static function sc_widget($a, $inhalt = ''): string {
-        $a = shortcode_atts(['typ' => 'buch', 'asin' => '', 'land' => '', 'marke' => '', 'titel' => '', 'text' => '', 'knopf' => '', 'alt_text' => '', 'alt_url' => '', 'url' => '', 'hinweis' => '', 'tag' => ''], (array) $a);
+        $a = shortcode_atts(['typ' => 'buch', 'asin' => '', 'land' => '', 'marke' => '', 'titel' => '', 'text' => '', 'knopf' => '', 'alt_text' => '', 'alt_url' => '', 'url' => '', 'hinweis' => '', 'tag' => '', 'asins' => '', 'top' => '', 'gewicht' => '', 'tage' => ''], (array) $a);
         $css = '';
         self::$widget_benutzt = true;
         if (!self::$widget_css) { self::$widget_css = true; $css = '<style id="sab-widget">' . self::WIDGET_CSS . '</style>'; }
         $typ = strtolower(trim((string) $a['typ']));
+        if ($typ === 'rotation') { $rh = self::rot_widget_html($a, (string) $inhalt); return $rh === '' ? '' : $css . $rh; }
         if ($typ === 'tipp') {
             $u = esc_url((string) $a['url']);
             return $css . '<div class="sab-wt"><b>' . esc_html((string) $a['titel']) . '</b>' . ($a['text'] !== '' ? '<p>' . esc_html((string) $a['text']) . '</p>' : '') . ($u !== '' ? '<a href="' . $u . '">' . esc_html($a['knopf'] !== '' ? (string) $a['knopf'] : 'Mehr erfahren') . '</a>' : '') . '</div>';
