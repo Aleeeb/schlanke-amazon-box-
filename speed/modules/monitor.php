@@ -5,9 +5,13 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 define( 'ABMON_IV', 600 );
 
+/* Voreinstellung nur auf der Zentrale (schneckenhilfe.de): an, mit den 7 Seiten. Gilt, solange nichts gespeichert wurde. Auf allen anderen Seiten aus. */
+function abmon_is_center() { $h = wp_parse_url( home_url(), PHP_URL_HOST ); return is_string( $h ) && preg_match( '/(^|\.)schneckenhilfe\.de$/i', $h ); }
+function abmon_on() { $v = get_option( 'abmon_on', null ); return $v === null ? abmon_is_center() : (bool) $v; }
+function abmon_urls_raw() { $v = get_option( 'abmon_urls', null ); return $v === null ? ( abmon_is_center() ? "https://zeckenhilfe.de\nhttps://maulwurfhilfe.de\nhttps://federhilfe.de\nhttps://hilftachtsam.de\nhttps://slughelp.com\nhttps://aide-limaces.info\nhttps://ayuda-babosas.com" : '' ) : (string) $v; }
 function abmon_urls() {
 	$out = array();
-	foreach ( preg_split( '/\r\n|\r|\n/', (string) get_option( 'abmon_urls', '' ) ) as $l ) {
+	foreach ( preg_split( '/\r\n|\r|\n/', abmon_urls_raw() ) as $l ) {
 		$l = trim( $l );
 		if ( $l === '' ) { continue; }
 		if ( ! preg_match( '#^https?://#i', $l ) ) { $l = 'https://' . $l; }
@@ -69,12 +73,12 @@ function abmon_run( $probe = 'abmon_probe' ) {
 
 add_action( 'abmon_cron', function () {
 	if ( defined( 'ABSPEED_OFF' ) && ABSPEED_OFF ) { return; }
-	if ( get_option( 'abmon_on' ) && abmon_urls() ) { abmon_run(); }
-	if ( get_option( 'abmon_on' ) ) { wp_schedule_single_event( time() + ABMON_IV, 'abmon_cron' ); }
+	if ( abmon_on() && abmon_urls() ) { abmon_run(); }
+	if ( abmon_on() ) { wp_schedule_single_event( time() + ABMON_IV, 'abmon_cron' ); }
 } );
 /* Falls der Zeitplan fehlt (z. B. nach Umzug), bei einem Aufruf wieder anlegen */
 add_action( 'init', function () {
-	if ( get_option( 'abmon_on' ) && ! wp_next_scheduled( 'abmon_cron' ) ) { wp_schedule_single_event( time() + 60, 'abmon_cron' ); }
+	if ( abmon_on() && ! wp_next_scheduled( 'abmon_cron' ) ) { wp_schedule_single_event( time() + 60, 'abmon_cron' ); }
 } );
 
 add_action( 'admin_menu', function () {
@@ -100,10 +104,10 @@ function abmon_page() {
 	$st = (array) get_option( 'abmon_state', array() );
 	echo '<div class="wrap"><h1>Überwachung <small>1AB Speed v' . esc_html( ABSPEED_VER ) . '</small></h1>';
 	if ( function_exists( 'abspeed_update_box' ) ) { abspeed_update_box(); }
-	echo '<p>Diese Seite fragt alle 10 Minuten bei den unten eingetragenen Seiten an (nur Kopfzeile, wenige hundert Bytes). Nach zwei Fehlschlägen hintereinander kommt eine Mail, und eine weitere, wenn die Seite wieder läuft. Nur auf der Zentrale einschalten.</p>';
+	echo '<p>Diese Seite fragt alle 10 Minuten bei den unten eingetragenen Seiten an (nur Kopfzeile, wenige hundert Bytes). Nach zwei Fehlschlägen hintereinander kommt eine Mail, und eine weitere, wenn die Seite wieder läuft. Auf schneckenhilfe.de ist sie voreingestellt an (mit den 7 Seiten), auf allen anderen Seiten aus.</p>';
 	echo '<form method="post">'; wp_nonce_field( 'abmon_save' );
-	echo '<p><label><input type="checkbox" name="abmon_on" value="1" ' . checked( (bool) get_option( 'abmon_on' ), true, false ) . '> Überwachung einschalten</label></p>';
-	echo '<p><label>Seiten (eine Adresse pro Zeile)<br><textarea name="abmon_urls" rows="8" cols="60" placeholder="https://beispiel.de">' . esc_textarea( (string) get_option( 'abmon_urls', '' ) ) . '</textarea></label></p>';
+	echo '<p><label><input type="checkbox" name="abmon_on" value="1" ' . checked( abmon_on(), true, false ) . '> Überwachung einschalten</label></p>';
+	echo '<p><label>Seiten (eine Adresse pro Zeile)<br><textarea name="abmon_urls" rows="8" cols="60" placeholder="https://beispiel.de">' . esc_textarea( abmon_urls_raw() ) . '</textarea></label></p>';
 	echo '<p><label>Mail an <input type="email" name="abmon_mail" class="regular-text" value="' . esc_attr( abmon_mail() ) . '"></label></p>';
 	echo '<p><button class="button button-primary" name="abmon_save" value="1">Speichern</button></p></form>';
 	echo '<form method="post">'; wp_nonce_field( 'abmon_now' );
