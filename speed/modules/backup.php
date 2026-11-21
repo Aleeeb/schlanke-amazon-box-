@@ -8,7 +8,7 @@
  * 0.5.0: inkrementell (nur geänderte/neue Dateien, Index je Sicherung), Aufbewahrung (neueste, ca. 1 Woche, optional ca. 1 Monat).
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
-define( 'ABBK_VER', '0.6.3' );
+define( 'ABBK_VER', '0.6.4' );
 define( 'ABBK_TMP', 'abt_' );
 define( 'ABBK_OLD', 'abo_' );
 
@@ -1235,8 +1235,8 @@ add_action( 'wp_ajax_abbk_dl', function () {
 
 /* ================= Seite ================= */
 add_action( 'admin_menu', function () {
-	/* eigener Menüpunkt, direkt unter „Affiliate Help“ (Position 58) */
-	add_menu_page( 'Sicherung', 'Sicherung', 'manage_options', 'abspeed-backup', 'abbk_page', 'dashicons-backup', '58.5' );
+	/* Untermenü von „1AB Speed“ */
+	add_submenu_page( 'abspeed', 'Sicherung & Umzug', 'Sicherung', 'manage_options', 'abspeed-backup', 'abbk_page' );
 }, 20 );
 
 function abbk_page() {

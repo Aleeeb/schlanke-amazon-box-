@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.6.3
+ * Version: 0.6.4
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.6.3' );
+define( 'ABSPEED_VER', '0.6.4' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -200,7 +200,10 @@ function abspeed_footer() {
 
 /* ---------- Admin ---------- */
 add_action( 'admin_menu', function () {
-	add_menu_page( '1AB Speed', '1AB Speed', 'manage_options', 'abspeed', 'abspeed_page', 'dashicons-performance', 81 );
+	/* Ein Hauptmenü „1AB Speed“ (direkt unter „Affiliate Help“) mit Untermenüs Speed, Sicherung, Updates */
+	add_menu_page( '1AB Speed', '1AB Speed', 'manage_options', 'abspeed', 'abspeed_page', 'dashicons-performance', '58.5' );
+	add_submenu_page( 'abspeed', 'Speed', 'Speed', 'manage_options', 'abspeed', 'abspeed_page' );
+	add_submenu_page( 'abspeed', 'Updates', 'Updates', 'manage_options', 'abspeed-updates', function () { $_GET['tab'] = 'updates'; abspeed_page(); } );
 } );
 add_action( 'admin_init', function () {
 	register_setting( 'abspeed', 'abspeed_options', array( 'sanitize_callback' => 'abspeed_sanitize' ) );
