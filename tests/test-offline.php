@@ -379,7 +379,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 19 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und siebzehn Untermenüs');
+ok(count($GLOBALS['menu']) === 20 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und achtzehn Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -2346,4 +2346,25 @@ SAB::$ab_tag = 0; $rw0 = SAB::sc_widget(['typ' => 'rotation', 'asins' => 'B0ROT0
 ok(strpos(preg_replace('#<template.*?</template>#s', '', $rw0), 'B0ROT00001') !== false, 'Rotation: Tag 0 zeigt Buch Eins');
 ok(SAB::sc_widget(['typ' => 'rotation', 'asins' => '']) === '' || true, 'Rotation: leer bleibt leer');
 SAB::$ab_tag = 0;
+// 0.92.80: Reiter Rotation (feste Plätze, Sperrliste, Top mit Klicks)
+$obak2 = $GLOBALS['opt']; $wbak2 = $GLOBALS['wpdb'] ?? null; $pbak = $_POST;
+$GLOBALS['opt']['sab_produkte'] = "B0ROT00001 | Buch Eins\nB0ROT00004 | Top Netz\nB0ROT00006 | Problem Ding";
+$rit2 = function ($t) { return ['titel' => $t, 'bilder' => ['x.jpg'], 'preis' => '9,99 €', 'lieferbar' => true, 'status' => 'IN_STOCK']; };
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0ROT00004' => $rit2('Top Netz Gartennetz'), 'B0ROT00006' => $rit2('Problem Ding Gartenzaun')], 'ts' => time()];
+$GLOBALS['tr']['sab_rot_top_30'] = ['k' => [['asin' => 'B0ROT00006', 'n' => 99], ['asin' => 'B0ROT00004', 'n' => 40]], 'f' => ['B0ROT00004' => 1, 'B0ROT00006' => 1]];
+$mR = new ReflectionMethod('SAB', 'rot_speichern'); $mR->setAccessible(true); $mH = new ReflectionMethod('SAB', 'rot_html'); $mH->setAccessible(true);
+$_POST = ['rot_asin' => 'https://www.amazon.es/dp/B0ROT00006?tag=x']; $m1 = $mR->invoke(null, 'rot_sperren');
+ok(in_array('B0ROT00006', $GLOBALS['opt']['sab_rot_sperre'], true) && strpos($m1, 'gesperrt') !== false, 'Rotation: Produkt sperren per Amazon-Link');
+$_POST = ['rot_neu' => 'B0ROT00001', 'rot_neu_gew' => '4', 'rot_top' => '5', 'rot_tage' => '30']; $m2 = $mR->invoke(null, 'rot_speichern');
+ok(($GLOBALS['opt']['sab_rot_fest'][0]['asin'] ?? '') === 'B0ROT00001' && ($GLOBALS['opt']['sab_rot_fest'][0]['gew'] ?? 0) === 4, 'Rotation: festen Platz hinzufügen mit Gewicht');
+$_POST = ['rot_neu' => 'B0ROT00006', 'rot_top' => '5', 'rot_tage' => '30', 'rot_pos' => ['B0ROT00001' => '1'], 'rot_gew' => ['B0ROT00001' => '4']]; $m3 = $mR->invoke(null, 'rot_speichern');
+ok(count($GLOBALS['opt']['sab_rot_fest']) === 1 && strpos($m3, 'Sperrliste') !== false, 'Rotation: gesperrtes Produkt kommt nicht als fester Platz hinein');
+$GLOBALS['tr']['sab_rot_top_30'] = ['k' => [['asin' => 'B0ROT00006', 'n' => 99], ['asin' => 'B0ROT00004', 'n' => 40]], 'f' => ['B0ROT00004' => 1, 'B0ROT00006' => 1]];
+SAB::$ab_tag = 0; $rwk = SAB::sc_widget(['typ' => 'rotation']);
+ok(strpos($rwk, 'B0ROT00004') !== false && strpos($rwk, 'B0ROT00006') === false && strpos($rwk, 'B0ROT00001') !== false, 'Rotation: Widget ohne Angaben nimmt Reiter-Einstellungen, Top beachtet die Sperrliste');
+$rh = $mH->invoke(null);
+ok(strpos($rh, 'Sperrliste') !== false && strpos($rh, 'Problem Ding') !== false && strpos($rh, 'Freigeben') !== false && strpos($rh, 'Nie empfehlen') !== false && strpos($rh, 'Top Netz') !== false, 'Rotation: Reiter zeigt feste Plätze, Top mit Sperr-Knopf und Sperrliste');
+$_POST = ['rot_asin' => 'B0ROT00006']; $mR->invoke(null, 'rot_frei');
+ok(!in_array('B0ROT00006', $GLOBALS['opt']['sab_rot_sperre'], true), 'Rotation: Freigeben nimmt von der Sperrliste');
+$GLOBALS['opt'] = $obak2; $_POST = $pbak; if ($wbak2) { $GLOBALS['wpdb'] = $wbak2; } SAB::$ab_tag = 0; unset($GLOBALS['tr']['sab_rot_top_30']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

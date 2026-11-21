@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.79
+ * Version: 0.92.80
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.79';
+    const VERSION = '0.92.80';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -9260,6 +9260,117 @@ JS;
      * [amz_widget typ="liste" titel="Beliebt diese Woche"]Text|https://…  (eine Zeile je Eintrag, Link ist optional)[/amz_widget]
      * Buch-Karte: Bild und Knopf sind EIN Affiliate-Link (das Bild ist kein eigener Link, der Knopf deckt die ganze Karte ab).
      */
+    /** Feste Plätze der Rotation aus den Einstellungen (Reiter „Rotation“), nach Position. @return array<int,array{asin:string,gew:int,pos:int,marke:string,titel:string,text:string,knopf:string}> */
+    private static function rot_fest(): array {
+        $out = [];
+        foreach ((array) get_option('sab_rot_fest', []) as $f) {
+            $a = self::asin((string) ($f['asin'] ?? '')); if (strlen($a) !== 10) { continue; }
+            $out[] = ['asin' => $a, 'gew' => max(1, min(9, (int) ($f['gew'] ?? 3))), 'pos' => (int) ($f['pos'] ?? 0), 'marke' => (string) ($f['marke'] ?? ''), 'titel' => (string) ($f['titel'] ?? ''), 'text' => (string) ($f['text'] ?? ''), 'knopf' => (string) ($f['knopf'] ?? '')];
+        }
+        usort($out, fn($x, $y) => $x['pos'] <=> $y['pos']);
+        return array_slice($out, 0, 10);
+    }
+
+    /** Klicks der letzten $tage Tage je ASIN (für die Entscheidung im Reiter). @return array<string,int> */
+    private static function rot_klicks(array $asins, int $tage = 30): array {
+        global $wpdb; $out = [];
+        $asins = array_values(array_unique(array_filter(array_map('strval', $asins))));
+        if (!isset($wpdb) || !$asins) { return $out; }
+        $t = self::klicktabelle(); $ph = implode(',', array_fill(0, count($asins), '%s'));
+        foreach ((array) $wpdb->get_results($wpdb->prepare("SELECT asin, COUNT(*) n FROM $t WHERE ts >= %s AND asin IN ($ph) GROUP BY asin", array_merge([gmdate('Y-m-d H:i:s', time() - $tage * DAY_IN_SECONDS)], $asins)), ARRAY_A) as $r) { $out[(string) $r['asin']] = (int) $r['n']; }
+        return $out;
+    }
+
+    private static function rot_name(string $a, array $items): string {
+        return (string) ((self::produkte()[$a] ?? '') ?: self::kurzname_aus_titel((string) ($items[$a]['titel'] ?? '')) ?: $a);
+    }
+
+    /** Reiter „Rotation“: feste Plätze, automatische Top-Produkte, Sperrliste. */
+    private static function rot_html(): string {
+        $fest = self::rot_fest(); $sperre = array_values(array_unique(array_map('strtoupper', array_map('strval', (array) get_option('sab_rot_sperre', [])))));
+        $st = get_option('sab_uebersicht_stand_' . self::land('')); $items = is_array($st) ? (array) ($st['items'] ?? []) : [];
+        $ntop = max(0, min(10, (int) get_option('sab_rot_top', 5))); $tage = max(7, (int) get_option('sab_rot_tage', 30));
+        $top = $ntop > 0 ? self::rot_top(max(0, min($ntop, 10 - count($fest))), array_merge(array_column($fest, 'asin'), $sperre), $tage) : [];
+        $kl = self::rot_klicks(array_merge(array_column($fest, 'asin'), $top, $sperre), $tage);
+        $host = self::LAENDER[self::land('')][0] ?? 'www.amazon.es';
+        $nf = function (string $form, string $feld = '', string $wert = '', string $text = '', string $klasse = 'button'): string {
+            return '<form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="rotation"><input type="hidden" name="sab_form" value="' . esc_attr($form) . '">' . ($feld !== '' ? '<input type="hidden" name="' . esc_attr($feld) . '" value="' . esc_attr($wert) . '">' : '') . '<button class="' . esc_attr($klasse) . '">' . esc_html($text) . '</button></form>';
+        };
+        $lk = fn(string $a): string => '<a href="' . esc_url('https://' . $host . '/dp/' . $a) . '" target="_blank" rel="noopener">bei Amazon ansehen ↗</a>';
+        $h = '<h2>Rotation: Produkte in der Seitenleiste</h2><p class="description" style="max-width:860px">Bis zu 10 Plätze wechseln sich in einem Seitenleisten-Widget ab. <strong>Feste Plätze</strong> (zum Beispiel Bücher oder eigene Produkte) kommen je nach Gewicht öfter, dazu kommen die <strong>beliebtesten Produkte dieser Seite</strong> (nach Klicks). Gesperrte Produkte werden nie automatisch gezeigt, egal wie oft sie geklickt werden. Crawler sehen nur ein Produkt pro Tag. Im Widget steht: <code>[amz_widget typ="rotation"]</code> (nimmt diese Einstellungen).</p>';
+        $h .= '<p><strong>' . (count($fest) + count($top)) . ' von 10</strong> Plätzen belegt (' . count($fest) . ' fest, ' . count($top) . ' automatisch). Klicks: letzte ' . $tage . ' Tage.</p>';
+        $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="rotation"><input type="hidden" name="sab_form" value="rot_speichern">';
+        $h .= '<h3>Feste Plätze</h3><table class="widefat striped" style="max-width:1150px"><thead><tr><th style="width:60px">Position</th><th>Produkt</th><th style="width:70px">Klicks</th><th style="width:80px">Gewicht</th><th>Etikett, Titel, Text, Knopf (leer = automatisch)</th><th style="width:70px">Entfernen</th></tr></thead><tbody>';
+        foreach ($fest as $i => $f) {
+            $a = $f['asin'];
+            $h .= '<tr><td><input type="number" min="1" max="99" name="rot_pos[' . esc_attr($a) . ']" value="' . (int) ($f['pos'] ?: $i + 1) . '" style="width:56px"></td><td><strong>' . esc_html(self::rot_name($a, $items)) . '</strong><br><small><code>' . esc_html($a) . '</code> · ' . $lk($a) . '</small></td><td>' . (int) ($kl[$a] ?? 0) . '</td>'
+               . '<td><select name="rot_gew[' . esc_attr($a) . ']">' . implode('', array_map(fn($g) => '<option' . ($g === $f['gew'] ? ' selected' : '') . '>' . $g . '</option>', range(1, 9))) . '</select></td>'
+               . '<td><input type="text" name="rot_marke[' . esc_attr($a) . ']" value="' . esc_attr($f['marke']) . '" placeholder="Etikett" style="width:110px"> <input type="text" name="rot_titel[' . esc_attr($a) . ']" value="' . esc_attr($f['titel']) . '" placeholder="Titel" style="width:170px"> <input type="text" name="rot_text[' . esc_attr($a) . ']" value="' . esc_attr($f['text']) . '" placeholder="Kurztext" style="width:200px"> <input type="text" name="rot_knopf[' . esc_attr($a) . ']" value="' . esc_attr($f['knopf']) . '" placeholder="Knopf" style="width:110px"></td>'
+               . '<td><input type="checkbox" name="rot_weg[]" value="' . esc_attr($a) . '"></td></tr>';
+        }
+        if (!$fest) { $h .= '<tr><td colspan="6"><em>Noch kein fester Platz.</em></td></tr>'; }
+        $h .= '</tbody></table><p><label>Produkt hinzufügen (ASIN oder Amazon-Link): <input type="text" name="rot_neu" style="width:320px"></label> <label>Gewicht <select name="rot_neu_gew">' . implode('', array_map(fn($g) => '<option' . ($g === 3 ? ' selected' : '') . '>' . $g . '</option>', range(1, 9))) . '</select></label></p>';
+        $h .= '<p><label>Automatische Top-Produkte: <input type="number" min="0" max="10" name="rot_top" value="' . $ntop . '" style="width:60px"></label> <label>aus den Klicks der letzten <input type="number" min="7" max="90" name="rot_tage" value="' . $tage . '" style="width:60px"> Tage</label> <span class="description">Gewicht 3 heißt: dreimal so oft wie ein automatisches Produkt (Gewicht 1).</span></p>';
+        $h .= '<p><button class="button button-primary">Speichern</button></p></form>';
+        $h .= '<h3>Automatisch gewählte Top-Produkte (aktuell)</h3>';
+        if ($top) {
+            $h .= '<table class="widefat striped" style="max-width:900px"><thead><tr><th>Produkt</th><th style="width:70px">Klicks</th><th style="width:230px"></th></tr></thead><tbody>';
+            foreach ($top as $a) { $h .= '<tr><td><strong>' . esc_html(self::rot_name($a, $items)) . '</strong><br><small><code>' . esc_html($a) . '</code> · ' . $lk($a) . '</small></td><td>' . (int) ($kl[$a] ?? 0) . '</td><td>' . $nf('rot_sperren', 'rot_asin', $a, 'Nie empfehlen (sperren)') . ' ' . $nf('rot_fix', 'rot_asin', $a, 'Als festen Platz') . '</td></tr>'; }
+            $h .= '</tbody></table>';
+        } else { $h .= '<p class="description">Keine automatischen Produkte (Anzahl 0 oder noch keine passenden Klicks). Gezeigt werden nur lieferbare Produkte mit Bild, die in Artikeln stehen.</p>'; }
+        $h .= '<h3>Sperrliste: nie empfehlen</h3>';
+        if ($sperre) {
+            $h .= '<table class="widefat striped" style="max-width:900px"><thead><tr><th>Produkt</th><th style="width:70px">Klicks</th><th style="width:140px"></th></tr></thead><tbody>';
+            foreach ($sperre as $a) { $h .= '<tr><td><strong>' . esc_html(self::rot_name($a, $items)) . '</strong><br><small><code>' . esc_html($a) . '</code> · ' . $lk($a) . '</small></td><td>' . (int) ($kl[$a] ?? 0) . '</td><td>' . $nf('rot_frei', 'rot_asin', $a, 'Freigeben') . '</td></tr>'; }
+            $h .= '</tbody></table>';
+        } else { $h .= '<p class="description">Noch nichts gesperrt.</p>'; }
+        $h .= '<form method="post" style="margin-top:10px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="rotation"><input type="hidden" name="sab_form" value="rot_sperre_neu"><label>Produkt sperren (ASIN oder Amazon-Link): <input type="text" name="rot_asin" style="width:320px"></label> <button class="button">Sperren</button></form>';
+        return $h;
+    }
+
+    private static function rot_speichern(string $form): string {
+        $fest = (array) get_option('sab_rot_fest', []); $sperre = array_values(array_unique(array_map('strtoupper', array_map('strval', (array) get_option('sab_rot_sperre', [])))));
+        $asin = self::asin_aus_text((string) wp_unslash($_POST['rot_asin'] ?? ''));
+        if ($form === 'rot_sperren' || $form === 'rot_sperre_neu') {
+            if (strlen($asin) !== 10) { return 'Keine gültige ASIN. Nichts gesperrt.'; }
+            $sperre[] = $asin; $fest = array_values(array_filter($fest, fn($f) => strtoupper((string) ($f['asin'] ?? '')) !== $asin));
+            update_option('sab_rot_sperre', array_values(array_unique($sperre)), false); update_option('sab_rot_fest', $fest, false); delete_transient('sab_rot_top_' . max(7, (int) get_option('sab_rot_tage', 30)));
+            return $asin . ' gesperrt: wird nicht mehr empfohlen (auch nicht automatisch).';
+        }
+        if ($form === 'rot_frei') {
+            update_option('sab_rot_sperre', array_values(array_diff($sperre, [$asin])), false);
+            return $asin . ' freigegeben.';
+        }
+        if ($form === 'rot_fix') {
+            if (strlen($asin) !== 10) { return 'Keine gültige ASIN.'; }
+            if (count($fest) >= 10) { return 'Schon 10 feste Plätze.'; }
+            foreach ($fest as $f) { if (strtoupper((string) ($f['asin'] ?? '')) === $asin) { return 'Ist schon ein fester Platz.'; } }
+            $fest[] = ['asin' => $asin, 'gew' => 3, 'pos' => count($fest) + 1, 'marke' => '', 'titel' => '', 'text' => '', 'knopf' => '']; update_option('sab_rot_fest', $fest, false);
+            return $asin . ' ist jetzt ein fester Platz.';
+        }
+        if ($form !== 'rot_speichern') { return ''; }
+        $g = fn(string $k, string $a): string => sanitize_text_field(wp_unslash((string) (((array) ($_POST[$k] ?? []))[$a] ?? '')));
+        $weg = array_map('strtoupper', array_map('strval', (array) ($_POST['rot_weg'] ?? []))); $neu = [];
+        foreach ($fest as $f) {
+            $a = strtoupper((string) ($f['asin'] ?? '')); if (strlen($a) !== 10 || in_array($a, $weg, true) || in_array($a, $sperre, true)) { continue; }
+            $neu[] = ['asin' => $a, 'gew' => max(1, min(9, (int) $g('rot_gew', $a))), 'pos' => max(1, min(99, (int) $g('rot_pos', $a))), 'marke' => $g('rot_marke', $a), 'titel' => $g('rot_titel', $a), 'text' => $g('rot_text', $a), 'knopf' => $g('rot_knopf', $a)];
+        }
+        $msg = 'Gespeichert.';
+        $na = self::asin_aus_text((string) wp_unslash($_POST['rot_neu'] ?? ''));
+        if (trim((string) ($_POST['rot_neu'] ?? '')) !== '') {
+            if (strlen($na) !== 10) { $msg .= ' Das neue Produkt war keine gültige ASIN und wurde nicht aufgenommen.'; }
+            elseif (in_array($na, $sperre, true)) { $msg .= ' ' . $na . ' steht auf der Sperrliste und wurde nicht aufgenommen.'; }
+            elseif (count($neu) >= 10) { $msg .= ' Schon 10 feste Plätze, ' . $na . ' nicht aufgenommen.'; }
+            elseif (!in_array($na, array_column($neu, 'asin'), true)) { $neu[] = ['asin' => $na, 'gew' => max(1, min(9, (int) ($_POST['rot_neu_gew'] ?? 3))), 'pos' => 99, 'marke' => '', 'titel' => '', 'text' => '', 'knopf' => '']; }
+        }
+        usort($neu, fn($x, $y) => $x['pos'] <=> $y['pos']); foreach ($neu as $i => $f) { $neu[$i]['pos'] = $i + 1; }
+        update_option('sab_rot_fest', $neu, false);
+        update_option('sab_rot_top', max(0, min(10, (int) ($_POST['rot_top'] ?? 5))), false);
+        update_option('sab_rot_tage', max(7, min(90, (int) ($_POST['rot_tage'] ?? 30))), false);
+        foreach ([7, 30, 60, 90] as $t) { delete_transient('sab_rot_top_' . $t); }
+        return $msg;
+    }
+
     /** Beliebteste Produkte (Klicks der letzten Tage, seitenweit) für die Rotation: nur lieferbare Produkte mit Bild, die in Artikeln stehen, nie tötende, nie die Ausgeschlossenen. @param array<int,array{asin:string,n:int}> $klicks @return string[] */
     public static function rot_top_auswahl(array $klicks, array $items, array $fund, array $aus, int $n): array {
         $namen = self::produkte(); $out = [];
@@ -9300,16 +9411,23 @@ JS;
             $t = array_map('trim', explode('|', $z)); $as = self::asin($t[0] ?? '');
             if (strlen($as) === 10) { $zeilen[$as] = ['marke' => (string) ($t[1] ?? ''), 'titel' => (string) ($t[2] ?? ''), 'text' => (string) ($t[3] ?? ''), 'knopf' => (string) ($t[4] ?? '')]; }
         }
+        $konfig = $a['asins'] === '' && !$zeilen;   // ohne eigene Angaben gelten die Einstellungen aus dem Reiter „Rotation“
+        $sperre = array_map('strtoupper', array_map('strval', (array) get_option('sab_rot_sperre', [])));
+        if ($konfig) {
+            foreach (self::rot_fest() as $f) { $zeilen[$f['asin']] = ['marke' => $f['marke'], 'titel' => $f['titel'], 'text' => $f['text'], 'knopf' => $f['knopf'], 'gew' => $f['gew']]; }
+            if ($a['top'] === '') { $a['top'] = (string) (int) get_option('sab_rot_top', 5); }
+            if ($a['tage'] === '') { $a['tage'] = (string) (int) get_option('sab_rot_tage', 30); }
+        }
         $liste = array_merge(preg_split('/[\s,;]+/', (string) $a['asins'], -1, PREG_SPLIT_NO_EMPTY) ?: [], array_keys($zeilen));
         foreach ($liste as $r) {
             $as = self::getauscht(self::asin((string) $r)); if (strlen($as) !== 10 || isset($slots[$as])) { continue; }
-            $slots[$as] = ['asin' => $as, 'gew' => $fest] + ($zeilen[self::asin((string) $r)] ?? []) + ['marke' => '', 'titel' => '', 'text' => '', 'knopf' => ''];
+            $z_ = $zeilen[self::asin((string) $r)] ?? []; $slots[$as] = ['asin' => $as, 'gew' => max(1, min(9, (int) ($z_['gew'] ?? $fest)))] + $z_ + ['marke' => '', 'titel' => '', 'text' => '', 'knopf' => ''];
             if ($slots[$as]['marke'] === '') { $slots[$as]['marke'] = (string) $a['marke']; }
         }
         $slots = array_slice($slots, 0, 10, true);
         $nt = max(0, min(10 - count($slots), (int) $a['top']));
         if ($nt > 0) {
-            foreach (self::rot_top($nt, array_keys($slots), max(7, (int) ($a['tage'] !== '' ? $a['tage'] : 30))) as $as) { $slots[$as] = ['asin' => $as, 'gew' => 1, 'marke' => 'Beliebt auf dieser Seite', 'titel' => '', 'text' => '', 'knopf' => '']; }
+            foreach (self::rot_top($nt, array_merge(array_keys($slots), $sperre), max(7, (int) ($a['tage'] !== '' ? $a['tage'] : 30))) as $as) { $slots[$as] = ['asin' => $as, 'gew' => 1, 'marke' => 'Beliebt auf dieser Seite', 'titel' => '', 'text' => '', 'knopf' => '']; }
         }
         if (!$slots) { return ''; }
         $slots = array_values($slots); $panes = []; $gew = []; $id = substr(md5(implode(',', array_column($slots, 'asin'))), 0, 8);
@@ -9398,6 +9516,7 @@ JS;
         'austausch'     => 'Austausch',
         'helfer'        => 'Helferaufgaben',
         'laender'       => 'Länder',
+        'rotation'      => 'Rotation',
         'lernen'        => 'Lernen',
         'scan'          => 'Seite scannen',
         'kartendesign'  => 'Kartendesign',
@@ -9873,6 +9992,8 @@ JS;
                 }
             } elseif ($form === 'kartendesign') {
                 $meldung = self::kd_speichern();
+            } elseif (strpos((string) $form, 'rot_') === 0) {
+                $meldung = self::rot_speichern((string) $form);
             } elseif ($form === 'laender') {
                 $meldung = self::laender_speichern();
             } elseif ($form === 'laender_pruefen') {
@@ -10273,6 +10394,8 @@ JS;
             echo self::score_html();
         } elseif ($tab === 'austausch') {
             echo self::austausch_html();
+        } elseif ($tab === 'rotation') {
+            echo self::rot_html();
         } elseif ($tab === 'laender') {
             echo self::laender_html();
         } elseif ($tab === 'lernen') {
