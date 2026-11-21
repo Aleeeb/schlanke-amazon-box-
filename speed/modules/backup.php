@@ -8,7 +8,7 @@
  * 0.5.0: inkrementell (nur geänderte/neue Dateien, Index je Sicherung), Aufbewahrung (neueste, ca. 1 Woche, optional ca. 1 Monat).
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
-define( 'ABBK_VER', '0.6.4' );
+define( 'ABBK_VER', '0.6.5' );
 define( 'ABBK_TMP', 'abt_' );
 define( 'ABBK_OLD', 'abo_' );
 

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.6.4
+ * Version: 0.6.5
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.6.4' );
+define( 'ABSPEED_VER', '0.6.5' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -562,6 +562,9 @@ function abspeed_update_box() {
 	if ( ! empty( $err['msg'] ) ) { echo '<br><span style="color:#b32d2e">Letzter Versuch fehlgeschlagen (' . esc_html( $err['msg'] ) . '), nächster Versuch automatisch.</span>'; }
 	echo '</form>';
 }
+
+/* Modul Überwachung (Zentrale prüft die anderen Seiten) */
+if ( file_exists( __DIR__ . '/modules/monitor.php' ) ) { require_once __DIR__ . '/modules/monitor.php'; }
 
 /* Modul Sicherung/Wiederherstellung (eigene Datei, legt Untermenü „Sicherung“ an) */
 if ( file_exists( __DIR__ . '/modules/backup.php' ) ) { require_once __DIR__ . '/modules/backup.php'; }
