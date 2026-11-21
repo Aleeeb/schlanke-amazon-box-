@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Speed
  * Description: Schlankes Lazy Load für Bilder, Videos und Iframes (YouTube-Klickvorschau ohne Datenabfrage vor dem Klick) plus Auswertungsseite mit Tempo-Hinweisen.
- * Version: 0.3.0
+ * Version: 0.6.1
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Author: 1AB
@@ -11,7 +11,7 @@
  */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ABSPEED_VER', '0.3.0' );
+define( 'ABSPEED_VER', '0.6.1' );
 define( 'ABSPEED_REPO', 'https://github.com/Aleeeb/schlanke-amazon-box-/' );
 define( 'ABSPEED_JSON', 'https://raw.githubusercontent.com/Aleeeb/schlanke-amazon-box-/main/update-1ab-speed.json' );
 
@@ -158,7 +158,15 @@ function abspeed_iframe( $m ) {
 	elseif ( preg_match( '#^https://player\.vimeo\.com/video/(\d+)#', $src, $y ) ) { $id = $y[1]; $provider = 'vimeo'; }
 	if ( $provider === '' ) {
 		// andere Iframes: nur lazy
-		if ( abspeed_opt( 'iframes' ) && stripos( $tag, ' loading=' ) === false ) { return preg_replace( '/<iframe\b/i', '<iframe loading="lazy"', $tag, 1 ); }
+		if ( ! abspeed_opt( 'iframes' ) ) { return $tag; }
+		// Andere Iframes (z. B. xeno-canto, Karten, Wikimedia): erst laden, wenn sie fast sichtbar sind (Beobachter + Rückfall noscript)
+		if ( preg_match( '#^https?://#i', $src ) && stripos( $tag, 'srcdoc=' ) === false ) {
+			$GLOBALS['abspeed_lziframe'] = true;
+			$lazy = preg_replace( '/\ssrc=(["\'])[^"\']+\1/i', ' src="about:blank" data-abs-src="' . esc_attr( $src ) . '"', $tag, 1 );
+			if ( stripos( $lazy, ' loading=' ) === false ) { $lazy = preg_replace( '/<iframe\b/i', '<iframe loading="lazy"', $lazy, 1 ); }
+			return $lazy . '<noscript>' . $tag . '</noscript>';
+		}
+		if ( stripos( $tag, ' loading=' ) === false ) { return preg_replace( '/<iframe\b/i', '<iframe loading="lazy"', $tag, 1 ); }
 		return $tag;
 	}
 	$w = 16; $h = 9;
@@ -182,6 +190,9 @@ function abspeed_iframe( $m ) {
 /* Facade-CSS + Klick-Skript nur wenn nötig (klein, inline) */
 add_action( 'wp_footer', 'abspeed_footer', 99 );
 function abspeed_footer() {
+	if ( ! empty( $GLOBALS['abspeed_lziframe'] ) ) {
+		echo '<script>(function(){var l=document.querySelectorAll("iframe[data-abs-src]");function go(f){var s=f.getAttribute("data-abs-src");if(s){f.removeAttribute("data-abs-src");f.src=s;}}if(!("IntersectionObserver" in window)){for(var i=0;i<l.length;i++)go(l[i]);return;}var o=new IntersectionObserver(function(e){for(var i=0;i<e.length;i++){if(e[i].isIntersecting){o.unobserve(e[i].target);go(e[i].target);}}},{rootMargin:"400px 0px"});for(var j=0;j<l.length;j++)o.observe(l[j]);})();</script>';
+	}
 	if ( empty( $GLOBALS['abspeed_facade'] ) ) { return; }
 	echo '<style>.abspeed-fc{position:relative;width:100%;max-width:100%;background:#111 center/cover no-repeat;cursor:pointer;overflow:hidden;border-radius:6px}.abspeed-fc iframe{position:absolute;inset:0;width:100%;height:100%;border:0}.abspeed-play{position:absolute;inset:0;margin:auto;width:68px;height:48px;border:0;padding:0;background:none;cursor:pointer}.abspeed-fc:hover path:first-child{fill:#f00;fill-opacity:1}</style>';
 	echo '<script>(function(){function go(b){var e=b.closest(".abspeed-fc");if(!e||e.querySelector("iframe"))return;var f=document.createElement("iframe");f.src=e.getAttribute("data-embed");f.title=e.getAttribute("data-title")||"Video";f.allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture;fullscreen";f.setAttribute("allowfullscreen","");e.appendChild(f);var p=e.querySelector(".abspeed-play");if(p)p.remove();}document.addEventListener("click",function(ev){var t=ev.target.closest&&ev.target.closest(".abspeed-fc");if(t)go(t);});})();</script>';
@@ -207,6 +218,15 @@ function abspeed_page() {
 	$tab = 'settings';
 	if ( isset( $_GET['tab'] ) && in_array( $_GET['tab'], array( 'report', 'updates' ), true ) ) { $tab = $_GET['tab']; }
 	if ( ! empty( $_GET['abspeed_update_now'] ) && check_admin_referer( 'abspeed_update_now' ) ) { abspeed_update_check( true ); }
+	if ( ! empty( $_POST['abspeed_upd_save'] ) && check_admin_referer( 'abspeed_upd_save' ) ) {
+		update_option( 'abspeed_auto', empty( $_POST['abspeed_auto'] ) ? 0 : 1, false );
+		$mo = isset( $_POST['abspeed_upd_mode'] ) ? sanitize_key( $_POST['abspeed_upd_mode'] ) : 'adaptive';
+		update_option( 'abspeed_upd_mode', in_array( $mo, array( 'adaptive', 'hourly', 'daily', 'off' ), true ) ? $mo : 'adaptive', false );
+		update_option( 'abspeed_upd_max_h', max( 1, min( 168, isset( $_POST['abspeed_upd_max_h'] ) ? (int) $_POST['abspeed_upd_max_h'] : 12 ) ), false );
+		update_option( 'abspeed_upd', array( 'iv' => 600, 'seen' => ABSPEED_VER, 'fails' => 0 ), false );
+		wp_clear_scheduled_hook( 'abspeed_update_cron' );
+		if ( $mo !== 'off' ) { wp_schedule_single_event( time() + 60, 'abspeed_update_cron' ); }
+	}
 	echo '<div class="wrap"><h1>1AB Speed <small>v' . esc_html( ABSPEED_VER ) . '</small></h1><h2 class="nav-tab-wrapper">';
 	echo '<a class="nav-tab ' . ( $tab === 'settings' ? 'nav-tab-active' : '' ) . '" href="' . esc_url( admin_url( 'admin.php?page=abspeed' ) ) . '">Einstellungen</a>';
 	echo '<a class="nav-tab ' . ( $tab === 'report' ? 'nav-tab-active' : '' ) . '" href="' . esc_url( admin_url( 'admin.php?page=abspeed&tab=report' ) ) . '">Auswertung</a>';
@@ -345,7 +365,8 @@ add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), function ( $l 
 add_action( 'abspeed_update_cron', 'abspeed_update_cron' );
 add_action( 'admin_init', function () {
 	if ( ! current_user_can( 'update_plugins' ) ) { return; }
-	if ( ! wp_next_scheduled( 'abspeed_update_cron' ) ) { wp_schedule_single_event( time() + 3600, 'abspeed_update_cron' ); }
+	if ( get_option( 'abspeed_upd_mode', 'adaptive' ) !== 'off' && ! wp_next_scheduled( 'abspeed_update_cron' ) ) { wp_schedule_single_event( time() + 120, 'abspeed_update_cron' ); }
+	abspeed_update_verify();
 	// Frisch installiert: Eintrag bei WordPress anlegen, damit der Schalter „Automatische Updates“ sofort erscheint
 	$key = plugin_basename( __FILE__ );
 	$t   = get_site_transient( 'update_plugins' );
@@ -398,16 +419,53 @@ function abspeed_update_check( $force = false ) {
 	return isset( $t->response[ $key ] ) ? (string) $t->response[ $key ]->new_version : '';
 }
 
+/* Sperre: Nicht mitten in Sicherung/Wiederherstellung aktualisieren */
+function abspeed_busy() { return function_exists( 'abbk_busy' ) && abbk_busy(); }
+
+/* Nächster Abstand: nach einer Veröffentlichung zuerst alle 10 Min., dann jeweils doppelt so lang bis zum Höchstwert (Standard 12 Std.), bis wieder eine neue Version kommt. */
+function abspeed_next_interval( $found_new ) {
+	$mode = get_option( 'abspeed_upd_mode', 'adaptive' );
+	if ( $mode === 'off' ) { return 0; }
+	if ( $mode === 'hourly' ) { return 3600; }
+	if ( $mode === 'daily' ) { return 86400; }
+	$st  = (array) get_option( 'abspeed_upd', array() );
+	$max = max( 1, min( 168, (int) get_option( 'abspeed_upd_max_h', 12 ) ) ) * 3600;
+	$iv  = isset( $st['iv'] ) ? (int) $st['iv'] : $max;
+	$seen = isset( $st['seen'] ) ? (string) $st['seen'] : '';
+	if ( $found_new || $seen !== ABSPEED_VER ) { $iv = 600; } else { $iv = min( $max, max( 600, $iv * 2 ) ); }
+	$st['iv'] = $iv; $st['seen'] = ABSPEED_VER;
+	update_option( 'abspeed_upd', $st, false );
+	return $iv;
+}
+
+/* Nach dem Neuladen mit neuer Version: Ergebnis des letzten Installationsversuchs festhalten */
+function abspeed_update_verify() {
+	$l = (array) get_option( 'abspeed_upd_log', array() );
+	if ( ! empty( $l['to'] ) && empty( $l['done'] ) && version_compare( ABSPEED_VER, $l['to'], '>=' ) ) {
+		$l['done'] = time(); $l['ok'] = true; update_option( 'abspeed_upd_log', $l, false );
+		$st = (array) get_option( 'abspeed_upd', array() ); $st['fails'] = 0; update_option( 'abspeed_upd', $st, false );
+	}
+}
+
 function abspeed_update_cron() {
+	if ( abspeed_busy() ) { wp_schedule_single_event( time() + 900, 'abspeed_update_cron' ); return; }
 	$neu = abspeed_update_check( true );
 	$key = plugin_basename( __FILE__ );
-	if ( $neu !== '' && in_array( $key, (array) get_site_option( 'auto_update_plugins', array() ), true ) && function_exists( 'wp_maybe_auto_update' ) ) {
+	$st  = (array) get_option( 'abspeed_upd', array() );
+	$fails = isset( $st['fails'] ) ? (int) $st['fails'] : 0;
+	$lg = (array) get_option( 'abspeed_upd_log', array() );
+	if ( $neu !== '' && ( empty( $lg['to'] ) || $lg['to'] !== $neu ) ) { $fails = 0; } // andere (neuere) Version: wieder versuchen
+	$auto = get_option( 'abspeed_auto', 1 ) || in_array( $key, (array) get_site_option( 'auto_update_plugins', array() ), true );
+	if ( $neu !== '' && $auto && $fails < 3 && function_exists( 'wp_maybe_auto_update' ) ) {
+		update_option( 'abspeed_upd_log', array( 'from' => ABSPEED_VER, 'to' => $neu, 'start' => time(), 'done' => 0, 'ok' => false ), false );
+		$st['fails'] = $fails + 1; update_option( 'abspeed_upd', $st, false ); // wird bei Erfolg nach dem Neuladen auf 0 gesetzt
 		$only = function ( $u, $i ) use ( $key ) { return is_object( $i ) && isset( $i->plugin ) && (string) $i->plugin === $key ? true : $u; };
 		add_filter( 'auto_update_plugin', $only, 99999, 2 );
 		wp_maybe_auto_update();
 		remove_filter( 'auto_update_plugin', $only, 99999 );
 	}
-	wp_schedule_single_event( time() + 3600, 'abspeed_update_cron' );
+	$iv = abspeed_next_interval( $neu !== '' );
+	if ( $iv ) { wp_schedule_single_event( time() + $iv, 'abspeed_update_cron' ); }
 }
 
 function abspeed_updates_page() {
@@ -426,7 +484,16 @@ function abspeed_updates_page() {
 	if ( ! empty( $st['ts'] ) ) {
 		echo '<p class="description">Letzte Abfrage bei GitHub vor ' . max( 0, (int) round( ( time() - (int) $st['ts'] ) / 60 ) ) . ' Min (Antwort: ' . esc_html( $st['code'] ) . ').</p>';
 	}
-	echo '<p>Automatische Updates: <strong>' . ( $auto ? 'an' : 'aus' ) . '</strong>. ' . ( $auto ? 'Das Plugin prüft stündlich und spielt neue Versionen selbst ein.' : 'Einschalten unter <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Plugins</a> in der Zeile „1AB Speed“ (Link „Automatische Updates aktivieren“).' ) . '</p>';
+	$mode = get_option( 'abspeed_upd_mode', 'adaptive' ); $auto2 = (bool) get_option( 'abspeed_auto', 1 ); $mx = (int) get_option( 'abspeed_upd_max_h', 12 );
+	$l = (array) get_option( 'abspeed_upd_log', array() ); $nx = wp_next_scheduled( 'abspeed_update_cron' );
+	echo '<h3>Selbst suchen und installieren</h3><form method="post">';
+	wp_nonce_field( 'abspeed_upd_save' );
+	echo '<p><label><input type="checkbox" name="abspeed_auto" value="1"' . ( $auto2 ? ' checked' : '' ) . '> Neue Versionen selbst installieren (nicht während einer Sicherung)</label></p>';
+	echo '<p>Prüfen: <select name="abspeed_upd_mode">';
+	foreach ( array( 'adaptive' => 'nach einer neuen Version oft, dann immer seltener', 'hourly' => 'stündlich', 'daily' => 'täglich', 'off' => 'gar nicht' ) as $k => $t ) { echo '<option value="' . esc_attr( $k ) . '"' . selected( $mode, $k, false ) . '>' . esc_html( $t ) . '</option>'; }
+	echo '</select> · höchster Abstand bei „immer seltener“: <input type="number" name="abspeed_upd_max_h" min="1" max="168" value="' . (int) $mx . '" style="width:60px"> Std. <span class="description">Ablauf: zuerst alle 10 Min., dann 20, 40 … bis zum höchsten Abstand, bis wieder eine neue Version kommt.</span></p>';
+	echo '<p><button class="button button-primary" name="abspeed_upd_save" value="1">Speichern</button></p></form>';
+	echo '<p class="description">' . ( $nx ? 'Nächste Prüfung: ' . esc_html( wp_date( 'd.m.Y H:i', $nx ) ) . '. ' : 'Keine Prüfung geplant. ' ) . ( ! empty( $l['to'] ) ? 'Letzter Installationsversuch: ' . esc_html( $l['from'] ) . ' → ' . esc_html( $l['to'] ) . ' am ' . esc_html( wp_date( 'd.m.Y H:i', (int) $l['start'] ) ) . ( ! empty( $l['ok'] ) ? ' – geklappt.' : ' – noch nicht bestätigt (nach spätestens 3 Fehlversuchen gibt das Plugin auf; dann unter Plugins von Hand aktualisieren oder per FTP).' ) : '' ) . '</p>';
 }
 
 
@@ -443,3 +510,6 @@ function abspeed_pre_download( $reply, $package ) {
 	if ( ! hash_equals( $h, (string) hash_file( 'sha256', $file ) ) ) { @unlink( $file ); return new WP_Error( 'abspeed_summe', 'Prüfsumme des Updates stimmt nicht. Es wurde nichts installiert.' ); }
 	return $file;
 }
+
+/* Modul Sicherung/Wiederherstellung (eigene Datei, legt Untermenü „Sicherung“ an) */
+if ( file_exists( __DIR__ . '/modules/backup.php' ) ) { require_once __DIR__ . '/modules/backup.php'; }
