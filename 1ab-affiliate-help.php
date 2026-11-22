@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.86
+ * Version: 0.92.87
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.86';
+    const VERSION = '0.92.87';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -4736,7 +4736,7 @@ JS;
     /** Kleines Skript, nur auf Seiten mit Produkten. Misst Klick und die Zeit bis zur Rückkehr in den Tab. */
     public static function messskript(): void {
         if (function_exists('is_user_logged_in') && is_user_logged_in() && current_user_can('edit_posts')) { return; }   // angemeldete Redakteure werden nicht gemessen
-        if (!self::$genutzt && !(function_exists('is_singular') && is_singular() && self::partner_links((string) get_post_field('post_content', get_the_ID())))) { return; }   // nur Seiten mit Produkten oder Partnerlinks
+        if (!self::$genutzt) { $pc = (function_exists('is_singular') && is_singular()) ? (string) get_post_field('post_content', get_the_ID()) : ''; if ($pc === '' || (!self::partner_links($pc) && !self::ebay_stellen($pc))) { return; } }   // nur Seiten mit Produkten, Partnerlinks oder eBay-Links
         $url = esc_url_raw(rest_url('sab/v1/m'));
         echo '<script>(function(){var U=' . wp_json_encode($url) . ',p=null;'
            . 'function S(o){try{navigator.sendBeacon(U,new Blob([JSON.stringify(o)],{type:"text/plain"}))}catch(e){}}'
@@ -4748,7 +4748,7 @@ JS;
            . 'function W(){(window.requestIdleCallback||function(f){setTimeout(f,1500)})(Z)}'
            . 'if(document.readyState==="complete"){W()}else{addEventListener("load",W)}'
            . 'var NR=new RegExp(' . wp_json_encode(self::PARTNER_NETZE) . ',"i");'
-           . 'document.addEventListener("click",function(e){var q=e.target.closest&&e.target.closest("a[href]");if(q&&!q.hasAttribute("data-sab-asin")&&q.hostname&&q.hostname!==location.hostname&&!/amazon\\.|amzn\\.|ebay\\.|(^|\\.)a\\.co$/i.test(q.hostname)&&(NR.test(q.hostname)||/sponsored/.test(q.rel||""))){S({id:Math.random().toString(36).slice(2,10),pl:q.hostname,pfad:location.pathname})}},true);'
+           . 'document.addEventListener("click",function(e){var q=e.target.closest&&e.target.closest("a[href]");if(q&&!q.hasAttribute("data-sab-asin")&&q.hostname&&q.hostname!==location.hostname&&!/amazon\\.|amzn\\.|(^|\\.)a\\.co$/i.test(q.hostname)&&(NR.test(q.hostname)||/ebay\\./i.test(q.hostname)||/sponsored/.test(q.rel||""))){S({id:Math.random().toString(36).slice(2,10),pl:q.hostname,pfad:location.pathname})}},true);'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
            . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn,.sab-karte-titel,.sab-karte-cta"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
@@ -9519,6 +9519,54 @@ JS;
         return $out;
     }
 
+    /** Anzahl eBay-Stellen in einem Text: [amz_ebay], Karten mit eBay-Link (ebay= oder campid=) und feste eBay-Links. */
+    public static function ebay_stellen(string $c): int {
+        $n = (int) preg_match_all('#\[amz_ebay\b#i', $c);
+        $n += (int) preg_match_all('#\[amz_karte\b[^\]]*\b(?:ebay|campid)=#i', $c);
+        $n += (int) preg_match_all('#<a\b[^>]*href=(["\'])[^"\']*//[^/"\']*ebay\.[^"\']*\1#i', $c);
+        return $n;
+    }
+
+    /** Amazon-Stellen in einem Text (Plugin-Platzhalter und feste Amazon-Links), nur zum Vergleich mit eBay. */
+    private static function amazon_stellen(string $c): int {
+        return (int) preg_match_all('#\[amz_(?:link|bild|produkt|karte)\b#i', $c) + (int) preg_match_all('#<a\b[^>]*href=(["\'])[^"\']*(?:amazon\.|amzn\.)[^"\']*\1#i', $c);
+    }
+
+    /** eBay-Auswertung für den Reiter Partnerlinks: Stellen und Klicks je Artikel, Klickrate, beste und schwächste, Anteil an Amazon. */
+    private static function ebay_html(array $rows, array $kl): string {
+        global $wpdb;
+        $views = []; $azk = [];
+        if (isset($wpdb)) {
+            foreach ((array) $wpdb->get_results("SELECT pfad, SUM(n) n FROM " . self::seiten_tabelle() . " GROUP BY pfad", ARRAY_A) as $r) { $views[(string) ($r['pfad'] ?? '')] = (int) ($r['n'] ?? 0); }
+            foreach ((array) $wpdb->get_results("SELECT pfad, COUNT(*) n FROM " . self::klicktabelle() . " GROUP BY pfad", ARRAY_A) as $r) { $azk[(string) ($r['pfad'] ?? '')] = (int) ($r['n'] ?? 0); }
+        }
+        $art = []; $sumE = 0; $sumA = 0; $kE = 0; $kA = 0;
+        foreach ($rows as $r) {
+            $c = (string) $r['post_content']; $e = self::ebay_stellen($c); $a = self::amazon_stellen($c);
+            $pf = self::pfad_sauber((string) get_permalink((int) $r['ID']));
+            $ke = 0; foreach ($kl[$pf] ?? [] as $hn => $z) { if (preg_match('#ebay\.#i', (string) $hn)) { $ke += (int) ($z['n'] ?? 0); } }
+            $ka = (int) ($azk[$pf] ?? 0); $v = (int) ($views[$pf] ?? 0);
+            $sumA += $a; $kA += $ka;
+            if (!$e) { continue; }
+            $sumE += $e; $kE += $ke;
+            $art[] = ['id' => (int) $r['ID'], 't' => (string) ($r['post_title'] ?: 'Beitrag ' . $r['ID']), 'e' => $e, 'k' => $ke, 'v' => $v, 'ka' => $ka, 'rate' => $v > 0 ? $ke / $v : null];
+        }
+        $h = '<h3>eBay im Detail</h3>';
+        if (!$art) { return $h . '<p>Keine eBay-Links in veröffentlichten Artikeln gefunden.</p>'; }
+        $pr = fn(int $a, int $b): string => $b > 0 ? number_format_i18n(100 * $a / $b, 1) . ' %' : '–';
+        $h .= '<p><strong>' . count($art) . '</strong> Artikel mit zusammen <strong>' . $sumE . '</strong> eBay-Stellen (Amazon: ' . $sumA . ' Stellen) · eBay-Klicks: <strong>' . $kE . '</strong>, Amazon-Klicks: <strong>' . $kA . '</strong> · Anteil eBay an allen Klicks: <strong>' . $pr($kE, $kE + $kA) . '</strong> · Anteil eBay an allen Stellen: <strong>' . $pr($sumE, $sumE + $sumA) . '</strong>.</p><p class="description">Klickrate = eBay-Klicks je Seitenaufruf in den Artikeln (Seitenaufrufe zählt das Plugin nur auf Seiten mit Produkten). eBay-Klicks werden ab Einspielen dieser Version gezählt, Amazon-Klicks und Seitenaufrufe ab Beginn der Messung. Die Zeiträume sind deshalb nicht gleich lang.</p>';
+        $mit = array_values(array_filter($art, fn($x) => $x['v'] >= 20));
+        usort($mit, fn($a, $b) => $b['rate'] <=> $a['rate']);
+        $zeile = fn(array $x): string => '<tr><td><a href="' . esc_url((string) get_permalink($x['id'])) . '" target="_blank" rel="noopener">' . esc_html($x['t']) . '</a></td><td>' . $x['e'] . '</td><td>' . $x['k'] . '</td><td>' . $x['v'] . '</td><td>' . ($x['rate'] === null ? '–' : number_format_i18n(100 * $x['rate'], 2) . ' %') . '</td><td>' . $x['ka'] . '</td></tr>';
+        $kopf = '<table class="widefat striped" style="max-width:900px"><thead><tr><th>Artikel</th><th>eBay-Stellen</th><th>eBay-Klicks</th><th>Aufrufe</th><th>Klickrate</th><th>Amazon-Klicks</th></tr></thead><tbody>';
+        if (count($mit) >= 2) {
+            $h .= '<h4>Beste Artikel (mindestens 20 Aufrufe)</h4>' . $kopf . implode('', array_map($zeile, array_slice($mit, 0, 5))) . '</tbody></table>';
+            $h .= '<h4>Schwächste Artikel</h4>' . $kopf . implode('', array_map($zeile, array_slice(array_reverse($mit), 0, 5))) . '</tbody></table>';
+        }
+        usort($art, fn($a, $b) => [$b['k'], $b['e']] <=> [$a['k'], $a['e']]);
+        return $h . '<h4>Alle Artikel mit eBay-Links</h4>' . $kopf . implode('', array_map($zeile, $art)) . '</tbody></table>';
+    }
+
     /** Reiter Partnerlinks: wie viele Awin- und andere Partnerlinks stehen in den Artikeln, und wie oft werden sie geklickt (Zähler ab Einspielen dieser Version). */
     private static function partner_html(): string {
         global $wpdb;
@@ -9528,16 +9576,16 @@ JS;
         foreach ($rows as $r) {
             $pl = self::partner_links((string) $r['post_content']); if (!$pl) { continue; }
             $pf = self::pfad_sauber((string) get_permalink((int) $r['ID'])); $k = 0; $hh = [];
-            foreach ($kl[$pf] ?? [] as $hn => $z) { $k += (int) ($z['n'] ?? 0); }
+            foreach ($kl[$pf] ?? [] as $hn => $z) { if (!preg_match('#ebay\\.#i', (string) $hn)) { $k += (int) ($z['n'] ?? 0); } }
             foreach ($pl as $l) { $hh[$l['host']] = ($hh[$l['host']] ?? 0) + 1; $hosts[$l['host']]['links'] = ($hosts[$l['host']]['links'] ?? 0) + 1; $hosts[$l['host']]['art'][$r['ID']] = 1; }
             $art[] = ['id' => (int) $r['ID'], 't' => (string) ($r['post_title'] ?: 'Beitrag ' . $r['ID']), 'n' => count($pl), 'h' => $hh, 'k' => $k];
         }
-        foreach ($kl as $pf => $hs) { foreach ($hs as $hn => $z) { $hosts[$hn]['k'] = ($hosts[$hn]['k'] ?? 0) + (int) ($z['n'] ?? 0); } }
+        foreach ($kl as $pf => $hs) { foreach ($hs as $hn => $z) { if (preg_match('#ebay\\.#i', (string) $hn)) { continue; } $hosts[$hn]['k'] = ($hosts[$hn]['k'] ?? 0) + (int) ($z['n'] ?? 0); } }
         usort($art, fn($a, $b) => [$b['k'], $b['n']] <=> [$a['k'], $a['n']]);
         $sum_l = array_sum(array_column($art, 'n')); $sum_k = array_sum(array_column($art, 'k'));
         $h = '<h2>Partnerlinks (Awin und andere, ohne Amazon und eBay)</h2><p class="description">Zählt Links zu Partnernetzwerken wie Awin und jeden externen Link mit <code>rel="sponsored"</code> in veröffentlichten Artikeln. Klicks werden ohne Cookie und ohne IP als Zähler je Seite und Zielseite gezählt, und zwar ab dem Einspielen dieser Version.</p>'
             . '<p><strong>' . count($art) . '</strong> Artikel mit zusammen <strong>' . (int) $sum_l . '</strong> Partnerlinks · <strong>' . (int) $sum_k . '</strong> Klicks bisher.</p>';
-        if (!$art) { return $h . '<p>Keine Partnerlinks gefunden.</p>'; }
+        if (!$art) { return $h . '<p>Keine Partnerlinks gefunden.</p>' . self::ebay_html($rows, $kl); }
         $h .= '<h3>Nach Zielseite</h3><table class="widefat striped" style="max-width:700px"><thead><tr><th>Zielseite</th><th>Links</th><th>Artikel</th><th>Klicks</th></tr></thead><tbody>';
         uasort($hosts, fn($a, $b) => [(int) ($b['k'] ?? 0), (int) ($b['links'] ?? 0)] <=> [(int) ($a['k'] ?? 0), (int) ($a['links'] ?? 0)]);
         foreach ($hosts as $hn => $x) { $h .= '<tr><td>' . esc_html((string) $hn) . '</td><td>' . (int) ($x['links'] ?? 0) . '</td><td>' . count((array) ($x['art'] ?? [])) . '</td><td>' . (int) ($x['k'] ?? 0) . '</td></tr>'; }
@@ -9546,7 +9594,7 @@ JS;
             $hs = []; foreach ($a['h'] as $hn => $n) { $hs[] = esc_html((string) $hn) . ' ×' . (int) $n; }
             $h .= '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['t']) . '</a> <small><a href="' . esc_url(admin_url('post.php?post=' . $a['id'] . '&action=edit')) . '" target="_blank" rel="noopener">Bearbeiten ↗</a></small></td><td>' . (int) $a['n'] . '</td><td>' . implode(', ', $hs) . '</td><td>' . (int) $a['k'] . '</td></tr>';
         }
-        return $h . '</tbody></table>';
+        return $h . '</tbody></table>' . self::ebay_html($rows, $kl);
     }
 
     private static function rot_html(): string {

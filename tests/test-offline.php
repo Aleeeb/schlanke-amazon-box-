@@ -2433,6 +2433,7 @@ SAB::$umbau_abw = []; SAB::$paare_log = []; [$o3, $n3] = SAB::paare_zu_einzelkar
 ok($n3 === 1 && strpos($o3, 'B0SPAL0006" land="es" titel="Mein Titel" stil="einzel"') !== false || $n3 === 1, 'Spalten: freistehendes Paar nach der Tabelle wird umgebaut');
 SAB::$umbau_abw = []; SAB::$paare_log = []; [$o4, $n4] = SAB::paare_zu_einzelkarten($cases['Tabelle'], 'B0SPAL0004', true);
 ok($n4 === 0 && $o4 === $cases['Tabelle'], 'Spalten: auch der Knopf „Karte“ im Frontend baut sie nicht um');
+if (!function_exists('number_format_i18n')) { function number_format_i18n($n, $d = 0) { return number_format((float) $n, (int) $d, ',', '.'); } }
 // ---- 0.92.85: Reiter Partnerlinks ----
 $pc1 = '<p><a href="https://www.awin1.com/cread.php?awinmid=1&awinaffid=2&ued=x">Shop</a> <a href="https://www.amazon.es/dp/B0AAAAAAA1?tag=x">A</a> <a href="https://www.ebay.es/itm/1?mkcid=1">E</a> <a href="https://andere.example/x" rel="nofollow sponsored">S</a> <a href="https://example.org/ohne">N</a></p>';
 $pl = SAB::partner_links($pc1);
@@ -2464,4 +2465,12 @@ SAB::$umbau_abw = []; SAB::$paare_log = []; [$og, $ng] = SAB::paare_zu_einzelkar
 ok($ng === 0 && $og === $sfremd, 'Hinweissatz: eBay-Link eines anderen Produkts bleibt, Fall wird gemeldet, nichts verloren');
 $ke = SAB::sc_karte(['asin' => 'B0EBAY0001', 'land' => 'es', 'ebay' => '1', 'host' => 'www.ebay.es', 'suche' => 'zaun', 'ebay_text' => 'eBay', 'titel' => 'Mein Titel', 'stil' => 'einzel']);
 ok(strpos($ke, 'sab-karte-ebay') !== false && strpos($ke, 'ebay.es') !== false, 'Hinweissatz: die entstandene Karte zeigt den eBay-Link');
+// ---- 0.92.87: eBay im Reiter Partnerlinks ----
+$pe = '<p>[amz_karte asin="B0EBAY0001" ebay="1"][amz_ebay asin="B0EBAY0001" suche="x"]eBay[/amz_ebay] <a href="https://www.ebay.es/itm/1">E</a> <a href="https://www.amazon.es/dp/B0AAAAAAA1">A</a> [amz_link asin="B0AAAAAAA1"]x[/amz_link]</p>';
+ok(SAB::ebay_stellen($pe) === 3, 'eBay-Stellen: Karte mit ebay, [amz_ebay] und fester eBay-Link werden gezählt');
+ok(!SAB::partner_links($pe), 'eBay zählt nicht als Partnerlink im Awin-Teil');
+$GLOBALS['wpdb'] = new class($pe) { public $posts = 'wp_posts'; public $prefix = 'wp_'; private $c; function __construct($c) { $this->c = $c; } function get_results($q, $o = null) { if (strpos($q, 'wp_posts') !== false) { return [['ID' => 51, 'post_title' => 'Ebay-Artikel', 'post_content' => $this->c . ' <a href="https://www.awin1.com/x">S</a>']]; } return []; } function prepare($q, ...$a) { return $q; } };
+$ph2 = $mPh->invoke(null);
+ok(strpos($ph2, 'eBay im Detail') !== false && strpos($ph2, 'Ebay-Artikel') !== false && strpos($ph2, 'Anteil eBay an allen Klicks') !== false, 'Partnerlinks: eBay-Abschnitt mit Stellen, Klicks und Anteil');
+$GLOBALS['wpdb'] = $wpdb_p;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
