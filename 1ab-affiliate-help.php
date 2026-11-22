@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.114
+ * Version: 0.92.115
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.114';
+    const VERSION = '0.92.115';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7331,6 +7331,11 @@ JS;
     /** Steht direkt vor Position $pos eine kurze Überschrift/Fettzeile ohne Link, die zum Produkt passt? @return ?array{0:int,1:string} [Start, Text] */
     private static function titel_davor(string $c, int $pos, string $asin, string $linktext): ?array {
         $fenster = max(0, $pos - 600); $vor = substr($c, $fenster, $pos - $fenster);
+        // Satz mit einem Titel in Anführungszeichen direkt vor dem Doppelpunkt („… im Buch „Chanting from the heart: Sutras and Chants“:“): der Titel in den Anführungszeichen wird Kartentitel, der Satz bleibt stehen
+        if (preg_match('#(?:<hr\b[^>]*>|</p>|</h[1-6]>)\s*((?:(?!<hr|<p\b|<h[1-6]|\[amz_|<a\b)[^<]){3,400}?)\s*(?:<hr\b[^>]*>\s*)?$#isu', $vor, $q_) || preg_match('#<p\b[^>]*>((?:(?!</?p\b|\[amz_|<a\b).){3,400}?)</p>\s*(?:<!--[^>]*-->\s*)?(?:<hr\b[^>]*>\s*)?$#isu', $vor, $q_)) {
+            $qt = trim(html_entity_decode(strip_tags((string) $q_[1]), ENT_QUOTES, 'UTF-8'));
+            if (preg_match('/[„“"]([^„“”"]{3,110})[“”"]\s*:\s*$/u', $qt, $qq_)) { return [$pos, trim($qq_[1])]; }
+        }
         // Der Block unmittelbar über dem Bild ist der Titel des Bildes: Überschrift (h2 bis h6), fette Zeile oder zentrierte kurze Zeile.
         // Kein Wortvergleich mit dem Linktext mehr: eigene Titel dürfen frei formuliert sein.
         $re = '#(?:<!--\s*wp:(?:heading|paragraph)[^>]*-->\s*)?(?:<(h[2-6])\b[^>]*>((?:(?!</h[1-6]>).)*?)</\1>|<p\b([^>]*)>((?:(?!</?p\b).)*?)</p>)\s*(?:<!--\s*/wp:(?:heading|paragraph)\s*-->\s*)?$#is';
