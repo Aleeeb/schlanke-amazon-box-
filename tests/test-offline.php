@@ -2400,4 +2400,18 @@ $GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results(
 unset($GLOBALS['opt']['sab_paar_ohne_titel'], $GLOBALS['opt']['sab_paar_titel'], $GLOBALS['opt']['sab_umbau_ok']); $GLOBALS['gespeichert'] = null; $mK->invoke(null, true);
 ok($GLOBALS['gespeichert'] === null && isset($GLOBALS['opt']['sab_karten_lauf']['probleme'][32]), 'Karten-Lauf: Paar ohne Titel bleibt unberührt und kommt zur Einzelkontrolle');
 $GLOBALS['wpdb'] = $wpdb_k; unset($GLOBALS['opt']['sab_karten_lauf'], $GLOBALS['pc']);
+// ---- 0.92.83: Bewegungstest und gleiche Buttonhöhe ----
+ok(strpos(SAB::KARTE_CSS, '.sab-karten:has(.sab-karte-ebay) .sab-karte:not(:has(.sab-karte-ebay))::after') !== false, 'Karten: ohne eBay-Link wird Platz reserviert, Amazon-Buttons liegen auf einer Linie');
+$ob5 = $GLOBALS['opt']; $pb5 = $_POST;
+$GLOBALS['opt']['sab_bewegung'] = ['an' => 0];
+$wA = SAB::sc_widget(['typ' => 'buch', 'asin' => 'B0BEWEG001', 'land' => 'es', 'titel' => 'Buch']);
+ok(strpos($wA, 'sab-bw-') === false, 'Bewegungstest: aus = Widget unverändert');
+$mBw = new ReflectionMethod('SAB', 'bewegung_speichern'); $mBw->setAccessible(true);
+$_POST = ['sab_bw_an' => '1', 'sab_bw_ziel' => '600']; $mBw->invoke(null);
+$wB = SAB::sc_widget(['typ' => 'buch', 'asin' => 'B0BEWEG001', 'land' => 'es', 'titel' => 'Buch']);
+ok(strpos($wB, 'data-sab-abe="e7a90002"') !== false && strpos($wB, 'sab-bw-A') !== false && strpos($wB, 'sab-bw-B') !== false && strpos($wB, 'sab-bw-C') !== false, 'Bewegungstest: drei Varianten A, B, C');
+$visB = preg_replace('#<template.*?</template>#s', '', $wB);
+ok(substr_count($visB, '<a ') <= 1 && strpos($visB, 'sab-tier') === false, 'Bewegungstest: Crawler sehen eine Variante mit einem Link, ohne Tier');
+ok(substr_count($wB, 'class="sab-tier') === 1, 'Bewegungstest: nur Variante C enthält das Insekt');
+$GLOBALS['opt'] = $ob5; $_POST = $pb5;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
