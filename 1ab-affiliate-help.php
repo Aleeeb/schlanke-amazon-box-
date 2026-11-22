@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.94
+ * Version: 0.92.95
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.94';
+    const VERSION = '0.92.95';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7058,6 +7058,19 @@ JS;
         return $out;
     }
 
+    /** Eigener kurzer Absatz direkt NACH dem Hinweissatz, der nur einen eBay-Link enthält („Alternative Angebote bei eBay.“, ES/FR/EN/IT ebenso). @return ?array{0:int,1:array,2:string} [Länge ab $pos, Attribute, Linktext] */
+    private static function ebay_zeile_danach(string $c, int $pos, string $asin): ?array {
+        if (!preg_match('#^\s*(?:<!--\s*wp:paragraph[^>]*-->\s*)?<p\b[^>]*>((?:(?!</?p\b).)*?)</p>(?:\s*<!--\s*/wp:paragraph\s*-->)?#is', substr($c, $pos, 900), $m)) { return null; }
+        $in = $m[1];
+        $e = self::ebay_im_absatz('<p>' . $in . '</p>', 3, 3 + strlen($in), $asin);
+        if (count($e) !== 1) { return null; }
+        $rest = preg_replace('#\[amz_ebay\b[^\]]*\].*?\[/amz_ebay\]|<a\b[^>]*>.*?</a>#is', '', $in);
+        if (stripos($rest, '[amz_') !== false || stripos($rest, '<img') !== false) { return null; }
+        $rest = trim(html_entity_decode(strip_tags($rest)));
+        if (mb_strlen($rest) > 60 || mb_strlen(trim(html_entity_decode(strip_tags($in)))) > 110) { return null; }
+        return [strlen($m[0]), $e[0][1], $e[0][2]];
+    }
+
     /** Steht die Stelle $pos in einer Spalte neben einem anderen Inhalt (WordPress-Spalten, Tabellenzelle, Flex-/Grid-Gruppe, Kartenreihe)? Dann würde eine große Einzelkarte das Layout sprengen. @return string Klartext-Grund oder '' */
     private static function in_spalten(string $c, int $pos): string {
         $vor = substr($c, 0, $pos);
@@ -7276,6 +7289,8 @@ JS;
                             continue 2;
                         }
                     }
+                    $zl = null;   // eigener Absatz „Alternative Angebote bei eBay.“ direkt unter dem Hinweissatz: gehört zur Karte
+                    if (!$nurtext) { $zl = self::ebay_zeile_danach($c, $same ? $as_[1] : $bs[1], $asin); if ($zl && !$ebl) { $ebl = [['', $zl[1], $zl[2]]]; $ebw = []; } }
                     $land = preg_match('#\bland="([a-z.]+)"#i', $a[1][0] . ' ' . $a[3][0], $lm) ? ' land="' . strtolower($lm[1]) . '"' : '';
                     $tag = preg_match('#\btag="([A-Za-z0-9\-]{3,40})"#', $a[1][0] . ' ' . $a[3][0], $tm) ? ' tag="' . $tm[1] . '"' : '';
                     $karte = '[amz_karten][amz_karte asin="' . $asin . '"' . $land . $tag . ' stil="einzel"][/amz_karten]';
@@ -7302,6 +7317,10 @@ JS;
                     if ($nurtext) { $c = substr($c, 0, $as_[0]) . $karte . ($gt !== null ? '' : substr($c, $as_[1], $boff - $as_[1])) . $b[2][0] . substr($c, $bend); }
                     elseif ($same) { $c = substr($c, 0, $as_[0]) . $karte . substr($c, $as_[1]); }
                     else { $c = substr($c, 0, $as_[0]) . $karte . ($gt !== null ? '' : substr($c, $as_[1], $bs[0] - $as_[1])) . substr($c, $bs[1]); }
+                    if ($zl) {   // die eBay-Zeile unter der Karte entfällt (der Link steckt jetzt in der Karte)
+                        $kz = strpos($c, $karte, $as_[0]);
+                        if ($kz !== false) { $kze = $kz + strlen($karte); $nz = self::ebay_zeile_danach($c, $kze, $asin); if ($nz) { $c = substr($c, 0, $kze) . substr($c, $kze + $nz[0]); self::$umbau_info[] = 'Zeile „' . mb_substr($zl[2], 0, 40) . '“ unter dem Hinweissatz entfällt, der eBay-Link steht jetzt an der Karte'; } }
+                    }
                     $kp = strpos($c, $karte, $as_[0]);   // Satzpunkt, der hinter dem Textlink stehen blieb, mit entfernen
                     if ($kp !== false) {
                         $ke = $kp + strlen($karte);

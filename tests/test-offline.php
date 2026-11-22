@@ -2532,4 +2532,19 @@ ok($nsl === 2 && substr_count($osl, '[amz_karten]') === 2 && substr_count($osl, 
 ok(strpos($osl, 'titel="Copper tape | 5 cm wide | 10 m"') !== false && strpos($osl, 'See offer') === false, 'Endblock Slughelp: Titel aus sm-ptitle, Linktext entfällt');
 $ehtml = SAB::sc_karten([], preg_replace('#^.*?(\[amz_karten\].*\[/amz_karten\]).*$#s', '$1', $oe1));
 ok(substr_count($ehtml, 'href="https://www.amazon.es') === 2 && substr_count($ehtml, 'sab-karte-ebay') === 2 && substr_count($ehtml, '<a ') === 4 && strpos($ehtml, 'sab_zeige') === false, 'Endblock-Karten: je Produkt ein Amazon-Anker (direkt zu Amazon, keine eigene Weiterleitung) plus ein eBay-Anker, kein Bild- oder Textlink zusätzlich');
+unset($GLOBALS['opt']['sab_paar_ohne_titel'], $GLOBALS['opt']['sab_paar_titel'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_paar_wahl']);
+foreach ([
+ 'DE' => ['Klick auf das Bild leitet zum ', 'Angebot bei Amazon', 'Alternative ', 'Angebote bei eBay'],
+ 'ES' => ['Haz clic en la imagen para ir a la ', 'oferta en Amazon', 'Alternativas: ', 'ofertas en eBay'],
+ 'FR' => ['Clique sur l’image pour voir l’', 'offre sur Amazon', 'Alternatives : ', 'offres sur eBay'],
+ 'EN' => ['Click the image to see the ', 'offer on Amazon', 'Alternative ', 'offers on eBay'],
+] as $sp => $w) {
+  SAB::$umbau_abw = []; SAB::$umbau_info = [];
+  $zt = '<p><strong>Schnexagon Schutzanstrich</strong></p><p>[amz_bild asin="B0EBZ00001"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>' . $w[0] . '[amz_link asin="B0EBZ00001"]' . $w[1] . '[/amz_link].</p><p>' . $w[2] . '[amz_ebay host="www.ebay.de" suche="Schnexagon"]' . $w[3] . '[/amz_ebay].</p><p>Weiter im Text.</p>';
+  [$oz, $nz] = SAB::paare_zu_einzelkarten($zt);
+  ok($nz === 1 && strpos($oz, 'ebay="1"') !== false && strpos($oz, 'amz_ebay') === false && strpos($oz, '<p>' . $w[2]) === false && strpos($oz, $w[1]) === false && strpos($oz, '<p>Weiter im Text.</p>') !== false, 'eBay-Zeile unter dem Hinweissatz ' . $sp . ': Karte mit eBay-Link, beide Zeilen entfallen (' . $oz . ')');
+}
+$zt = '<p><strong>Titel</strong></p><p>[amz_bild asin="B0EBZ00002"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild leitet zum [amz_link asin="B0EBZ00002"]Angebot bei Amazon[/amz_link].</p><p>Ein ganz normaler langer Absatz ohne eBay, der stehen bleiben muss und mit der Karte nichts zu tun hat.</p>';
+[$oz, $nz] = SAB::paare_zu_einzelkarten($zt);
+ok($nz === 1 && strpos($oz, 'normaler langer Absatz') !== false && strpos($oz, 'ebay="1"') === false, 'Normaler Absatz nach dem Hinweissatz bleibt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
