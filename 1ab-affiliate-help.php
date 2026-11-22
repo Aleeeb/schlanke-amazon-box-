@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.97
+ * Version: 0.92.99
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.97';
+    const VERSION = '0.92.99';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2528,6 +2528,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     }
 
     /** Schlichte Karten, auch am Handy zwei nebeneinander (nur CSS, HTML bleibt gleich). */
+    const REZ_TEXT_RE = '/^\W*(?:rezension|reviews?\b|avis\b|reseñas|recensioni|opiniones)/iu';
     const EINZEL_TEXT = ['de' => ['Klick auf das Bild führt zum', 'Angebot bei Amazon'], 'es' => ['Clic en la imagen lleva a la', 'oferta en Amazon'], 'fr' => ["Clic sur l'image mène à l'", 'offre sur Amazon'], 'it' => ["Clic sull'immagine porta all'", 'offerta su Amazon'], 'co.uk' => ['Clicking the image leads to the', 'offer on Amazon'], 'com' => ['Clicking the image leads to the', 'offer on Amazon']];
     const KR_CSS = '.sab-kr{position:absolute;top:8px;left:8px;z-index:3;min-width:34px;height:34px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui,sans-serif;color:#fff;background:#8a8f8a;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:help}.sab-kr-gr{background:#2e8b57}.sab-kr-y{background:#d4a017}.sab-kr-r{background:#c0392b}.sab-kr-n{position:absolute;top:45px;left:6px;z-index:3;padding:1px 5px;border-radius:6px;background:rgba(255,255,255,.92);color:#444;font:600 10px/1.3 system-ui,sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;pointer-events:none}';
     private static $kr_gesetzt = false;
@@ -2573,6 +2574,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $bild = self::brauchbar($p) ? self::sc_bild(['asin' => $asin, 'land' => $land, 'tag' => $a['tag']], '') : self::bild_fehlt($asin, 'Karte');   // nie still ohne Bild: Platzhalter, für Redakteure rot, und Eintrag in der Warnliste
         }
         $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn', 'tag' => $a['tag']], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
+        if ($a['text'] !== '' && $a['rez'] === '' && preg_match(self::REZ_TEXT_RE, (string) $a['text']) && strpos($rzb = self::sc_rezension(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn'], (string) $a['text']), '<a ') === 0) { $btn = $rzb; if (preg_match('#\bhref="([^"]*)"#', $rzb, $rh_)) { $bild = preg_replace('#\bhref="[^"]*"#', 'href="' . $rh_[1] . '"', $bild, 1); } }   // Karte „Rezensionen bei Amazon“ (Produkt, von dem abgeraten wird): der Knopf führt zu den Rezensionen, nicht zum Produkt
         $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
         if ($ebay !== '') { $ebay = str_replace('<a ', '<a class="sab-karte-ebay" ', $ebay); }
         if ($a['rez'] !== '') {   // Link zu den Rezensionen des Produkts bei Amazon (Partner-ID des Landes), klein neben dem eBay-Link
@@ -3613,7 +3615,7 @@ JS;
         $asin = self::getauscht(self::asin($a['asin'])); $land = self::land($a['land']); $tag = self::tag($land);
         if (strlen($asin) !== 10 || !isset(self::LAENDER[$land])) { return esc_html((string) $inhalt); }
         $cls = trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $a['class']));
-        $link = 'https://' . self::LAENDER[$land][0] . '/product-reviews/' . $asin . ($tag !== '' ? '?tag=' . rawurlencode($tag) : '');
+        $link = 'https://' . self::LAENDER[$land][0] . '/dp/' . $asin . ($tag !== '' ? '?tag=' . rawurlencode($tag) : '') . '#customerReviews';   // Sprungmarke auf der Produktseite: /product-reviews/ verlangt bei Amazon inzwischen die Anmeldung
         self::$genutzt = true; self::$links++;
         return '<a' . ($cls ? ' class="' . esc_attr($cls) . '"' : '') . ' href="' . esc_url($link) . '"' . self::a_attr($asin) . '>' . esc_html(trim((string) $inhalt) !== '' ? (string) $inhalt : 'Rezensionen ansehen') . '</a>';
     }
@@ -7108,6 +7110,19 @@ JS;
         return [strlen($m[0]), $e[0][1], $e[0][2]];
     }
 
+    /** Steht im selben Tabellenzeilen- oder Spaltenblock wie $pos noch ein anderes Produkt (Karte, Bild oder Textlink mit anderer ASIN)? */
+    private static function nachbar_produkt(string $c, int $pos, string $asin): bool {
+        $vor = substr($c, 0, $pos); $s = 0; $e = strlen($c);
+        $a1 = max((int) strripos($vor, '<tr'), (int) strripos($vor, '<!-- wp:columns'));
+        if ($a1 === 0 && stripos($vor, '<tr') !== 0 && stripos($vor, '<!-- wp:columns') !== 0) { return false; }
+        $s = $a1; $m = preg_match('#</tr>|<!--\s*/wp:columns\s*-->#i', $c, $x, PREG_OFFSET_CAPTURE, $pos);
+        if ($m) { $e = $x[0][1]; }
+        $blk = substr($c, $s, $e - $s);
+        if (!preg_match_all('#\[amz_(?:karte|bild|link)\b[^\]]*\basin="([A-Za-z0-9]{10})"#i', $blk, $mm)) { return false; }
+        foreach ($mm[1] as $x1) { if (strtoupper($x1) !== strtoupper($asin)) { return true; } }
+        return false;
+    }
+
     /** Steht die Stelle $pos in einer Spalte neben einem anderen Inhalt (WordPress-Spalten, Tabellenzelle, Flex-/Grid-Gruppe, Kartenreihe)? Dann würde eine große Einzelkarte das Layout sprengen. @return string Klartext-Grund oder '' */
     private static function in_spalten(string $c, int $pos): string {
         $vor = substr($c, 0, $pos);
@@ -7128,6 +7143,14 @@ JS;
         }
         if (array_sum($st) > 0) { return 'in einem Container mit mehreren Spalten (Flex oder Grid)'; }
         return '';
+    }
+
+    /** Kurze, ehrliche Überschrift für den Grund, warum ein Paar nicht umgebaut wird (nicht immer „mitten im Satz“). */
+    public static function paar_kurz_test(string $g): string { return self::paar_kurz($g); }
+    private static function paar_kurz(string $grund): string {
+        if (strpos($grund, 'Tabelle') !== false || strpos($grund, 'Spalte') !== false || strpos($grund, 'Container') !== false || strpos($grund, 'Kartenreihe') !== false) { return 'Steht in Tabelle/Spalte (bleibt)'; }
+        if (strpos($grund, 'längerer Text') !== false || strpos($grund, 'Text oder andere') !== false) { return 'Textlink mitten im Satz'; }
+        return 'Nicht sauber lösbar';
     }
 
     /** Warum ist um den Platzhalter [von, bis) kein eigener kurzer Absatz zu finden? Klartext für die Vorschau (statt immer „mitten im Satz“). */
@@ -7312,7 +7335,9 @@ JS;
                     $sig = md5($a[0][0] . $b[0][0]) . ":" . $aoff;
                     if (isset($versucht[$sig])) { break; }
                     $versucht[$sig] = 1;
-                    if (($sp = self::in_spalten($c, $aoff)) !== '' && !self::umbau_ok('spalte:' . $asin)) {   // große Einzelkarte nur, wenn das Produkt allein steht: in Zweierboxen bleibt es, wie es ist
+                    $klein = false;
+                    if (($sp = self::in_spalten($c, $aoff)) !== '' && !self::umbau_ok('spalte:' . $asin) && $nur === '' && !$erzwingen && self::nachbar_produkt($c, $aoff, $asin)) { $klein = true; $sp = ''; self::$umbau_info[] = 'Produkt ' . $asin . ' steht neben einem anderen Produkt: es wird eine kleine Karte wie die Nachbarkarte, keine große Einzelkarte'; }
+                    if ($sp !== '' && !self::umbau_ok('spalte:' . $asin)) {   // große Einzelkarte nur, wenn das Produkt allein steht: in Zweierboxen bleibt es, wie es ist
                         $text0 = mb_substr(trim(html_entity_decode(strip_tags($b[2][0]))), 0, 40);
                         $grund = 'Das Produkt steht ' . $sp . '. Eine große Einzelkarte würde das Layout verschieben, deshalb bleibt es unverändert';
                         $msg = 'Bild und Textlink („' . $text0 . '“) zu ' . $asin . ' nicht umgebaut: ' . $grund . '.';
@@ -7359,6 +7384,7 @@ JS;
                     if ($eigen === '' && isset($titel_asin[$asin])) { $eigen = $titel_asin[$asin]; self::$umbau_info[] = 'Dasselbe Produkt ' . $asin . ' steht noch einmal ohne Titel: die Karte nimmt den Titel der ersten Stelle („' . mb_substr($eigen, 0, 50) . '“)'; }
                     elseif ($eigen !== '') { $titel_asin[$asin] = $eigen; }
                     if ($eigen !== '') { $karte = str_replace(' stil="einzel"', ' titel="' . esc_attr($eigen) . '" stil="einzel"', $karte); }
+                    if ($klein) { $karte = str_replace(' stil="einzel"', '', $karte); }
                     if (!$alt && $eigen === '' && !$erzwingen && get_option('sab_paar_ohne_titel', '0') !== '1' && !self::umbau_ok('paar:' . $asin)) {   // kein Titel erkannt: nicht raten, Redakteur entscheidet in der Vorschau
                         $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ': über dem Bild wurde kein Titel erkannt, nicht umgewandelt. Unten den Titel eintragen oder bestätigen.';
                         self::$umbau_keys[self::$umbau_abw[] = $msg] = 'paar:' . $asin; self::$paare_log[$asin] = ['titel_fehlt', '', $text];
@@ -7811,7 +7837,7 @@ JS;
             try { [$cc0, $ne0] = self::endblock_zu_karten((string) $r['post_content']); [, $n] = self::paare_zu_einzelkarten($cc0); $n += $ne0; } catch (\Throwable $e) { continue; }
             $fehlt = 0; $schw = 0; foreach (self::$paare_log as $pl) { if ($pl[0] === 'titel_fehlt') { $fehlt++; } elseif ($pl[0] === 'schwierig') { $schw++; } }
             if (!$n && !$fehlt && !$schw) { continue; }   // nichts zu tun (schon erledigt)
-            if ($fehlt || $schw) { $l['probleme'][$id] = ['t' => $titel, 'm' => [$fehlt ? 'Titel über dem Bild fehlt (' . $fehlt . ')' : 'Textlink mitten im Satz (' . $schw . ')']]; continue; }
+            if ($fehlt || $schw) { $l['probleme'][$id] = ['t' => $titel, 'm' => [$fehlt ? 'Titel über dem Bild fehlt (' . $fehlt . ')' : 'Nicht umgebaut: Bild/Textlink nicht sauber lösbar (' . $schw . '), Grund in der Vorschau']]; continue; }
             self::$paare_log = []; self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = [];
             try { self::umbau_text((string) $r['post_content']); } catch (\Throwable $e) { self::$umbau_abw[] = 'Prüfung abgebrochen: ' . $e->getMessage(); }
             if (self::$umbau_abw) { $l['probleme'][$id] = ['t' => $titel, 'm' => array_slice(array_values(array_unique(self::$umbau_abw)), 0, 3)]; continue; }
@@ -9234,7 +9260,7 @@ JS;
         if ($sum[0] > 0) {
             $stufe2 = '<form method="post" style="margin:10px 0;padding:8px 12px;background:#fff;border:1px solid #c3c4c7;max-width:900px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="karten_lauf_start"><p style="margin:0 0 6px"><strong>Stufe 2: alle grünen Karten auf einmal umbauen.</strong> Das Plugin baut nur Artikel um, in denen jedes Bild-und-Textlink-Paar mit erkanntem Titel zur Karte wird und nichts beanstandet wird (jeweils mit Sicherung, Rückgängig pro Artikel). Gelbe und rote bleiben unberührt und stehen danach getrennt zur Einzelkontrolle.</p><p style="margin:0 0 8px"><label><input type="checkbox" name="sab_bestaetigt" value="1" required> Ja, alle grünen Karten jetzt umbauen</label></p><button class="button button-primary">Alle grünen Karten umbauen</button></form>';
         }
-        return $stufe2 . self::karten_lauf_html() . '<p><strong>' . count($z) . ' Artikel</strong>: ' . $sum[0] . ' Paare werden zur Karte, bei ' . $sum[1] . ' fehlt der Titel (gelb), ' . $sum[2] . ' stehen mitten im Satz (rot). Nur zum Ansehen, es wird nichts geändert. Reine Textlinks ohne Bild bleiben, wie sie sind.</p><table class="widefat striped" style="max-width:900px"><thead><tr><th></th><th>Artikel</th><th>Wird Karte</th><th>Titel fehlt</th><th>Mitten im Satz</th><th></th></tr></thead><tbody>' . implode('', $z) . '</tbody></table>';
+        return $stufe2 . self::karten_lauf_html() . '<p><strong>' . count($z) . ' Artikel</strong>: ' . $sum[0] . ' Paare werden zur Karte, bei ' . $sum[1] . ' fehlt der Titel (gelb), ' . $sum[2] . ' lassen sich nicht sauber umbauen (rot; Grund in der Vorschau). Nur zum Ansehen, es wird nichts geändert. Reine Textlinks ohne Bild bleiben, wie sie sind.</p><table class="widefat striped" style="max-width:900px"><thead><tr><th></th><th>Artikel</th><th>Wird Karte</th><th>Titel fehlt</th><th>Nicht umgebaut</th><th></th></tr></thead><tbody>' . implode('', $z) . '</tbody></table>';
     }
 
     /** Farbige Übersicht der Bild+Textlink-Paare (grün = Titel erkannt, rot = kein Titel, Redakteur entscheidet) und der doppelten Elemente nach dem Umbau. */
@@ -9246,7 +9272,7 @@ JS;
             foreach (self::$paare_log as $asin => $l) {
                 $ok = $l[0] === 'karte'; $schw = $l[0] === 'schwierig';
                 $h .= '<div style="border-left:4px solid ' . ($ok ? '#1a7f37' : '#d63638') . ';padding:4px 10px;margin:6px 0;background:#fff">'
-                    . $chip($ok ? 'Titel: ' . mb_substr((string) $l[1], 0, 50) : ($schw ? 'Textlink mitten im Satz' : 'Titel fehlt'), $ok ? '#1a7f37' : '#d63638') . $chip('Bild', '#1a7f37') . $chip('Textlink „' . mb_substr((string) $l[2], 0, 30) . '“', '#2271b1') . ' <code>' . esc_html($asin) . '</code>';
+                    . $chip($ok ? 'Titel: ' . mb_substr((string) $l[1], 0, 50) : ($schw ? self::paar_kurz((string) ($l[4] ?? '')) : 'Titel fehlt'), $ok ? '#1a7f37' : '#d63638') . $chip('Bild', '#1a7f37') . $chip('Textlink „' . mb_substr((string) $l[2], 0, 30) . '“', '#2271b1') . ' <code>' . esc_html($asin) . '</code>';
                 if ($schw) {
                     $h .= '<div style="margin:6px 0;color:#a00;font-size:13px"><strong>Grund:</strong> ' . esc_html((string) ($l[4] ?? '')) . '</div><div style="margin:6px 0;padding:6px 8px;background:#f6f7f7;font-size:13px">…' . esc_html((string) ($l[3] ?? '')) . '…</div>'
                         . '<form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_paar_wahl"><input type="hidden" name="sab_asin" value="' . esc_attr($asin) . '"><input type="hidden" name="sab_vorschau" value="' . $id . '"><button class="button button-small button-primary" title="Das Bild wird zur Karte (mit dem einen Link). Der Textlink im Satz bleibt als normaler Text ohne Link stehen.">Karte setzen, Satz ohne Link lassen</button></form>'
