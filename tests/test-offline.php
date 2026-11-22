@@ -2473,4 +2473,14 @@ $GLOBALS['wpdb'] = new class($pe) { public $posts = 'wp_posts'; public $prefix =
 $ph2 = $mPh->invoke(null);
 ok(strpos($ph2, 'eBay im Detail') !== false && strpos($ph2, 'Ebay-Artikel') !== false && strpos($ph2, 'Anteil eBay an allen Klicks') !== false, 'Partnerlinks: eBay-Abschnitt mit Stellen, Klicks und Anteil');
 $GLOBALS['wpdb'] = $wpdb_p;
+// ---- 0.92.88: Vorschau mit den Stilen der Webseite; langer Hinweissatz ----
+$mVc = new ReflectionMethod('SAB', 'vorschau_css'); $mVc->setAccessible(true); $css0 = $GLOBALS['opt']['sab_karten_css'] ?? null; unset($GLOBALS['opt']['sab_karten_css']); $vc = $mVc->invoke(null); if ($css0 !== null) { $GLOBALS['opt']['sab_karten_css'] = $css0; }
+ok(strpos($vc, '.sab-karte-einzel') !== false && strpos($vc, '.sab-karte-btn') !== false && strpos($vc, '.sab-link') !== false, 'Vorschau: enthält Karten- und Einzelkartenstile wie die Webseite');
+unset($GLOBALS['opt']['sab_paar_ohne_titel'], $GLOBALS['opt']['sab_paar_titel'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_paar_wahl']);
+$lang = '<p><strong>Mein Titel</strong></p><p>[amz_bild asin="B0LANG0001" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Clic en la imagen lleva a la [amz_link asin="B0LANG0001" land="es"]oferta en Amazon, ahí encuentras todos los detalles del producto y las opiniones de otros clientes[/amz_link]</p><p>Danach.</p>';
+SAB::$umbau_abw = []; SAB::$paare_log = []; [$ol, $nl] = SAB::paare_zu_einzelkarten($lang);
+ok($nl === 1 && strpos($ol, 'amz_link') === false, 'Hinweissatz: langer „Clic en la imagen …“-Satz mit Bild davor wird zur Karte');
+$reintext = '<p><strong>Mein Titel</strong></p><p>[amz_bild asin="B0LANG0002" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Wir haben dieses Produkt im Garten über viele Wochen getestet und können es nach den Erfahrungen in feuchten Nächten wirklich uneingeschränkt weiterempfehlen, siehe [amz_link asin="B0LANG0002" land="es"]hier[/amz_link]</p>';
+SAB::$umbau_abw = []; SAB::$paare_log = []; [$or, $nr] = SAB::paare_zu_einzelkarten($reintext);
+ok($nr === 0 && $or === $reintext, 'Hinweissatz: normaler langer Satz mit Textlink bleibt unberührt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

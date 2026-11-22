@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.87
+ * Version: 0.92.88
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.87';
+    const VERSION = '0.92.88';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7097,10 +7097,18 @@ JS;
         foreach ($weg as $w) { $innen = str_replace($w, '', $innen); }
         $ohne = str_replace(substr($c, $von, $bis - $von), '', $innen);
         $rest = trim(html_entity_decode(strip_tags($ohne)));
+        if (mb_strlen($rest) > 80 && mb_strlen($rest) <= 220 && self::hinweissatz_beginn($rest)) { $rest = ''; }   // der bekannte Satz „Klick auf das Bild …“ (in jeder Sprache) darf länger sein
         if (mb_strlen($rest) > 80 || strpos($ohne, '[amz_') !== false || stripos($ohne, '<a ') !== false) { return null; }
         $e = $pe + 4; $s = $ps; $komm = false;
         if (preg_match('#<!--\s*wp:paragraph[^>]*-->\s*$#i', substr($c, max(0, $ps - 120), min(120, $ps)), $m1) && preg_match('#^\s*<!--\s*/wp:paragraph\s*-->#i', substr($c, $e, 60), $m2)) { $s = $ps - strlen($m1[0]); $e += strlen($m2[0]); $komm = true; }
         return [$s, $e, $komm];
+    }
+
+    /** Beginnt der Text mit dem Hinweissatz „Klick auf das Bild führt zum …“ (DE, ES, FR, IT, EN)? */
+    private static function hinweissatz_beginn(string $t): bool {
+        $t = mb_strtolower(trim($t));
+        foreach (self::EINZEL_TEXT as $et) { $b = mb_strtolower(rtrim((string) $et[0])); if ($b !== '' && mb_strpos($t, $b) === 0) { return true; } }
+        return (bool) preg_match('/^(?:klick(?:e)?\s+auf\s+das\s+bild|clic\s+en\s+la\s+imagen|clic\s+sur\s+l.image|clicca\s+sull.immagine|click(?:ing)?\s+(?:on\s+)?the\s+image)/iu', $t);
     }
 
     /** Steht direkt vor Position $pos eine kurze Überschrift/Fettzeile ohne Link, die zum Produkt passt? @return ?array{0:int,1:string} [Start, Text] */
@@ -8944,11 +8952,18 @@ JS;
         return $out;
     }
 
+    /** Dieselben Stile wie auf der Webseite (Bausteine, Karten, Kartendesign, Bildgröße), damit die Vorschau genau so aussieht wie das Ergebnis im Frontend. */
+    private static function vorschau_css(): string {
+        if (get_option('sab_karten_css') === '0') { return ''; }
+        $bm = max(120, min(800, (int) (get_option('sab_bild_max') ?: 240))); $kd = self::kd_opt();
+        return '<style>' . self::KARTEN_CSS . 'a.sab-bild img{max-width:' . $bm . 'px;max-height:' . $bm . 'px;object-fit:contain}</style><style>' . self::KARTE_CSS . ($kd ? self::KD_CSS . '.sab-karte{' . self::kd_vars($kd) . '}' : '') . '</style>';
+    }
+
     /** Zeigt HTML in einem eigenen Rahmen mit dem Aussehen der Webseite; das Admin-Aussehen kann so nichts verzerren (z. B. riesige Symbole). */
     private static function vorschau_rahmen(string $inhalt): string {
         $t = self::theme_kopf();
         $warn = $t['kopf'] === '' ? '<p style="margin:0 0 4px;color:#a00;font-size:12px"><strong>Achtung:</strong> Das Aussehen der Webseite konnte nicht geladen werden (Startseite nicht abrufbar). Größen und Layout in dieser Vorschau sind deshalb nicht verlässlich.</p>' : '';
-        $css = get_option('sab_karten_css') !== '0' ? '<style>' . self::KARTEN_CSS . '</style>' : '';
+        $css = self::vorschau_css();
         $doc = '<!doctype html><html><head><meta charset="utf-8"><base href="' . esc_url(home_url('/')) . '" target="_blank">' . $t['kopf'] . $css . '<style>body{margin:0;padding:12px;background:#fff}.sab-chg{outline:2px solid #d63638;outline-offset:2px;background:rgba(214,54,56,.08);cursor:help}.sab-chg-b{display:inline-block;max-width:100%}.sab-chg-i{display:inline}</style></head><body class="' . esc_attr($t['klasse']) . '"><div class="site-content"><div class="inside-article"><div class="entry-content">' . preg_replace('#<script\b.*?</script>#is', '', $inhalt) . '</div></div></div></body></html>';
         return $warn . '<iframe class="sab-umb-rahmen" sandbox="allow-same-origin" loading="lazy" style="width:100%;height:320px;border:1px solid #dcdcde;background:#fff" srcdoc="' . esc_attr($doc) . '" onload="try{this.style.height=Math.min(900,this.contentDocument.documentElement.scrollHeight+10)+\'px\'}catch(e){}"></iframe>';
     }
@@ -9025,7 +9040,7 @@ JS;
             $code = '<details style="margin-top:6px"><summary style="cursor:pointer;color:#2271b1">HTML-Code zeigen</summary>';
             $zeilen[] = '<tr><td colspan="2" style="background:#f6f7f7"><strong>' . esc_html($titelz) . '</strong></td></tr><tr><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($abm) . $code . $kurz($ab, $la) . '</details>' : $kurz($ab, $la)) . '</td><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($nabm) . $code . $kurz($nab, $lb) . '</details>' : $kurz($nab, $lb)) . '</td></tr>';
         }
-        $h .= '' . (get_option('sab_karten_css') !== '0' ? '<style>' . self::KARTEN_CSS . '</style>' : '') . '<style>.sab-umb-bild img{max-width:100%;height:auto}</style><p><strong>Abschnitte, die sich ändern (' . count($zeilen) . '):</strong> links vorher, rechts nachher, so wie Besucher es sehen (bei den ersten 12 Abschnitten als Bild im Aussehen der Webseite, den HTML-Code gibt es per Klick). Die Vorher-Seite zeigt, was jetzt im Artikel steht.</p><table class="widefat striped"><thead><tr><th>Vorher</th><th>Nachher</th></tr></thead><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td colspan="2">Nichts.</td></tr>') . '</tbody></table>';
+        $h .= '' . self::vorschau_css() . '<style>.sab-umb-bild img{max-width:100%;height:auto}</style><p><strong>Abschnitte, die sich ändern (' . count($zeilen) . '):</strong> links vorher, rechts nachher, so wie Besucher es sehen (bei den ersten 12 Abschnitten als Bild im Aussehen der Webseite, den HTML-Code gibt es per Klick). Die Vorher-Seite zeigt, was jetzt im Artikel steht.</p><table class="widefat striped"><thead><tr><th>Vorher</th><th>Nachher</th></tr></thead><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td colspan="2">Nichts.</td></tr>') . '</tbody></table>';
         $rest = [];
         if (preg_match_all('#<a\b[^>]*>.*?</a>#is', preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', $neu), $m)) {
             foreach ($m[0] as $a) { if (preg_match('#href=(["\'])(.*?)\1#is', $a, $hh) && preg_match('#amazon\.|amzn\.|a\.co/|link\.amazon#i', $hh[2])) { $rest[] = '<li><code style="word-break:break-all">' . esc_html(mb_substr($a, 0, 300)) . '</code></li>'; } }
