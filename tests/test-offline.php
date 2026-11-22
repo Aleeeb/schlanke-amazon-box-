@@ -2367,4 +2367,25 @@ ok(strpos($rh, 'Sperrliste') !== false && strpos($rh, 'Problem Ding') !== false 
 $_POST = ['rot_asin' => 'B0ROT00006']; $mR->invoke(null, 'rot_frei');
 ok(!in_array('B0ROT00006', $GLOBALS['opt']['sab_rot_sperre'], true), 'Rotation: Freigeben nimmt von der Sperrliste');
 $GLOBALS['opt'] = $obak2; $_POST = $pbak; if ($wbak2) { $GLOBALS['wpdb'] = $wbak2; } SAB::$ab_tag = 0; unset($GLOBALS['tr']['sab_rot_top_30']);
+// 0.92.81: Etikett-Test (ein Test für alle Einzelkarten, mit und ohne Etikett)
+$ob3 = $GLOBALS['opt']; $pb3 = $_POST;
+$GLOBALS['opt']['sab_ab'] = []; unset($GLOBALS['opt']['sab_etikett']);
+$kA = SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Schneckenzaun-Set', 'stil' => 'einzel']);
+ok(strpos($kA, 'sab-etikett') === false && strpos($kA, 'data-sab-abe') === false, 'Etikett-Test aus: Einzelkarte unverändert, ohne Etikett');
+$mEs = new ReflectionMethod('SAB', 'etikett_speichern'); $mEs->setAccessible(true);
+$_POST = ['sab_etk_an' => '1', 'sab_etk_text' => 'Beliebt', 'sab_etk_ziel' => '1500']; $me = $mEs->invoke(null);
+ok(!empty($GLOBALS['opt']['sab_ab']['e7a90001']['an']) && ($GLOBALS['opt']['sab_ab']['e7a90001']['ziel'] ?? 0) === 1500 && !empty($GLOBALS['opt']['sab_ab']['e7a90001']['et']), 'Etikett-Test: Schalter legt den Test an (Ziel 1500)');
+$kE = SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Schneckenzaun-Set', 'stil' => 'einzel']);
+$visE = preg_replace('#<template.*?</template>#s', '', $kE);
+ok(strpos($kE, 'data-sab-abe="e7a90001"') !== false && substr_count($kE, 'sab-etikett">Beliebt') === 1 && substr_count($kE, 'data-sab-var="A"') >= 1 && substr_count($kE, 'data-sab-var="B"') >= 1, 'Etikett-Test an: zwei Varianten (ohne und mit Etikett „Beliebt“)');
+ok(substr_count($visE, '<a ') <= 1, 'Etikett-Test: Crawler sehen nur eine Variante mit einem Link');
+$GLOBALS['opt']['sab_rot_sperre'] = ['B0TABLE001'];
+ok(strpos(SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Schneckenzaun-Set', 'stil' => 'einzel']), 'sab-etikett') === false, 'Etikett-Test: gesperrtes Produkt bekommt nie ein Etikett');
+unset($GLOBALS['opt']['sab_rot_sperre']);
+$GLOBALS['opt']['sab_produkte'] = "B0TABLE001 | Schneckengift Pellets";
+$GLOBALS['opt']['sab_uebersicht_stand_es'] = ['items' => ['B0TABLE001' => ['titel' => 'Schneckengift tötet Schnecken', 'bilder' => ['x.jpg']]], 'ts' => time()];
+ok(strpos(SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Schneckengift', 'stil' => 'einzel']), 'sab-etikett') === false, 'Etikett-Test: tötendes Produkt bekommt nie ein Etikett');
+$_POST = []; $mEs->invoke(null);
+ok(empty($GLOBALS['opt']['sab_ab']['e7a90001']['an']), 'Etikett-Test: ausschalten pausiert den Test');
+$GLOBALS['opt'] = $ob3; $_POST = $pb3;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

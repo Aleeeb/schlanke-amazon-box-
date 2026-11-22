@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.80
+ * Version: 0.92.81
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.80';
+    const VERSION = '0.92.81';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2531,7 +2531,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
     const EINZEL_TEXT = ['de' => ['Klick auf das Bild führt zum', 'Angebot bei Amazon'], 'es' => ['Clic en la imagen lleva a la', 'oferta en Amazon'], 'fr' => ["Clic sur l'image mène à l'", 'offre sur Amazon'], 'it' => ["Clic sull'immagine porta all'", 'offerta su Amazon'], 'co.uk' => ['Clicking the image leads to the', 'offer on Amazon'], 'com' => ['Clicking the image leads to the', 'offer on Amazon']];
     const KR_CSS = '.sab-kr{position:absolute;top:8px;left:8px;z-index:3;min-width:34px;height:34px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui,sans-serif;color:#fff;background:#8a8f8a;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:help}.sab-kr-gr{background:#2e8b57}.sab-kr-y{background:#d4a017}.sab-kr-r{background:#c0392b}.sab-kr-n{position:absolute;top:45px;left:6px;z-index:3;padding:1px 5px;border-radius:6px;background:rgba(255,255,255,.92);color:#444;font:600 10px/1.3 system-ui,sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;pointer-events:none}';
     private static $kr_gesetzt = false;
-    const KARTE_CSS = '.sab-vortitel{text-align:center;font-weight:600;font-size:1.08em;line-height:1.35;color:#2d3b2d;margin:1.6em 0 .5em}.sab-karte{position:relative}.sab-kr{position:absolute;top:8px;left:8px;z-index:3;min-width:34px;height:34px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui,sans-serif;color:#fff;background:#8a8f8a;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:help}.sab-kr-gr{background:#2e8b57}.sab-kr-y{background:#d4a017}.sab-kr-r{background:#c0392b}.sab-kr-n{position:absolute;top:45px;left:6px;z-index:3;padding:1px 5px;border-radius:6px;background:rgba(255,255,255,.92);color:#444;font:600 10px/1.3 system-ui,sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;pointer-events:none}.sab-karte.sab-karte-einzel{max-width:680px;margin:1em auto;border:0;border-radius:0;box-shadow:none;background:transparent;padding:6px 16px 8px;gap:10px}.sab-karte-einzel a.sab-bild{gap:12px}.sab-karte-einzel .sab-karte-cta{margin-top:2px;gap:8px 14px}.sab-karte-einzel .sab-bild img{border-radius:10px;background:transparent;mix-blend-mode:multiply}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.1em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel .sab-bild img{height:300px!important}.sab-karte-cta{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:.88em;line-height:1.35;color:#555;text-align:center;align-self:center;width:100%}.sab-karte-cta-l{display:inline-flex;align-items:center;justify-content:center;padding:.55em 1.1em;min-height:40px;box-sizing:border-box;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-weight:600;font-size:1.05em;text-decoration:none!important;white-space:nowrap}.sab-karte-cta-l:after{content:" \\2192";white-space:pre}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px!important;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-karte.sab-karte-einzel{padding:6px 8px 10px;gap:10px}.sab-karte .sab-bild img{height:160px!important}.sab-karte-einzel .sab-bild img{height:230px!important}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte-einzel .sab-karte-cta{flex-direction:row;flex-wrap:wrap;justify-content:center;gap:10px 14px}.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}.sab-karten.sab-karten-einzel,.sab-karten[style*="repeat(1,"]:has(.sab-karte-einzel){max-width:none!important}.sab-karte.sab-karte-einzel{width:100%;box-sizing:border-box}.sab-karte-einzel .sab-karte-titel{text-align:center}.sab-karte-einzel .sab-karte-cta{width:100%}';
+    const KARTE_CSS = '.sab-vortitel{text-align:center;font-weight:600;font-size:1.08em;line-height:1.35;color:#2d3b2d;margin:1.6em 0 .5em}.sab-karte{position:relative}.sab-kr{position:absolute;top:8px;left:8px;z-index:3;min-width:34px;height:34px;padding:0 3px;box-sizing:border-box;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui,sans-serif;color:#fff;background:#8a8f8a;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:help}.sab-kr-gr{background:#2e8b57}.sab-kr-y{background:#d4a017}.sab-kr-r{background:#c0392b}.sab-kr-n{position:absolute;top:45px;left:6px;z-index:3;padding:1px 5px;border-radius:6px;background:rgba(255,255,255,.92);color:#444;font:600 10px/1.3 system-ui,sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;pointer-events:none}.sab-karte.sab-karte-einzel{max-width:680px;margin:1em auto;border:0;border-radius:0;box-shadow:none;background:transparent;padding:6px 16px 8px;gap:10px}.sab-karte-einzel a.sab-bild{gap:12px}.sab-karte-einzel .sab-karte-cta{margin-top:2px;gap:8px 14px}.sab-karte-einzel .sab-bild img{border-radius:10px;background:transparent;mix-blend-mode:multiply}.sab-karte-einzel .sab-karte-titel{display:block;-webkit-line-clamp:unset;font-size:1.1em;font-weight:700;margin:0 0 2px;color:#1a1a1a}.sab-karte-einzel .sab-bild img{height:300px!important}.sab-karte-cta{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:.88em;line-height:1.35;color:#555;text-align:center;align-self:center;width:100%}.sab-karte-cta-l{display:inline-flex;align-items:center;justify-content:center;padding:.55em 1.1em;min-height:40px;box-sizing:border-box;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-weight:600;font-size:1.05em;text-decoration:none!important;white-space:nowrap}.sab-karte-cta-l:after{content:" \\2192";white-space:pre}.sab-karten{display:grid;gap:10px;margin:1.2em 0;align-items:stretch}.sab-karte{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 16px 22px;border:1px solid #eceeea;border-radius:14px;background:#fff;text-align:center;min-width:0}.sab-karte .sab-bild{display:block;width:100%}.sab-karte .sab-bild img{display:block;width:100%;height:220px!important;max-height:none;object-fit:contain;margin:0 auto}.sab-karte-titel{font-size:.9em;line-height:1.3;color:#333;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}.sab-karte-btn{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;box-sizing:border-box;padding:.55em .4em;min-height:40px;border:1px solid #0f3d2e;border-radius:999px;background:#0f3d2e;color:#fff!important;font-size:.92em;font-weight:600;text-decoration:none!important}.sab-karte-btn:after{content:" \2192"}.sab-karte-btn:hover{background:#17533f}.sab-karte-ebay{font-size:.8em;color:#666!important}.sab-karte a.sab-bild{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;text-decoration:none!important;color:inherit}span.sab-karte-btn{display:flex;margin-top:auto}.sab-karte>.sab-karte-btn{margin-top:auto}@media(max-width:599px){.sab-etikett{position:static;align-self:center;margin:0 0 2px}.sab-karte.sab-karte-einzel{padding:6px 8px 10px;gap:10px}.sab-karte .sab-bild img{height:160px!important}.sab-karte-einzel .sab-bild img{height:230px!important}.sab-karte{padding:14px 10px 16px}.sab-karte-btn{font-size:.8em;padding:.55em .5em;white-space:normal;line-height:1.25;overflow-wrap:anywhere}}@media(min-width:600px){.sab-karte-einzel .sab-karte-cta{flex-direction:row;flex-wrap:wrap;justify-content:center;gap:10px 14px}.sab-karte{padding:14px;gap:10px}.sab-karte-titel{font-size:.95em}}@media(max-width:320px){.sab-karten{grid-template-columns:1fr!important}}.sab-etikett{position:absolute;top:8px;right:8px;z-index:2;background:#e8590c;color:#fff;font:700 12px/1 system-ui,sans-serif;letter-spacing:.02em;padding:6px 10px;border-radius:999px;box-shadow:0 2px 6px rgba(0,0,0,.18);pointer-events:none}.sab-karten[style*="repeat(1,"]{max-width:300px;margin-left:auto;margin-right:auto}.sab-karten.sab-karten-einzel,.sab-karten[style*="repeat(1,"]:has(.sab-karte-einzel){max-width:none!important}.sab-karte.sab-karte-einzel{width:100%;box-sizing:border-box}.sab-karte-einzel .sab-karte-titel{text-align:center}.sab-karte-einzel .sab-karte-cta{width:100%}';
 
     public static function sc_karten($a, $inhalt = ''): string {
         self::$genutzt = true; self::$karten = true;
@@ -2555,11 +2555,12 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
     public static function sc_karte($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => '', 'eigenbild' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => '', 'eigenbild' => '', 'etikett' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
         if (strlen($asin) !== 10) { return ''; }
         self::$genutzt = true; self::$karten = true;
         if (!self::$ab_in && !self::$ab_ctx && ($ez = self::ab_einzel($orig))) { $eh = self::ab_einzel_html($a, $ez); if ($eh !== '') { return $eh; } }
+        if (!self::$ab_in && !self::$ab_ctx && $a['stil'] === 'einzel' && ($et = self::etikett_test($asin))) { $eh = self::etikett_html($a, $et); if ($eh !== '') { return $eh; } }
         $p = self::produkt($asin, $land);
         // dein Titel aus dem Artikel bleibt stehen; nach einem Austausch kommt der Kurzname des neuen Produkts
         $titel = ($asin === $orig && trim((string) $a['titel']) !== '') ? esc_html(trim((string) $a['titel'])) : self::sc_titel(['asin' => $asin, 'land' => $land, 'kurz' => 70], '');
@@ -2583,7 +2584,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         if ($a['stil'] === 'einzel' && preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb)) {   // Einzelprodukt-Karte: Titel über dem Bild, darunter „Klick auf das Bild zum Angebot bei Amazon“, alles EIN Link
             $et = self::EINZEL_TEXT[$land] ?? self::EINZEL_TEXT['de'];
             $cta = '<span class="sab-karte-cta">' . esc_html($et[0]) . (preg_match("/['’]$/u", $et[0]) ? '' : ' ') . '<span class="sab-karte-cta-l">' . esc_html($a['text'] !== '' ? $a['text'] : $et[1]) . '</span></span>';
-            return '<div class="sab-karte sab-karte-einzel' . $kc . '">' . $mb[1] . $tt . $mb[2] . $ex . $cta . '</a>' . $ebay . self::klickrate_kreis($asin) . '</div>';
+            return '<div class="sab-karte sab-karte-einzel' . $kc . '">' . ($a['etikett'] !== '' ? '<span class="sab-etikett">' . esc_html((string) $a['etikett']) . '</span>' : '') . $mb[1] . $tt . $mb[2] . $ex . $cta . '</a>' . $ebay . self::klickrate_kreis($asin) . '</div>';
         }
         // Bild, Titel und Button sind EIN Link (für Crawler zählt das als ein Affiliate-Link); data-sab-asin/-slot/-var bleiben für Statistik und Austausch am Link
         if (preg_match('#^(<a\b[^>]*\bclass="sab-bild[^"]*"[^>]*>)(.*)</a>$#s', $bild, $mb) && preg_match('#^<a\b[^>]*>(.*)</a>$#s', $btn, $mt)) {
@@ -3835,6 +3836,53 @@ JS;
     private static bool $ab_in = false;
 
     /** Laufender Test für diese ASIN: ['id' => …, 'b' => ASIN] oder null. */
+    const ETIKETT_ID = 'e7a90001';
+    const ETIKETT_TEXTE = ['de' => 'Empfehlung', 'es' => 'Recomendado', 'fr' => 'Recommandé', 'it' => 'Consigliato', 'co.uk' => 'Recommended', 'com' => 'Recommended', 'ca' => 'Recommended', 'com.au' => 'Recommended'];
+
+    /** Etikett-Test (Reiter A/B-Tests): ein Test für alle Einzelkarten, mit und ohne kleines Etikett. Nie für tötende oder gesperrte Produkte. @return array{id:string,text:string}|null */
+    private static function etikett_test(string $asin): ?array {
+        $o = (array) get_option('sab_etikett', []); if (empty($o['an'])) { return null; }
+        $ab = self::ab_optionen()[self::ETIKETT_ID] ?? null; if (!$ab || empty($ab['an'])) { return null; }
+        $land = self::land(''); $text = trim((string) ($o['text'] ?? '')) !== '' ? trim((string) $o['text']) : (self::ETIKETT_TEXTE[$land] ?? 'Recommended');
+        $namen = self::produkte(); $st = get_option('sab_uebersicht_stand_' . $land); $it = is_array($st) ? (array) ($st['items'] ?? []) : [];
+        if (self::toetend(($namen[$asin] ?? '') . ' ' . (string) ($it[$asin]['titel'] ?? ''))) { return null; }
+        if (in_array($asin, array_map('strtoupper', array_map('strval', (array) get_option('sab_rot_sperre', []))), true)) { return null; }
+        return ['id' => self::ETIKETT_ID, 'text' => $text];
+    }
+
+    private static function etikett_html(array $a, array $et): string {
+        self::$ab_in = true; $o = ++self::$ab_n;
+        self::$ab_ctx = ['slot' => 'ab-' . $et['id'], 'var' => 'A']; $ha = self::sc_karte($a);
+        $b = $a; $b['etikett'] = $et['text'];
+        self::$ab_ctx = ['slot' => 'ab-' . $et['id'], 'var' => 'B']; $hb = self::sc_karte($b);
+        self::$ab_ctx = null; self::$ab_in = false;
+        if ($ha === '' || $hb === '') { return ''; }
+        return self::ab_huelle($et['id'], [$ha, $hb], $o);
+    }
+
+    /** Schalter im Reiter A/B-Tests: Etikett-Test an/aus, Text. Legt den Test an (Standard aus) oder pausiert ihn; Zahlen bleiben. */
+    private static function etikett_speichern(): string {
+        $an = !empty($_POST['sab_etk_an']); $text = sanitize_text_field(wp_unslash((string) ($_POST['sab_etk_text'] ?? '')));
+        update_option('sab_etikett', ['an' => $an ? 1 : 0, 'text' => mb_substr($text, 0, 24)], false);
+        $opt = self::ab_optionen(); $o = $opt[self::ETIKETT_ID] ?? ['ziel' => self::AB_ZIEL, 'a' => [], 'b' => [], 'et' => 1];
+        if ($an && (empty($o['an']) || empty($o['start']))) { $o['start'] = gmdate('Y-m-d'); }
+        $o['an'] = $an ? 1 : 0; $o['et'] = 1; $o['a'] = []; $o['b'] = [];
+        $o['ziel'] = max(100, (int) ($_POST['sab_etk_ziel'] ?? ($o['ziel'] ?? self::AB_ZIEL)));
+        $opt[self::ETIKETT_ID] = $o; update_option('sab_ab', $opt, false); delete_transient('sab_alle_asins');
+        return $an ? 'Etikett-Test läuft: alle Einzelkarten zeigen je zur Hälfte mit und ohne Etikett (Crawler sehen eine Variante pro Tag).' : 'Etikett-Test aus. Die Zahlen bleiben gespeichert.';
+    }
+
+    private static function etikett_formular_html(): string {
+        $o = (array) get_option('sab_etikett', []); $ab = self::ab_optionen()[self::ETIKETT_ID] ?? [];
+        return '<div style="border:1px solid #c3c4c7;background:#fff;padding:10px 16px;margin:12px 0;max-width:900px"><h3 style="margin-top:0">Etikett-Test: wirkt ein kleines Etikett an der Karte?</h3>'
+            . '<p class="description">Ein Test für alle Einzelkarten zusammen: die eine Hälfte der Besucher sieht die Karte mit kleinem Aufkleber (zum Beispiel „' . esc_html(self::ETIKETT_TEXTE[self::land('')] ?? 'Recommended') . '“), die andere ohne. Gezählt werden Klicks je Variante, ohne Cookie. Tötende und gesperrte Produkte bekommen nie ein Etikett. Crawler sehen eine Variante pro Tag.</p>'
+            . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="tests"><input type="hidden" name="sab_form" value="etikett">'
+            . '<label><input type="checkbox" name="sab_etk_an" value="1"' . (!empty($o['an']) ? ' checked' : '') . '> <strong>Etikett-Test läuft</strong></label> '
+            . '<label style="margin-left:14px">Text <input type="text" name="sab_etk_text" maxlength="24" value="' . esc_attr((string) ($o['text'] ?? '')) . '" placeholder="' . esc_attr(self::ETIKETT_TEXTE[self::land('')] ?? 'Recommended') . '" style="width:150px"></label> '
+            . '<label style="margin-left:14px">Ziel <input type="number" min="100" step="100" name="sab_etk_ziel" value="' . (int) ($ab['ziel'] ?? self::AB_ZIEL) . '" style="width:80px"> Besuche</label> '
+            . '<button class="button button-primary" style="margin-left:14px">Speichern</button></form></div>';
+    }
+
     private static function ab_einzel(string $asin): ?array {
         foreach (self::ab_aktiv() as $id => $o) {
             if (!empty($o['e']) && ($o['a'][0] ?? '') === $asin && strlen((string) ($o['b'][0] ?? '')) === 10) { return ['id' => $id, 'b' => (string) $o['b'][0]]; }
@@ -4254,7 +4302,7 @@ JS;
             $l = strtolower($v); $asins = (array) ($o[$l] ?? []);
             $n = $r['n' . $v]; $k = $r['k' . $v]; $p = $r['p' . $v]; $ci = $r['ci' . $v];
             $sieg = $r['status'] === 'klar' && $r['sieger'] === $v;
-            $h .= '<div class="sab-ab-paar ' . $l . ($sieg ? ' sieg' : '') . '"><h4>Paar ' . $v . ($sieg ? ' &#127942;' : '') . '</h4>';
+            $h .= '<div class="sab-ab-paar ' . $l . ($sieg ? ' sieg' : '') . '"><h4>' . (!empty($o['et']) ? ($v === 'A' ? 'Ohne Etikett (A)' : 'Mit Etikett (B)') : 'Paar ' . $v) . ($sieg ? ' &#127942;' : '') . '</h4>';
             foreach ($asins as $a) { $h .= self::ab_produkt_html((string) $a); }
             $h .= '<div class="sab-ab-zahl">' . self::ab_pct($p) . '</div><div class="sab-ab-klein">Klickrate: ' . (int) $k . ' Klicks bei ' . (int) $n . ' Einblendungen</div>';
             $h .= '<div class="sab-ab-bereich" title="95 %-Bereich der wahren Klickrate"><i class="' . $l . '" style="left:' . round(100 * $ci[0] / $maxp / 1.05, 1) . '%;width:' . max(1, round(100 * ($ci[1] - $ci[0]) / $maxp / 1.05, 1)) . '%"></i></div>';
@@ -4344,7 +4392,7 @@ JS;
     /** Reiter „A/B-Tests“: laufende Tests, alle gefundenen Viererblöcke zum Einschalten, Ziele. */
     private static function ab_tab_html(): string {
         $opt = self::ab_optionen(); $zahlen = self::ab_zahlen(); $scan = self::ab_scan(!empty($_POST['sab_ab_neu']));
-        $h = self::ab_css() . '<h2>A/B-Test der Viererblöcke</h2>'
+        $h = self::ab_css() . self::etikett_formular_html() . '<h2>A/B-Test der Viererblöcke</h2>'
            . '<p>Ein Viererblock (zwei Zweierblöcke nebeneinander) wird geteilt: Jeder Besucher sieht nur eins der beiden Paare, per Zufall (etwa 50:50), ohne Cookie und ohne IP. Gezählt werden Einblendungen und Klicks je Paar. Im HTML stehen beide Paare, der Artikel in der Datenbank bleibt unverändert. Zum Ansehen: <code>?sab_ab=A</code> oder <code>?sab_ab=B</code> an die Adresse hängen (zählt nicht mit).</p>';
         $lauf = []; $andere = [];
         foreach ($opt as $id => $o) { if (!empty($o['an'])) { $lauf[$id] = $o; } else { $andere[$id] = $o; } }
@@ -4365,6 +4413,7 @@ JS;
         $ids = array_unique(array_merge(array_keys($scan), array_keys($opt)));
         $h .= '<table class="widefat striped" style="max-width:1100px"><thead><tr><th style="width:60px">Test</th><th>Paar A</th><th>Paar B</th><th>Seiten</th><th style="width:90px">Ziel</th></tr></thead><tbody>';
         foreach ($ids as $id) {
+            if (!empty(($opt[$id] ?? [])['et'])) { continue; }
             $o = $opt[$id] ?? []; $asins = $scan[$id]['asins'] ?? ['A' => (array) ($o['a'] ?? []), 'B' => (array) ($o['b'] ?? [])];
             $h .= '<tr><td data-l="Test"><label><input type="checkbox" name="sab_ab_an[' . esc_attr($id) . ']" value="1"' . (!empty($o['an']) ? ' checked' : '') . '> <strong>an</strong></label><br><small><code>' . esc_html($id) . '</code></small>' . (!empty($o['e']) ? '<br><small>Einzelprodukt</small>' : '') . (!empty($o['w']) ? '<br><small>Widget</small>' : '') . (!empty($o['z']) ? '<br><small>Zweierblock</small>' : '') . '</td>';
             foreach (['A', 'B'] as $v) { $h .= '<td data-l="Paar ' . $v . '">'; foreach ($asins[$v] as $a) { $h .= self::ab_produkt_html((string) $a); } if ($v === 'B' && !empty($o['c'])) { $h .= '<p class="sab-ab-klein" style="margin:6px 0 2px"><strong>Variante C:</strong></p>'; foreach ((array) $o['c'] as $a) { $h .= self::ab_produkt_html((string) $a); } } $h .= '</td>'; }
@@ -4424,7 +4473,7 @@ JS;
         $an = (array) ($_POST['sab_ab_an'] ?? []); $zl = (array) ($_POST['sab_ab_ziel'] ?? []);
         $null = !empty($_POST['sab_ab_null']);
         foreach (array_unique(array_merge(array_keys($scan), array_keys($opt))) as $id) {
-            if (!preg_match('/^[a-f0-9]{8}$/', (string) $id)) { continue; }
+            if (!preg_match('/^[a-f0-9]{8}$/', (string) $id) || !empty(($opt[$id] ?? [])['et'])) { continue; }   // der Etikett-Test hat sein eigenes Formular
             $o = $opt[$id] ?? [];
             $neu = isset($an[$id]);
             $o['ziel'] = max(100, (int) ($zl[$id] ?? ($o['ziel'] ?? self::AB_ZIEL)));
@@ -9990,6 +10039,8 @@ JS;
                     if ($ok > 0) { unset($kk[$kid]); update_option('sab_kontrolle', $kk, false); }
                     $meldung = $ok > 0 ? 'Rückgängig gemacht in ' . $ok . ' Artikel(n)' . ($skip ? ', ' . $skip . ' übersprungen, weil sie seitdem von Hand geändert wurden (dort bitte unter „Versionen“ zurückgehen).' : '.') : 'Nichts zurückgesetzt: ' . ($skip ? 'die Artikel wurden seitdem geändert (bitte unter „Versionen“ die Version vor dem Tausch laden).' : 'keine Sicherung gefunden.');
                 }
+            } elseif ($form === 'etikett') {
+                $meldung = self::etikett_speichern();
             } elseif ($form === 'kartendesign') {
                 $meldung = self::kd_speichern();
             } elseif (strpos((string) $form, 'rot_') === 0) {
