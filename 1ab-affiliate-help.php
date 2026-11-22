@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.81
+ * Version: 0.92.82
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.81';
+    const VERSION = '0.92.82';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7514,6 +7514,58 @@ JS;
         return $umg . ' Artikel ohne Problem umgebaut (insgesamt in diesem Lauf: ' . $l['umgebaut'] . '). ' . count($l['probleme']) . ' Problemartikel bleiben unberührt und stehen unten.' . ($rest > 0 ? ' Noch ' . $rest . ' Artikel zu prüfen, es geht gleich automatisch weiter.' : ' Der Lauf ist fertig.');
     }
 
+    public static bool $karten_weiter = false;
+
+    /** Stufe 2: Artikel, in denen Bild und Textlink zu Einzelkarten werden, in Schritten umbauen. Probleme (Titel fehlt, Satzmitte, Abweichung, Fehler) bleiben unberührt und werden gemerkt. */
+    private static function karten_lauf_schritt(bool $neu): string {
+        global $wpdb;
+        $l = $neu ? ['umgebaut' => 0, 'probleme' => [], 'start' => time(), 'rest' => 0, 'aktiv' => true] : array_merge(['umgebaut' => 0, 'probleme' => [], 'rest' => 0, 'aktiv' => false], (array) get_option('sab_karten_lauf', []));
+        if (!isset($wpdb)) { return 'Keine Datenbank.'; }
+        $rows = (array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND post_content LIKE '%[amz\\_bild%' AND post_content LIKE '%[amz\\_link%' ORDER BY ID LIMIT 400", ARRAY_A);
+        $t0 = microtime(true); $umg = 0; $rest = 0;
+        foreach ($rows as $r) {
+            $id = (int) $r['ID'];
+            if (isset($l['probleme'][$id])) { continue; }
+            if (microtime(true) - $t0 > 30) { $rest++; continue; }
+            self::$paare_log = []; self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
+            $titel = (string) ($r['post_title'] ?: 'Beitrag ' . $id);
+            try { [, $n] = self::paare_zu_einzelkarten((string) $r['post_content']); } catch (\Throwable $e) { continue; }
+            $fehlt = 0; $schw = 0; foreach (self::$paare_log as $pl) { if ($pl[0] === 'titel_fehlt') { $fehlt++; } elseif ($pl[0] === 'schwierig') { $schw++; } }
+            if (!$n && !$fehlt && !$schw) { continue; }   // nichts zu tun (schon erledigt)
+            if ($fehlt || $schw) { $l['probleme'][$id] = ['t' => $titel, 'm' => [$fehlt ? 'Titel über dem Bild fehlt (' . $fehlt . ')' : 'Textlink mitten im Satz (' . $schw . ')']]; continue; }
+            self::$paare_log = []; self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = [];
+            try { self::umbau_text((string) $r['post_content']); } catch (\Throwable $e) { self::$umbau_abw[] = 'Prüfung abgebrochen: ' . $e->getMessage(); }
+            if (self::$umbau_abw) { $l['probleme'][$id] = ['t' => $titel, 'm' => array_slice(array_values(array_unique(self::$umbau_abw)), 0, 3)]; continue; }
+            self::$umbau_abw = []; self::$skip_gruende = [];
+            try { [, , $gea] = self::umbau_artikel($id); } catch (\Throwable $e) { self::$umbau_abw[] = 'Umbau abgebrochen (' . $e->getMessage() . '), Artikel unverändert'; $gea = 0; }
+            if (self::$umbau_abw) { $l['probleme'][$id] = ['t' => $titel, 'm' => array_slice(array_values(array_unique(self::$umbau_abw)), 0, 3)]; }
+            elseif ($gea) { $umg++; $l['umgebaut']++; }
+            else { $l['probleme'][$id] = ['t' => $titel, 'm' => ['Nichts umgebaut.']]; }
+        }
+        $l['rest'] = $rest; if ($rest === 0) { $l['aktiv'] = false; $l['ende'] = time(); }
+        update_option('sab_karten_lauf', $l, false);
+        self::$karten_weiter = $rest > 0;
+        return $umg . ' Artikel mit Karten umgebaut (in diesem Lauf: ' . $l['umgebaut'] . '). ' . count($l['probleme']) . ' Artikel bleiben zur Einzelkontrolle.' . ($rest > 0 ? ' Es geht gleich automatisch weiter.' : ' Der Lauf ist fertig.');
+    }
+
+    /** Stand und Problemliste der Stufe 2 (Karten). */
+    private static function karten_lauf_html(): string {
+        $l = (array) get_option('sab_karten_lauf', []);
+        if (!$l) { return ''; }
+        $h = '<div style="margin:8px 0;padding:8px 12px;background:#f6f7f7;border-left:4px solid #2271b1;max-width:900px"><strong>Stufe 2, letzter Lauf:</strong> ' . (int) ($l['umgebaut'] ?? 0) . ' Artikel umgebaut, ' . count((array) ($l['probleme'] ?? [])) . ' zur Einzelkontrolle' . (!empty($l['aktiv']) ? ' (Lauf nicht beendet)' : '') . '.';
+        if (!empty($l['aktiv']) && (int) ($l['rest'] ?? 0) > 0) {
+            $h .= '<form method="post" id="sab-karten-weiter" style="margin-top:6px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="karten_lauf_weiter"><button class="button button-primary">Weiter</button> <span class="description">' . (self::$karten_weiter ? 'Die Seite macht gleich von selbst weiter. Bitte offen lassen.' : 'Der Lauf wurde unterbrochen: mit „Weiter“ geht es dort weiter.') . '</span></form>' . (self::$karten_weiter ? '<script>setTimeout(function(){var f=document.getElementById("sab-karten-weiter");if(f){f.submit();}},1500);</script>' : '');
+        }
+        if (!empty($l['probleme'])) {
+            $h .= '<table class="widefat striped" style="margin-top:8px"><thead><tr><th>Artikel zur Einzelkontrolle</th><th>Grund</th><th></th></tr></thead><tbody>';
+            foreach ((array) $l['probleme'] as $pid => $pr) {
+                $h .= '<tr><td><a href="' . esc_url((string) get_permalink((int) $pid)) . '" target="_blank" rel="noopener">' . esc_html((string) ($pr['t'] ?? '')) . '</a></td><td>' . esc_html(implode(' | ', (array) ($pr['m'] ?? []))) . '</td><td><a class="button button-small" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => (int) $pid], admin_url('admin.php')) . '#sab-vorschau') . '">Einzelvorschau</a></td></tr>';
+            }
+            $h .= '</tbody></table>';
+        }
+        return $h . '</div>';
+    }
+
     /** Anzeige zum Lauf „Alle problemlosen umbauen“: Stand, Weiter-Knopf, danach die Problemartikel und deren Problemprodukte (zuletzt). */
     private static function umbau_lauf_html(bool $mit_karten): string {
         $l = self::umbau_lauf_stand();
@@ -8886,11 +8938,15 @@ JS;
             if (!$n && !$fehlt && !$schw) { continue; }
             $sum[0] += $n; $sum[1] += $fehlt; $sum[2] += $schw;
             $ampel = $schw ? '#d63638' : ($fehlt ? '#dba617' : '#1a7f37');
-            $z[] = '<tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' . $ampel . '"></span></td><td><a href="' . esc_url((string) get_permalink((int) $r['ID'])) . '" target="_blank" rel="noopener">' . esc_html((string) ($r['post_title'] ?: 'Beitrag ' . $r['ID'])) . '</a></td><td>' . $n . '</td><td>' . $fehlt . '</td><td>' . $schw . '</td><td><a class="button button-small" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => (int) $r['ID']], admin_url('admin.php'))) . '">Vorschau</a></td></tr>';
+            $z[] = '<tr><td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' . $ampel . '"></span></td><td><a href="' . esc_url((string) get_permalink((int) $r['ID'])) . '" target="_blank" rel="noopener">' . esc_html((string) ($r['post_title'] ?: 'Beitrag ' . $r['ID'])) . '</a></td><td>' . $n . '</td><td>' . $fehlt . '</td><td>' . $schw . '</td><td><a class="button button-small" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'vorschau' => (int) $r['ID']], admin_url('admin.php')) . '#sab-vorschau') . '">Vorschau</a></td></tr>';
         }
         self::$paare_log = []; self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_keys = [];
         if (!$z) { return '<p>Keine Artikel mit Bild und Textlink zum selben Produkt gefunden (nur Artikel, in denen der Umbau schon <code>[amz_bild]</code> und <code>[amz_link]</code> gesetzt hat; neue Artikel zuerst über die Vorschau umbauen).</p>'; }
-        return '<p><strong>' . count($z) . ' Artikel</strong>: ' . $sum[0] . ' Paare werden zur Karte, bei ' . $sum[1] . ' fehlt der Titel (gelb), ' . $sum[2] . ' stehen mitten im Satz (rot). Nur zum Ansehen, es wird nichts geändert. Reine Textlinks ohne Bild bleiben, wie sie sind.</p><table class="widefat striped" style="max-width:900px"><thead><tr><th></th><th>Artikel</th><th>Wird Karte</th><th>Titel fehlt</th><th>Mitten im Satz</th><th></th></tr></thead><tbody>' . implode('', $z) . '</tbody></table>';
+        $stufe2 = '';
+        if ($sum[0] > 0) {
+            $stufe2 = '<form method="post" style="margin:10px 0;padding:8px 12px;background:#fff;border:1px solid #c3c4c7;max-width:900px">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="karten_lauf_start"><p style="margin:0 0 6px"><strong>Stufe 2: alle grünen Karten auf einmal umbauen.</strong> Das Plugin baut nur Artikel um, in denen jedes Bild-und-Textlink-Paar mit erkanntem Titel zur Karte wird und nichts beanstandet wird (jeweils mit Sicherung, Rückgängig pro Artikel). Gelbe und rote bleiben unberührt und stehen danach getrennt zur Einzelkontrolle.</p><p style="margin:0 0 8px"><label><input type="checkbox" name="sab_bestaetigt" value="1" required> Ja, alle grünen Karten jetzt umbauen</label></p><button class="button button-primary">Alle grünen Karten umbauen</button></form>';
+        }
+        return $stufe2 . self::karten_lauf_html() . '<p><strong>' . count($z) . ' Artikel</strong>: ' . $sum[0] . ' Paare werden zur Karte, bei ' . $sum[1] . ' fehlt der Titel (gelb), ' . $sum[2] . ' stehen mitten im Satz (rot). Nur zum Ansehen, es wird nichts geändert. Reine Textlinks ohne Bild bleiben, wie sie sind.</p><table class="widefat striped" style="max-width:900px"><thead><tr><th></th><th>Artikel</th><th>Wird Karte</th><th>Titel fehlt</th><th>Mitten im Satz</th><th></th></tr></thead><tbody>' . implode('', $z) . '</tbody></table>';
     }
 
     /** Farbige Übersicht der Bild+Textlink-Paare (grün = Titel erkannt, rot = kein Titel, Redakteur entscheidet) und der doppelten Elemente nach dem Umbau. */
@@ -10399,6 +10455,10 @@ JS;
                     . (self::$umbau_abw ? ' NICHT umgebaut wegen Abweichung: ' . implode(' | ', array_slice(array_unique(self::$umbau_abw), 0, 8)) . '.' : '');
             } elseif ($form === 'umbau_problemlos_start' && !empty($_POST['sab_bestaetigt'])) {
                 $meldung = self::umbau_problemlos_schritt(true);
+            } elseif ($form === 'karten_lauf_start' && !empty($_POST['sab_bestaetigt'])) {
+                $meldung = self::karten_lauf_schritt(true);
+            } elseif ($form === 'karten_lauf_weiter') {
+                $meldung = self::karten_lauf_schritt(false);
             } elseif ($form === 'umbau_problemlos_weiter') {
                 $meldung = self::umbau_problemlos_schritt(false);
             } elseif ($form === 'umbau_zurueck_einzeln') {
@@ -10469,6 +10529,13 @@ JS;
             }
             $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
+            $vid = (int) ($_GET['vorschau'] ?? ($_POST['sab_vorschau'] ?? 0));
+            if ($vid || !empty($_GET['alle_vorschau']) || !empty($_POST['sab_alle_vorschau'])) {   // Vorschau ganz oben, damit sie nicht unter den langen Listen verschwindet
+                echo '<div id="sab-vorschau" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">';
+                if (!empty($_GET['alle_vorschau']) || !empty($_POST['sab_alle_vorschau'])) { echo self::umbau_uebersicht_html((int) ($_GET['ab'] ?? ($_POST['sab_ab'] ?? 0))); }
+                if ($vid) { echo self::umbau_vorschau($vid); }
+                echo '</div><script>var v=document.getElementById("sab-vorschau");if(v){v.scrollIntoView();}</script>';
+            }
             echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau')
                . self::umbau_falte('Phantom-Platzhalter', self::phantome_html(), false)
                . self::umbau_falte('Widgets in der Seitenleiste', $wh_ = self::umbau_widgets_html(), strpos($wh_, 'alte Links</span>') !== false)
@@ -10487,9 +10554,6 @@ JS;
                    . '<p style="margin:0 0 8px"><label><input type="checkbox" name="sab_bestaetigt" value="1" required> Ja, alle Artikel ohne Problem jetzt umbauen</label></p><button class="button button-primary button-hero">Alle problemlosen umbauen</button></form>';
             }
             echo '<p><a class="button button-primary" href="' . esc_url(add_query_arg(['page' => 'sab-umbau', 'alle_vorschau' => 1, 'ab' => 0], admin_url('admin.php'))) . '">Vorschau für alle offenen Artikel (Probleme sehen, dann mehrere auf einmal umbauen)</a></p>';
-            if (!empty($_GET['alle_vorschau']) || !empty($_POST['sab_alle_vorschau'])) { echo self::umbau_uebersicht_html((int) ($_GET['ab'] ?? ($_POST['sab_ab'] ?? 0))); }
-            $vid = (int) ($_GET['vorschau'] ?? ($_POST['sab_vorschau'] ?? 0));
-            if ($vid) { echo self::umbau_vorschau($vid); }
             if ($liste) {
                 $zeile = function (array $a): void {
                     $vu = add_query_arg(['page' => 'sab-umbau', 'vorschau' => $a['id']], admin_url('admin.php'));

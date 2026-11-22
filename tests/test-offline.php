@@ -2388,4 +2388,16 @@ ok(strpos(SAB::sc_karte(['asin' => 'B0TABLE001', 'land' => 'es', 'titel' => 'Sch
 $_POST = []; $mEs->invoke(null);
 ok(empty($GLOBALS['opt']['sab_ab']['e7a90001']['an']), 'Etikett-Test: ausschalten pausiert den Test');
 $GLOBALS['opt'] = $ob3; $_POST = $pb3;
+// ---- 0.92.82: Umbau-Stufe 2 (Karten) ----
+$gut = '<p>Vorher.</p><p>[amz_bild asin="B0PAAR0001" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0PAAR0001" land="es"]Schneckenzaun Pro[/amz_link]</p><p>Danach.</p>';
+$GLOBALS['pc'] = $gut; $wpdb_k = $GLOBALS['wpdb'] ?? null;
+$GLOBALS['wpdb'] = new class($gut) { public $posts = 'wp_posts'; private $c; function __construct($c) { $this->c = $c; } function get_results($q, $o = null) { return [['ID' => 31, 'post_title' => 'Gut', 'post_content' => $this->c]]; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } };
+unset($GLOBALS['opt']['sab_karten_lauf']); $GLOBALS['gespeichert'] = null;
+$mK = new ReflectionMethod('SAB', 'karten_lauf_schritt'); $mK->setAccessible(true);
+$rk = $mK->invoke(null, true);
+ok(strpos((string) $GLOBALS['gespeichert'], 'stil="einzel"') !== false && ($GLOBALS['opt']['sab_karten_lauf']['umgebaut'] ?? 0) === 1 && empty($GLOBALS['opt']['sab_karten_lauf']['probleme']), 'Karten-Lauf: grünes Paar wird zur Einzelkarte umgebaut (' . $rk . ')');
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; function get_results($q, $o = null) { return [['ID' => 32, 'post_title' => 'Ohne Titel', 'post_content' => '<p>Das ist ein langer normaler Absatz über Schnecken im Garten, der sicher kein Titel ist, weil er viel zu lang ist und mit einem Punkt endet.</p><p>[amz_bild asin="B0KARL0002" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0KARL0002" land="es"]Zaun[/amz_link]</p>']]; } function prepare($q, ...$a) { return $q; } function esc_like($s) { return $s; } };
+unset($GLOBALS['opt']['sab_paar_ohne_titel'], $GLOBALS['opt']['sab_paar_titel'], $GLOBALS['opt']['sab_umbau_ok']); $GLOBALS['gespeichert'] = null; $mK->invoke(null, true);
+ok($GLOBALS['gespeichert'] === null && isset($GLOBALS['opt']['sab_karten_lauf']['probleme'][32]), 'Karten-Lauf: Paar ohne Titel bleibt unberührt und kommt zur Einzelkontrolle');
+$GLOBALS['wpdb'] = $wpdb_k; unset($GLOBALS['opt']['sab_karten_lauf'], $GLOBALS['pc']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
