@@ -2450,4 +2450,18 @@ $rq = new class { function get_body() { return json_encode(['id' => 'abcd1234', 
 unset($GLOBALS['opt']['sab_pl_klicks']); SAB::messen($rq); SAB::messen($rq);
 ok(($GLOBALS['opt']['sab_pl_klicks']['/artikel/']['www.awin1.com']['n'] ?? 0) === 2, 'Partnerlinks: Klicks werden je Seite und Zielseite gezählt');
 $GLOBALS['wpdb'] = $wpdb_p; unset($GLOBALS['opt']['sab_pl_klicks']);
+// ---- 0.92.86: Hinweissatz mit eBay-Link entfällt beim Zusammenfassen zur Karte ----
+unset($GLOBALS['opt']['sab_paar_ohne_titel'], $GLOBALS['opt']['sab_paar_titel'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_paar_wahl']);
+$sebay = '<p><strong>Mein Titel</strong></p><p>[amz_bild asin="B0EBAY0001" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Clic en la imagen lleva a la [amz_link asin="B0EBAY0001" land="es"]oferta en Amazon[/amz_link] ([amz_ebay asin="B0EBAY0001" host="www.ebay.es" suche="zaun"]eBay[/amz_ebay])</p><p>Danach.</p>';
+SAB::$umbau_abw = []; SAB::$umbau_info = []; SAB::$paare_log = []; [$oe, $ne] = SAB::paare_zu_einzelkarten($sebay);
+ok($ne === 1 && strpos($oe, 'amz_ebay') === false && strpos($oe, 'amz_link') === false && strpos($oe, 'ebay="1" host="www.ebay.es" suche="zaun"') !== false && strpos($oe, 'Clic en') === false && strpos($oe, '<p>Danach.</p>') !== false, 'Hinweissatz: Satz samt Amazon- und eBay-Link entfällt, eBay-Link wandert in die Karte (' . $oe . ')');
+ok(count(array_filter(SAB::$umbau_info, fn($x) => strpos($x, 'eBay-Link') !== false)) === 1, 'Hinweissatz: Vorschau nennt, was entfällt');
+$sfest = str_replace('[amz_ebay asin="B0EBAY0001" host="www.ebay.es" suche="zaun"]eBay[/amz_ebay]', '<a href="https://www.ebay.es/sch?_nkw=zaun">eBay</a>', $sebay);
+SAB::$umbau_abw = []; SAB::$paare_log = []; [$of, $nf] = SAB::paare_zu_einzelkarten($sfest);
+ok($nf === 1 && strpos($of, 'ebay.es/sch') === false && strpos($of, 'ebay="1"') !== false, 'Hinweissatz: auch fester eBay-Link entfällt und wird zum Kartenlink');
+$sfremd = str_replace('asin="B0EBAY0001" host', 'asin="B0ANDERE01" host', $sebay);
+SAB::$umbau_abw = []; SAB::$paare_log = []; [$og, $ng] = SAB::paare_zu_einzelkarten($sfremd);
+ok($ng === 0 && $og === $sfremd, 'Hinweissatz: eBay-Link eines anderen Produkts bleibt, Fall wird gemeldet, nichts verloren');
+$ke = SAB::sc_karte(['asin' => 'B0EBAY0001', 'land' => 'es', 'ebay' => '1', 'host' => 'www.ebay.es', 'suche' => 'zaun', 'ebay_text' => 'eBay', 'titel' => 'Mein Titel', 'stil' => 'einzel']);
+ok(strpos($ke, 'sab-karte-ebay') !== false && strpos($ke, 'ebay.es') !== false, 'Hinweissatz: die entstandene Karte zeigt den eBay-Link');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

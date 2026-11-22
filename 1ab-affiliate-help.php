@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.85
+ * Version: 0.92.86
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.85';
+    const VERSION = '0.92.86';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7029,6 +7029,24 @@ JS;
         return [$s, $e, $ko > 0];
     }
 
+    /** eBay-Links ([amz_ebay] oder fester eBay-Link) im Absatz des Textlinks: von $von bis zum nächsten </p>. Nur wenn sie zum selben Produkt gehören. @return array<int,array{0:string,1:array,2:string}> [voller Text, Attribute, Linktext] */
+    private static function ebay_im_absatz(string $c, int $von, int $bis, string $asin): array {
+        $pe = stripos($c, '</p>', $bis); if ($pe === false) { return []; }
+        $reg = substr($c, $von, $pe - $von); $out = [];
+        if (preg_match_all('#\[amz_ebay\b([^\]]*)\](.*?)\[/amz_ebay\]#is', $reg, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                $at = [];
+                if (preg_match_all('#\b([a-z_]+)=(["\'])(.*?)\2#i', $x[1], $am, PREG_SET_ORDER)) { foreach ($am as $y) { $at[strtolower($y[1])] = html_entity_decode($y[3]); } }
+                if (isset($at['asin']) && strtoupper($at['asin']) !== strtoupper($asin)) { continue; }
+                $out[] = [$x[0], $at, trim(html_entity_decode(strip_tags($x[2])))];
+            }
+        }
+        if (preg_match_all('#<a\b[^>]*href=(["\'])[^"\']*ebay\.[^"\']*\1[^>]*>(.*?)</a>#is', $reg, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) { $out[] = [$x[0], [], trim(html_entity_decode(strip_tags($x[2])))]; }
+        }
+        return $out;
+    }
+
     /** Steht die Stelle $pos in einer Spalte neben einem anderen Inhalt (WordPress-Spalten, Tabellenzelle, Flex-/Grid-Gruppe, Kartenreihe)? Dann würde eine große Einzelkarte das Layout sprengen. @return string Klartext-Grund oder '' */
     private static function in_spalten(string $c, int $pos): string {
         $vor = substr($c, 0, $pos);
@@ -7148,10 +7166,12 @@ JS;
                     }
                     $bend = $boff + strlen($b[0][0]);
                     $text = mb_substr(trim(html_entity_decode(strip_tags($b[2][0]))), 0, 40);
-                    $as = self::paar_absatz($c, $aoff, $aend, [$b[0][0]]);   // Bild und Textlink im selben Absatz
+                    $ebl = self::ebay_im_absatz($c, min($aoff, $boff), $bend, $asin);   // eBay-Link im Hinweissatz („… (eBay)“): wandert in die Karte, der Satz entfällt ganz
+                    $ebw = array_column($ebl, 0);
+                    $as = self::paar_absatz($c, $aoff, $aend, array_merge([$b[0][0]], $ebw));   // Bild und Textlink im selben Absatz
                     $same = $as !== null && $boff < $as[1];
                     if ($same) { $as_ = $as; $bs = null; }
-                    else { $as_ = self::paar_huelle($c, $aoff, $aend); $bs = self::paar_absatz($c, $boff, $bend); }
+                    else { $as_ = self::paar_huelle($c, $aoff, $aend); $bs = self::paar_absatz($c, $boff, $bend, $ebw); }
                     $nurtext = false;
                     if ($as_ === null || (!$same && $bs === null)) {
                         $wahl = ((array) get_option('sab_paar_wahl', []))[$asin] ?? '';
@@ -7168,6 +7188,13 @@ JS;
                     $land = preg_match('#\bland="([a-z.]+)"#i', $a[1][0] . ' ' . $a[3][0], $lm) ? ' land="' . strtolower($lm[1]) . '"' : '';
                     $tag = preg_match('#\btag="([A-Za-z0-9\-]{3,40})"#', $a[1][0] . ' ' . $a[3][0], $tm) ? ' tag="' . $tm[1] . '"' : '';
                     $karte = '[amz_karten][amz_karte asin="' . $asin . '"' . $land . $tag . ' stil="einzel"][/amz_karten]';
+                    if ($ebl && ($same || $bs !== null)) {   // der eBay-Link des Hinweissatzes gehört jetzt der Karte
+                        $e0 = $ebl[0]; $ea = ' ebay="1"';
+                        foreach (['host', 'campid', 'suche', 'customid'] as $ek) { if (($e0[1][$ek] ?? '') !== '') { $ea .= ' ' . $ek . '="' . esc_attr($e0[1][$ek]) . '"'; } }
+                        if (($e0[2] ?? '') !== '') { $ea .= ' ebay_text="' . esc_attr(mb_substr($e0[2], 0, 40)) . '"'; }
+                        $karte = str_replace(' stil="einzel"', $ea . ' stil="einzel"', $karte);
+                        self::$umbau_info[] = 'Hinweissatz zu ' . $asin . ' mit Amazon- und eBay-Link entfällt, der eBay-Link („' . mb_substr($e0[2], 0, 30) . '“) steht jetzt an der Karte';
+                    }
                     $alt = self::titel_davor($c, $as_[0], $asin, $text);   // alter Titel direkt über dem Bild: die Karte hat ihren eigenen
                     $eigen = trim((string) (((array) get_option('sab_paar_titel', []))[$asin] ?? ''));
                     if ($eigen === '' && $gt !== null) { $eigen = $gt; }
