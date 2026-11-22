@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.99
+ * Version: 0.92.104
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.99';
+    const VERSION = '0.92.104';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2838,6 +2838,7 @@ function run(tz,lang){var w=pick(tz,lang);if(!w||!T[w])return 0;var n=0,all=docu
 for(var i=0;i<all.length;i++){var a=all[i],u;try{u=new URL(a.href)}catch(e){continue}
 var h=u.hostname.match(/(?:^|\.)amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)$/);if(!h||h[1]===w)continue;
 if(a.hasAttribute('data-sab-fix'))continue;var tag=u.searchParams.get('tag'),ok=false;for(var k in T){if(T[k]===tag)ok=true}if(!ok)continue;
+if(/#customerReviews|\/product-reviews\//.test(a.href)){var rl=a.getAttribute('data-sab-l'),rm=null;if(rl){rl.split(',').forEach(function(x){var q=x.split(':');if(q[0]===w&&/^[A-Z0-9]{10}$/.test(q[1]||''))rm=q[1]})}if(!rm)continue;a.setAttribute('data-sab-z',w+':r');a.href='https://www.amazon.'+w+'/dp/'+rm+'?tag='+T[w]+'#customerReviews';n++;continue}
 if(a.hasAttribute('data-sab-home')){a.setAttribute('data-sab-z',w+':h');a.href='https://www.amazon.'+w+'/?tag='+T[w];n++;continue}
 var t=a.getAttribute('data-sab-t')||a.getAttribute('data-aawp-product-title')||a.getAttribute('title')||'';
 if(!t){var sg=(u.pathname.split('/')[1]||'');if(!/^(dp|gp|product|s|exec|d|o|ref|stores|hz|b)$/i.test(sg)&&!/^[A-Z0-9]{10}$/.test(sg))t=sg.replace(/-/g,' ')}
@@ -3508,8 +3509,20 @@ JS;
         return $out;
     }
 
+    /** Phantomprodukte, 20 Minuten zwischengespeichert; der Schlüssel enthält den Stand der Artikel und aller Listen, jede Änderung rechnet also neu. */
+    private static function phantome_cached(): array {
+        global $wpdb;
+        $stand = isset($wpdb) ? (string) $wpdb->get_var("SELECT CONCAT(MAX(post_modified_gmt), '|', COUNT(*)) FROM {$wpdb->posts} WHERE post_status IN ('publish','future')") : '';
+        $opt = []; foreach (['sab_produkte', 'sab_slots', 'sab_tests', 'sab_gruppen', 'sab_tausch', 'sab_ersatz', 'sab_amz_alt', 'sab_such_kand', 'sab_auch_gekauft', 'sab_manuell', 'sab_claude_empf', 'sab_marken', 'sab_trotz', 'sab_bonus', 'sab_austausch_hinten', 'sab_austausch_okay', 'widget_block', 'widget_text', 'widget_custom_html'] as $o) { $opt[] = get_option($o, ''); }
+        $ck = 'sab_phantome_' . md5(self::VERSION . $stand . serialize($opt) . serialize(self::ab_optionen()) . count((array) self::alle_asins()));
+        $c = get_transient($ck);
+        if (is_array($c)) { return $c; }
+        $c = self::phantome_finden(); set_transient($ck, $c, 20 * MINUTE_IN_SECONDS);
+        return $c;
+    }
+
     private static function phantome_html(): string {
-        $ph = self::phantome_finden();
+        $ph = self::phantome_cached();
         $h = '<h3 style="margin-top:1.5em">Phantomprodukte (' . count($ph) . ')</h3><p class="description" style="max-width:820px">Produkte, die in Listen oder Regeln des Plugins stehen, aber in keinem veröffentlichten Artikel oder keiner Seite. Sie können nichts blockieren, tauchen aber manchmal in Zählungen auf. Mit dem Knopf fliegen sie aus allen Listen (Produktliste, Ersatzlisten, Gruppen, Tausch-Regeln, Markierungen).</p>';
         if (!$ph) { return $h . '<p>Keine.</p>'; }
         $h .= '<form method="post" action="' . esc_url(admin_url('admin.php?page=sab-umbau')) . '">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="phantome"><ul style="list-style:disc;margin-left:18px">';
@@ -7325,7 +7338,9 @@ JS;
                 if ($nur !== '' && $asin !== strtoupper($nur)) { continue; }
                 foreach ($B as $b) {
                     $boff = $b[0][1];
-                    if ($boff < $aend || strtoupper($b[1][0]) !== $asin) { continue; }
+                    if ($boff < $aend) { continue; }
+                    $fremd = strtoupper($b[1][0]) !== $asin;
+                    if ($fremd && !self::fremdlink_passt($c, $A, $B, $aend, $boff, $asin, strtoupper($b[1][0]))) { continue; }
                     $lueck = substr($c, $aend, $boff - $aend); $gt = null;
                     if ($boff - $aend <= 1500 && preg_match('#^(?:\s|<!--.*?-->|</p>|</figure>|</div>)*(?:<(h[2-5])\b[^>]*>(.*?)</\1>|<p\b[^>]*>\s*<(?:strong|b)>(.*?)</(?:strong|b)>\s*</p>)(?:\s|<!--.*?-->)*(?:<p\b[^>]*>[^<]*)?$#is', $lueck, $lm) && stripos($lm[0], '<a ') === false && stripos($lm[0], '[amz_') === false) {   // Titel steht ZWISCHEN Bild und Textlink: wird Kartentitel
                         $gtt = trim(html_entity_decode(strip_tags($lm[2] !== '' ? $lm[2] : ($lm[3] ?? '')), ENT_QUOTES, 'UTF-8'));
@@ -7405,13 +7420,22 @@ JS;
                         $ke = $kp + strlen($karte);
                         $c = substr($c, 0, $ke) . preg_replace('#^(?:\s*<br\s*/?>)*\s*[.!]+(?=\s*(?:<|$))|^\s*(?:<!--\s*wp:paragraph[^>]*-->\s*)?<p\b[^>]*>\s*[.!]+\s*</p>(?:\s*<!--\s*/wp:paragraph\s*-->)?#i', '', substr($c, $ke), 1);
                     }
-                    $n++; self::$umbau_info[] = 'Bild und Textlink' . ($text !== '' ? ' („' . $text . '“)' : '') . ' zu ' . $asin . ' zu einer Einzelkarte zusammengeführt';
+                    $n++; self::$umbau_info[] = 'Bild und Textlink' . ($text !== '' ? ' („' . $text . '“)' : '') . ' zu ' . $asin . ' zu einer Einzelkarte zusammengeführt' . ($fremd ? ' (Achtung: der Textlink führte zu ' . strtoupper($b[1][0]) . ', einem anderen Produkt als das Bild; die Karte nimmt das Bildprodukt ' . $asin . ')' : '');
                     $getan = true; break 2;
                 }
             }
             if (!$getan) { break; }
         }
         return [$c, $n];
+    }
+
+    /** Bild und Textlink mit UNTERSCHIEDLICHER ASIN gehören trotzdem zusammen, wenn der Textlink der nächste Link nach dem Bild ist, im Hinweissatz („Klick auf das Bild …“) steht und weder das Bild einen eigenen Textlink noch der Textlink ein eigenes Bild hat. */
+    private static function fremdlink_passt(string $c, array $A, array $B, int $aend, int $boff, string $asin, string $basin): bool {
+        foreach ($B as $b2) { $o = $b2[0][1]; if ($o > $aend && $o < $boff) { return false; } if ($o > $aend && $o - $aend <= 1500 && strtoupper($b2[1][0]) === $asin) { return false; } }   // dazwischen oder danach hat das Bild einen eigenen Textlink
+        foreach ($A as $a2) { if (strtoupper($a2[2][0]) === $basin) { return false; } if ($a2[0][1] > $aend && $a2[0][1] < $boff) { return false; } }   // der Textlink hat ein eigenes Bild, oder ein anderes Bild liegt dazwischen
+        $vor = substr($c, max(0, $boff - 400), min(400, $boff)); $po = strripos($vor, '<p');
+        $satz = trim(html_entity_decode(strip_tags($po === false ? $vor : substr($vor, $po))));
+        return $satz !== '' && self::hinweissatz_beginn($satz);
     }
 
     /** Analyse (nur Lesen): je ASIN Anzahl Stellen und Artikel, und was bereits im Plugin läuft. */
@@ -9116,20 +9140,22 @@ JS;
     }
 
     /** Stylesheets und Körperklassen der echten Webseite (von der Startseite gelesen, 6 Stunden gemerkt), damit Vorschauen wie bei Besuchern aussehen. */
+    public static string $vorschau_url = '';   // Adresse des Artikels, dessen Vorschau gezeigt wird: Aussehen (Stile, Körperklassen) kommt von genau dieser Seite
     private static function theme_kopf(): array {
-        $c = get_transient('sab_theme_kopf');
+        $url = self::$vorschau_url !== '' ? self::$vorschau_url : home_url('/'); $ck = 'sab_theme_kopf' . (self::$vorschau_url !== '' ? '_' . md5($url) : '');
+        $c = get_transient($ck);
         if (is_array($c)) { return $c; }
         $kopf = ''; $klasse = '';
-        $r = wp_remote_get(home_url('/'), ['timeout' => 8]);
+        $r = wp_remote_get($url, ['timeout' => 8]);
         if (!is_wp_error($r) && wp_remote_retrieve_response_code($r) === 200) {
             $html = (string) wp_remote_retrieve_body($r);
             $head = preg_match('#<head\b.*?</head>#is', $html, $m) ? $m[0] : '';
             if (preg_match_all('#<link\b[^>]*rel=["\']stylesheet["\'][^>]*>#i', $head, $m)) { $kopf .= implode("\n", $m[0]); }
             if (preg_match_all('#<style\b[^>]*>.*?</style>#is', $head, $m)) { $kopf .= implode("\n", $m[0]); }
-            if (preg_match('#<body\b[^>]*class=["\']([^"\']*)#i', $html, $m)) { $klasse = trim(str_replace(['home', 'blog'], '', $m[1])) . ' single single-post'; }
+            if (preg_match('#<body\b[^>]*class=["\']([^"\']*)#i', $html, $m)) { $klasse = self::$vorschau_url !== '' ? trim($m[1]) : trim(str_replace(['home', 'blog'], '', $m[1])) . ' single single-post'; }
         }
         $out = ['kopf' => $kopf, 'klasse' => $klasse];
-        set_transient('sab_theme_kopf', $out, $kopf === '' ? MINUTE_IN_SECONDS : 6 * HOUR_IN_SECONDS);
+        set_transient($ck, $out, $kopf === '' ? MINUTE_IN_SECONDS : 6 * HOUR_IN_SECONDS);
         return $out;
     }
 
@@ -9138,6 +9164,29 @@ JS;
         if (get_option('sab_karten_css') === '0') { return ''; }
         $bm = max(120, min(800, (int) (get_option('sab_bild_max') ?: 240))); $kd = self::kd_opt();
         return '<style>' . self::KARTEN_CSS . 'a.sab-bild img{max-width:' . $bm . 'px;max-height:' . $bm . 'px;object-fit:contain}</style><style>' . self::KARTE_CSS . ($kd ? self::KD_CSS . '.sab-karte{' . self::kd_vars($kd) . '}' : '') . '</style>';
+    }
+
+    /** Artikeltext so aufbereiten wie WordPress beim Ausliefern (Blöcke, Absätze, Shortcodes in derselben Reihenfolge wie the_content). */
+    private static function wie_seite(string $t): string {
+        if (function_exists('do_blocks')) { $t = do_blocks($t); }
+        $t = wpautop($t);
+        if (function_exists('shortcode_unautop')) { $t = shortcode_unautop($t); }
+        return do_shortcode($t);
+    }
+
+    /** Drehender Kreis mit Erklärung: erscheint sofort (Ausgabe wird vorab gesendet), solange der Reiter noch rechnet. */
+    private static function lade_hinweis(string $text): string {
+        $h = '<div id="sab-lade" style="max-width:640px;margin:24px 0;padding:16px 20px;background:#fff;border:1px solid #c3c4c7;border-left:4px solid #2271b1;border-radius:4px;display:flex;gap:16px;align-items:center"><style>@keyframes sabdreh{to{transform:rotate(360deg)}}</style><span style="flex:none;width:34px;height:34px;border:4px solid #dcdcde;border-top-color:#2271b1;border-radius:50%;animation:sabdreh .9s linear infinite" aria-hidden="true"></span><div><strong>Einen Moment bitte …</strong><br><span style="color:#50575e">' . esc_html($text) . '</span></div></div>';
+        echo $h; $h = '';
+        if (!defined('SAB_SYNC')) { while (@ob_get_level() > 0) { @ob_end_flush(); } @flush(); }   // nur im echten Betrieb vorab senden (im Test würde das den Zwischenspeicher leeren)
+        return '';
+    }
+
+    public static array $zeiten = [];
+    private static function zeit(string $n, callable $f) { $t = microtime(true); $r = $f(); self::$zeiten[$n] = round((microtime(true) - $t) * 1000); return $r; }
+
+    private static function lade_hinweis_ende(): string {
+        return '<script>(function(){var l=document.getElementById("sab-lade");if(l){l.parentNode.removeChild(l)}})()</script>';
     }
 
     /** Zeigt HTML in einem eigenen Rahmen mit dem Aussehen der Webseite; das Admin-Aussehen kann so nichts verzerren (z. B. riesige Symbole). */
@@ -9169,16 +9218,20 @@ JS;
     private static function umbau_vorschau(int $id): string {
         try { return self::umbau_vorschau_roh($id); }
         catch (\Throwable $e) { return '<div class="notice notice-error inline"><p><strong>Die Vorschau dieses Artikels ist abgebrochen:</strong> ' . esc_html($e->getMessage()) . ' (' . esc_html(basename($e->getFile())) . ':' . (int) $e->getLine() . '). Der Artikel wurde nicht verändert.</p></div>'; }
+        finally { self::$vorschau_url = ''; }
     }
 
     private static function umbau_vorschau_roh(int $id): string {
         $post = get_post($id);
         if (!$post) { return '<p>Artikel nicht gefunden.</p>'; }
         $c = (string) $post->post_content;
+        self::$vorschau_url = (string) get_permalink($id);
         self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
         self::$skip_laender = []; self::$paare_log = [];
         [$neu, $n, $sk] = self::umbau_text($c);   // der ganze Artikel auf einmal, wie beim echten Umbau (Tabellenspalten und Nachbarn sind sichtbar)
-        $h = '<h3>Vorschau für „' . esc_html($post->post_title) . '“</h3><p class="description">Es wird nichts gespeichert. Gezeigt wird das Ergebnis für den ganzen Artikel, so wie der Umbau ihn schreiben würde.</p>';
+        $zu = '<a class="button" style="float:right" href="' . esc_url(admin_url('admin.php?page=sab-umbau')) . '">✕ Vorschau schließen</a>';
+        $h = $zu . '<h3 style="margin-top:6px">Vorschau für „' . esc_html($post->post_title) . '“</h3><p class="description">Es wird nichts gespeichert. Gezeigt wird das Ergebnis für den ganzen Artikel, so wie der Umbau ihn schreiben würde.</p>';
+        if (get_post_meta($id, '_sab_umbau_backup', true) !== '') { $h .= '<form method="post" style="margin:6px 0 10px;padding:8px 12px;background:#fff8e5;border-left:4px solid #dba617">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_zurueck_einzeln"><input type="hidden" name="sab_id" value="' . (int) $id . '"><strong>Dieser Artikel wurde schon umgebaut.</strong> <button class="button" onclick="return confirm(\'Auf den Zustand vor dem ersten Umbau zurücksetzen? Spätere Handänderungen gehen dabei verloren (in den WordPress-Versionen bleiben sie).\')">↩ Rückgängig (Zustand vor dem Umbau)</button></form>'; }
         if (self::$skip_laender) { $h .= '<div class="notice notice-error inline"><p><strong>Keine Partner-ID für: ' . esc_html(implode(', ', array_keys(self::$skip_laender))) . '.</strong> Links zu diesen Amazon-Ländern werden deshalb nicht umgebaut. Bitte unter Einstellungen die Partner-ID dieses Shops eintragen.</p></div>'; }
         $knopf = '<form method="post" style="margin:10px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_einzeln"><input type="hidden" name="sab_id" value="' . (int) $id . '"><button class="button button-primary button-hero">Jetzt so umbauen</button> <span class="description">Der Artikel wird vorher gesichert, Rückgängig geht in der Liste.</span></form>';
         $h .= $knopf;
@@ -9216,7 +9269,7 @@ JS;
             $titelz = mb_substr(trim(preg_replace('/\s+/', ' ', strip_tags($ab))), 0, 60) ?: 'Abschnitt ' . $i;
             // grafische Ansicht: beide Fassungen so gezeigt, wie Besucher sie sehen würden (höchstens 12 Abschnitte, wegen der Ladezeit)
             [$abm, $nabm] = self::aenderungen_markieren($ab, $nab);
-            $bild = fn(string $t) => self::vorschau_rahmen(do_shortcode(wpautop($t)));
+            $bild = fn(string $t) => self::vorschau_rahmen(self::wie_seite($t));
             $grafisch = $i <= 12;
             $code = '<details style="margin-top:6px"><summary style="cursor:pointer;color:#2271b1">HTML-Code zeigen</summary>';
             $zeilen[] = '<tr><td style="background:#f6f7f7"><strong>' . esc_html($titelz) . '</strong></td></tr>'
@@ -9243,6 +9296,18 @@ JS;
     private static function paare_liste_html(): string {
         global $wpdb;
         if (!isset($wpdb)) { return ''; }
+        $stand = (string) $wpdb->get_var("SELECT CONCAT(MAX(post_modified_gmt), '|', COUNT(*)) FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page')");
+        $ck = 'sab_paare_liste_' . md5(self::VERSION . $stand . serialize([get_option('sab_umbau_ok'), get_option('sab_paar_wahl'), get_option('sab_paar_titel'), get_option('sab_tags'), get_option('sab_karten_lauf')]) . (self::$wie_cache_aus ? microtime() : ''));
+        $zw = get_transient($ck);
+        if (is_string($zw) && $zw !== '') { return $zw; }
+        $erg = self::paare_liste_roh();
+        set_transient($ck, $erg, 20 * MINUTE_IN_SECONDS);
+        return $erg;
+    }
+
+    public static bool $wie_cache_aus = false;
+    private static function paare_liste_roh(): string {
+        global $wpdb;
         $rows = (array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND post_content LIKE '%[amz\\_bild%' AND post_content LIKE '%[amz\\_link%' ORDER BY ID LIMIT 400", ARRAY_A);
         $z = []; $sum = [0, 0, 0];
         foreach ($rows as $r) {
@@ -10930,6 +10995,7 @@ JS;
         } elseif ($tab === 'problem') {
             echo self::ausfall_html() . '<hr style="margin:2em 0">' . self::problem_html() . self::asin_diag_html() . self::aawp_reste_html();
         } elseif ($tab === 'umbau') {
+            echo self::lade_hinweis('Der Umbau-Reiter liest gerade alle Artikel und prüft, welche Links und Bilder zu Karten werden können. Das dauert einige Sekunden; es wird dabei nichts verändert.');
             $eid = (int) ($_GET['entzerren'] ?? ($_POST['sab_id'] ?? 0));
             if (!empty($_GET['entzerren']) || (isset($_POST['sab_form']) && in_array($_POST['sab_form'], ['entzerren_los', 'entzerren_zurueck'], true))) { echo '<div id="sab-entzerren" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">' . self::entzerren_vorschau_html($eid) . '</div>'; }
             if ((!empty($_GET['wied']) && !empty($_GET['wasin'])) || (isset($_POST['sab_form']) && in_array($_POST['sab_form'], ['wied_los', 'wied_zurueck'], true))) {
@@ -10937,21 +11003,21 @@ JS;
                 if (!$wa_ && $wp_ && ($lw_ = (array) get_post_meta($wp_, '_sab_wied_backup', true)) && ($le_ = end($lw_))) { $wa_ = (string) ($le_['alt'] ?? ''); }
                 echo '<div id="sab-wied" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">' . self::wiederholung_html($wp_, $wa_) . '</div>';
             }
-            $liste = self::umbau_artikelliste(); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
+            $liste = self::zeit('umbau_artikelliste', fn() => self::umbau_artikelliste()); $nf = 0; $nk = 0; $nfertig = 0; $nteil = 0;
             foreach ($liste as $a) { $nf += $a['fest']; $nk += $a['kurz']; $nfertig += $a['fertig'] ? 1 : 0; $nteil += !empty($a['teil']) ? 1 : 0; }
             $vid = (int) ($_GET['vorschau'] ?? ($_POST['sab_vorschau'] ?? 0));
             if ($vid || !empty($_GET['alle_vorschau']) || !empty($_POST['sab_alle_vorschau'])) {   // Vorschau ganz oben, damit sie nicht unter den langen Listen verschwindet
-                echo '<div id="sab-vorschau" style="border:2px solid #2271b1;padding:8px 16px;margin:12px 0;background:#fff">';
+                echo '<div id="sab-vorschau" style="border:1px solid #c3c4c7;border-top:4px solid #2271b1;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:10px 20px 14px;margin:14px 0;background:#fff;max-width:1200px">';
                 if (!empty($_GET['alle_vorschau']) || !empty($_POST['sab_alle_vorschau'])) { echo self::umbau_uebersicht_html((int) ($_GET['ab'] ?? ($_POST['sab_ab'] ?? 0))); }
                 if ($vid) { echo self::umbau_vorschau($vid); }
-                echo '</div><script>var v=document.getElementById("sab-vorschau");if(v){v.scrollIntoView();}</script>';
+                echo '<p style="margin:12px 0 0"><a class="button" href="' . esc_url(admin_url('admin.php?page=sab-umbau')) . '">✕ Vorschau schließen</a></p></div><script>var v=document.getElementById("sab-vorschau");if(v){v.scrollIntoView();}</script>';
             }
             echo '<h2>Umbau: feste Amazon-Links durch Plugin-Platzhalter ersetzen</h2>' . self::scan_knopf_html('umbau')
-               . self::umbau_falte('Phantom-Platzhalter', self::phantome_html(), false)
-               . self::umbau_falte('Widgets in der Seitenleiste', $wh_ = self::umbau_widgets_html(), strpos($wh_, 'alte Links</span>') !== false)
-               . self::umbau_falte('Bild und Textlink zu Karten (Liste)', self::paare_liste_html(), true)
-               . self::umbau_falte('Karten mit etwas Doppeltem daneben', $dh_ = self::karten_doppelt_html(), strpos($dh_, '<li>') !== false)
-               . self::umbau_falte('Sichtbare Shortcode-Reste im Text', self::umbau_textreste_html(), self::$textreste !== null && self::$textreste !== [], self::$textreste === null ? 'noch nicht geprüft, zum Prüfen aufklappen' : '')
+               . self::umbau_falte('Phantom-Platzhalter', self::zeit('phantome_html', fn() => self::phantome_html()), false)
+               . self::umbau_falte('Widgets in der Seitenleiste', $wh_ = self::zeit('umbau_widgets_html', fn() => self::umbau_widgets_html()), strpos($wh_, 'alte Links</span>') !== false)
+               . self::umbau_falte('Bild und Textlink zu Karten (Liste)', self::zeit('paare_liste_html', fn() => self::paare_liste_html()), true)
+               . self::umbau_falte('Karten mit etwas Doppeltem daneben', $dh_ = self::zeit('karten_doppelt_html', fn() => self::karten_doppelt_html()), strpos($dh_, '<li>') !== false)
+               . self::umbau_falte('Sichtbare Shortcode-Reste im Text', self::zeit('umbau_textreste_html', fn() => self::umbau_textreste_html()), self::$textreste !== null && self::$textreste !== [], self::$textreste === null ? 'noch nicht geprüft, zum Prüfen aufklappen' : '')
                . '<details style="max-width:760px;margin:8px 0"><summary><strong>So funktioniert der Umbau</strong></summary><ol><li><strong>Vorschau ansehen:</strong> Pro Artikel siehst du, welche Links wie umgebaut würden. Es wird nichts gespeichert.</li>'
                . '<li><strong>Umbauen:</strong> Der Artikel wird gesichert (Original in der Sicherung, dazu eine WordPress-Revision) und die Links werden zu <code>[amz_bild]</code> / <code>[amz_link]</code>. Der alte Code bleibt als Rückfall zwischen den Tags.</li>'
                . '<li><strong>Danach</strong> lassen sich Produkte seitenweit tauschen (Reiter „Problemprodukte“), und der Artikel zählt für Statistik und A/B-Tests. <strong>Rückgängig</strong> geht pro Artikel.</li></ol></details>'
@@ -10971,8 +11037,8 @@ JS;
                        . '<td>' . ($a['fertig'] ? '<strong style="color:#1a7f37">umgebaut</strong>' : (!empty($a['teil']) ? '<strong style="color:#b36b00">teilweise umgebaut</strong>' : 'offen')) . ($a['status'] !== 'publish' && $a['status'] !== '' ? ' <small>(' . esc_html(['draft' => 'Entwurf', 'private' => 'privat', 'pending' => 'zur Review', 'future' => 'geplant'][$a['status']] ?? $a['status']) . ')</small>' : '') . '</td><td><a class="button" href="' . esc_url($vu) . '">Vorschau</a> ';
                     echo '<form method="post" style="display:inline">'; wp_nonce_field('sab_speichern');
                     echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_id" value="' . (int) $a['id'] . '">'
-                       . ($a['fertig'] ? '<input type="hidden" name="sab_form" value="umbau_zurueck_einzeln"><button class="button">Rückgängig</button>' : '<input type="hidden" name="sab_form" value="umbau_einzeln"><button class="button button-primary">Umbauen</button>')
-                       . '</form></td></tr>';
+                       . ($a['fertig'] ? '<input type="hidden" name="sab_form" value="umbau_zurueck_einzeln"><button class="button" onclick="return confirm(\'Diesen Artikel auf den Zustand vor dem ersten Umbau zurücksetzen? Änderungen, die du danach von Hand gemacht hast, gehen dabei verloren (in den WordPress-Versionen bleiben sie).\')">↩ Rückgängig</button>' : '<input type="hidden" name="sab_form" value="umbau_einzeln"><button class="button button-primary">Umbauen</button>')
+                       . '</form>' . (!empty($a['teil']) ? ' <form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_id" value="' . (int) $a['id'] . '"><input type="hidden" name="sab_form" value="umbau_zurueck_einzeln"><button class="button" onclick="return confirm(\'Diesen Artikel auf den Zustand vor dem ersten Umbau zurücksetzen? Änderungen, die du danach von Hand gemacht hast, gehen dabei verloren (in den WordPress-Versionen bleiben sie).\')">↩ Rückgängig</button></form>' : '') . '</td></tr>';
                 };
                 $kopf = '<table class="widefat striped sab-sort2" style="margin-top:1em"><thead><tr><th style="width:28px"><input type="checkbox" onclick="event.stopPropagation();document.querySelectorAll(\'.sab-wahl\').forEach(function(c){c.checked=this.checked}.bind(this))" title="Alle offenen markieren"></th><th>Artikel</th><th>feste Links</th><th>Kurzlinks</th><th>Stand</th><th>Aktion</th></tr></thead><tbody>';
                 $offene = array_values(array_filter($liste, fn($x) => !$x['fertig'])); $fertige = array_values(array_filter($liste, fn($x) => $x['fertig']));
@@ -10984,13 +11050,13 @@ JS;
                     echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau_viele"><button class="button button-primary button-large">Markierte Artikel umbauen</button> <span class="description">Jeder Artikel wird vorher gesichert und kann einzeln zurückgesetzt werden.</span></form>';
                 }
                 if ($fertige) {
-                    echo '<details style="margin-top:1em"><summary><strong>Schon umgebaut (' . count($fertige) . ')</strong></summary>' . $kopf;
+                    echo '<details style="margin-top:1em"><summary><strong>Schon umgebaut (' . count($fertige) . ') – hier steht bei jedem Artikel „↩ Rückgängig“</strong></summary>' . $kopf;
                     foreach ($fertige as $a) { $zeile($a); }
                     echo '</tbody></table></details>';
                 }
-                echo self::tabellenhilfe();
+                echo self::zeit('tabellenhilfe', fn() => self::tabellenhilfe());
             }
-            $namen = self::produkte(); $an = self::umbau_analyse();
+            $namen = self::produkte(); $an = self::zeit('umbau_analyse', fn() => self::umbau_analyse());
             echo '<details style="margin-top:1.5em"><summary><strong>Alle auf einmal umbauen oder zurücksetzen</strong></summary>';
             echo '<form method="post" style="margin-top:1em">'; wp_nonce_field('sab_speichern');
             echo '<input type="hidden" name="sab_tab" value="umbau"><input type="hidden" name="sab_form" value="umbau">'
@@ -11008,7 +11074,7 @@ JS;
                 }
                 echo '</tbody></table>';
             }
-            echo '</details>';
+            echo '</details>' . self::lade_hinweis_ende() . '<!-- sab-zeit ' . esc_html(json_encode(self::$zeiten)) . ' -->';
         } elseif ($tab === 'widgets') {
             echo self::widgets_html();
         } elseif ($tab === 'vorschau') {
