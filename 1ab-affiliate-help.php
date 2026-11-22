@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.113
+ * Version: 0.92.114
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.113';
+    const VERSION = '0.92.114';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2556,7 +2556,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
     public static function sc_karte($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => '', 'eigenbild' => '', 'etikett' => '', 'rez' => '', 'rez_text' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => '', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => '', 'eigenbild' => '', 'etikett' => '', 'rez' => '', 'rez_text' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
         if (strlen($asin) !== 10) { return ''; }
         self::$genutzt = true; self::$karten = true;
@@ -2698,7 +2698,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** [amz_ebay asin="…" host="www.ebay.es" campid="…" suche="…"]Text[/amz_ebay]: eBay-Suchlink; nach einem Austausch sucht er mit dem Namen des neuen Produkts. */
     public static function sc_ebay($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'host' => '', 'campid' => '', 'suche' => '', 'customid' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig);
         $suche = trim((string) $a['suche']);
         if ($asin !== $orig || $suche === '') {
@@ -2706,7 +2706,8 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
             if ($suche === '') { $p = self::produkt($asin, self::land($a['land'])); $suche = trim(mb_substr((string) ($p['titel'] ?? ''), 0, 60)); }
         }
         if ($suche === '') { return esc_html((string) $inhalt); }
-        $host = preg_match('/^(?:www\.)?ebay\.[a-z.]+$/i', $a['host']) ? $a['host'] : 'www.ebay.es';
+        $standard = ['de' => 'www.ebay.de', 'es' => 'www.ebay.es', 'fr' => 'www.ebay.fr', 'it' => 'www.ebay.it', 'co.uk' => 'www.ebay.co.uk', 'com' => 'www.ebay.com', 'ca' => 'www.ebay.ca', 'com.au' => 'www.ebay.com.au'][self::land($a['land'])] ?? 'www.ebay.es';   // ohne Angabe: eBay-Seite des Landes dieser Webseite
+        $host = preg_match('/^(?:www\.)?ebay\.[a-z.]+$/i', (string) $a['host']) ? $a['host'] : $standard;
         $q = ['_nkw' => $suche, 'mkcid' => 1, 'mkevt' => 1, 'toolid' => 10001];
         $camp = $a['campid'] !== '' ? $a['campid'] : (preg_split('/[\s|=,]+/', trim((string) get_option('sab_ebay_ids', '')))[0] ?? '');
         if (preg_replace('/\D/', '', (string) $camp) !== '') { $q['campid'] = preg_replace('/\D/', '', (string) $camp); }
@@ -7119,8 +7120,16 @@ JS;
                 $out[] = [$x[0], $at, trim(html_entity_decode(strip_tags($x[2])))];
             }
         }
-        if (preg_match_all('#<a\b[^>]*href=(["\'])[^"\']*ebay\.[^"\']*\1[^>]*>(.*?)</a>#is', $reg, $m, PREG_SET_ORDER)) {
-            foreach ($m as $x) { $out[] = [$x[0], [], trim(html_entity_decode(strip_tags($x[2])))]; }
+        if (preg_match_all('#<a\b[^>]*href=(["\'])([^"\']*ebay\.[^"\']*)\1[^>]*>(.*?)</a>#is', $reg, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                $at = []; $hr = html_entity_decode($x[2]);   // fester eBay-Link: Land, Partner-ID und Suchbegriff mitnehmen (sonst landet der Link der Karte auf der Standard-Seite ohne Partner-ID)
+                if (preg_match('#^https?://(?:www\.)?(ebay\.[a-z.]+)/#i', $hr, $hm)) { $at['host'] = 'www.' . strtolower($hm[1]); }
+                parse_str((string) wp_parse_url($hr, PHP_URL_QUERY), $q);
+                if (!empty($q['campid'])) { $at['campid'] = preg_replace('/\D/', '', (string) $q['campid']); }
+                if (!empty($q['customid'])) { $at['customid'] = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $q['customid']); }
+                if (!empty($q['_nkw'])) { $at['suche'] = str_replace(['"', '[', ']'], '', trim((string) $q['_nkw'])); }
+                $out[] = [$x[0], $at, trim(html_entity_decode(strip_tags($x[3])))];
+            }
         }
         return $out;
     }
