@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.95
+ * Version: 0.92.96
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.95';
+    const VERSION = '0.92.96';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -2555,7 +2555,7 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
 
     /** [amz_karte asin="…" land="es" titel="" ebay_host/campid/suche/customid="…" text="Ver en Amazon" ebay_text="o en eBay"] */
     public static function sc_karte($a, $inhalt = ''): string {
-        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => '', 'eigenbild' => '', 'etikett' => ''], $a);
+        $a = shortcode_atts(['asin' => '', 'land' => '', 'titel' => '', 'text' => '', 'ebay' => '', 'host' => 'www.ebay.es', 'campid' => '', 'suche' => '', 'customid' => '', 'ebay_text' => '', 'tag' => '', 'stil' => '', 'eigenbild' => '', 'etikett' => '', 'rez' => '', 'rez_text' => ''], $a);
         $orig = self::asin($a['asin']); $asin = self::getauscht($orig); $land = self::land($a['land']);
         if (strlen($asin) !== 10) { return ''; }
         self::$genutzt = true; self::$karten = true;
@@ -2575,6 +2575,10 @@ if ($alter > self::TTL && !$laden && !defined('SAB_SYNC') && self::$sofort_bilde
         $btn = self::sc_link(['asin' => $asin, 'land' => $land, 'class' => 'sab-karte-btn', 'tag' => $a['tag']], $a['text'] !== '' ? $a['text'] : (self::BUTTON_TEXT[$land] ?? self::BUTTON_TEXT['de']));
         $ebay = $a['ebay'] !== '' || $a['campid'] !== '' ? self::sc_ebay(['asin' => $orig, 'land' => $land, 'host' => $a['host'], 'campid' => $a['campid'], 'suche' => $a['suche'], 'customid' => $a['customid']], $a['ebay_text'] !== '' ? $a['ebay_text'] : 'eBay') : '';
         if ($ebay !== '') { $ebay = str_replace('<a ', '<a class="sab-karte-ebay" ', $ebay); }
+        if ($a['rez'] !== '') {   // Link zu den Rezensionen des Produkts bei Amazon (Partner-ID des Landes), klein neben dem eBay-Link
+            $rz = self::sc_rezension(['asin' => $asin, 'land' => $land], trim((string) $a['rez_text']) !== '' ? (string) $a['rez_text'] : 'Rezensionen');
+            if (strpos($rz, '<a ') === 0) { $ebay .= ($ebay !== '' ? ' ' : '') . str_replace('<a ', '<a class="sab-karte-ebay sab-karte-rez" ', $rz); }
+        }
         $tt = $titel !== '' ? '<div class="sab-karte-titel">' . $titel . '</div>' : '';
         $kd = self::kd_opt(); $kc = $kd ? ' sab-kd-' . $kd['stil'] : ''; $ex = '';
         if ($kd && self::brauchbar($p)) {   // Preis und Verfügbarkeit nur aus der Amazon-Abfrage (höchstens 1 Tag alt), mit Stand und Hinweis; Bewertungen werden nie angezeigt
@@ -6761,6 +6765,27 @@ JS;
         return count($w1) >= 2;
     }
 
+    /** Rezensionslinks in einer Tabellenzelle ([amz_rezension] oder fester Amazon-Rezensionslink): aus $in entfernen, Text zurückgeben. @return ?array{0:bool,1:string} [gefunden, Text]; null, wenn der Link zu einem anderen Produkt gehört */
+    private static function zelle_rez(string &$in, string $asin): ?array {
+        $fund = false; $text = '';
+        if (preg_match_all('#\[amz_rezension\b([^\]]*)\](.*?)\[/amz_rezension\]#is', $in, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                if (!preg_match('#\basin=(["\'])([A-Za-z0-9]{10})\1#i', $x[1], $am) || strtoupper($am[2]) !== $asin) { return null; }
+                $fund = true; if ($text === '') { $text = trim(html_entity_decode(strip_tags($x[2]))); }
+                $in = str_replace($x[0], '', $in);
+            }
+        }
+        if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1[^>]*>(.*?)</a>#is', $in, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                if (stripos($x[3], '<img') !== false || ($rz = self::rezension_ziel($x[2], true)) === null) { continue; }
+                if ($rz[1] !== $asin) { return null; }
+                $fund = true; if ($text === '') { $text = trim(html_entity_decode(strip_tags($x[3]))); }
+                $in = str_replace($x[0], '', $in);
+            }
+        }
+        return [$fund, mb_substr(str_replace(['"', '[', ']'], '', $text), 0, 40)];
+    }
+
     /**
      * Produkttabelle (Spalten mit je einer ASIN: Bild, Titel, Kurzlink, eBay) => [amz_karten] mit je einer [amz_karte] pro Spalte.
      * Unverändert bleibt die Tabelle, wenn eine Spalte nicht eindeutig ist oder ein auflösbarer Kurzlink auf ein anderes Produkt zeigt als das Bild.
@@ -6786,9 +6811,11 @@ JS;
                 if ($nur !== '' && $asin !== $nur) { return $t[0]; }
                 if (!self::tag($land)) { return $t[0]; }
                 if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land) && !self::weg_umbauen($asin)) { self::$umbau_keys[self::$umbau_abw[] = 'Produkt ' . $asin . ' ist bei Amazon nicht mehr bekannt, Tabelle nicht umgebaut (erst tauschen)'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; return $t[0]; }
-                $titel = ''; $attr = ''; $text = '';
+                $titel = ''; $attr = ''; $text = ''; $rez = null;
                 foreach ($zellen as $ri => $zs) {
                     $cell = $zs[$ci] ?? ''; $in = preg_replace('#^<t[dh]\b[^>]*>|</t[dh]>$#i', '', $cell);
+                    if (($zr = self::zelle_rez($in, $asin)) === null) { self::$umbau_abw[] = 'Tabelle: ein Rezensionslink in der Spalte gehört zu einem anderen Produkt als das Bild (' . $asin . '), Tabelle nicht umgebaut'; return $t[0]; }
+                    if ($zr[0] && $rez === null) { $rez = $zr[1]; }
                     if (strpos($in, '[') !== false && stripos($in, '[amz_') !== false) { return $t[0]; }
                     if (preg_match('#href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/[^"\']*)\1#i', $in, $k)) {
                         if (self::kurz_ok($k[2])) { return $t[0]; }   // bewusst so gelassen
@@ -6809,7 +6836,7 @@ JS;
                 }
                 if ($titel !== '' && !self::umbau_ok('titel:' . $asin . ':' . md5($titel)) && self::titel_passt_nicht($asin, $land, $titel)) { self::$umbau_keys[self::$umbau_info[] = 'Bild bestimmt den Titel: „' . mb_substr($titel, 0, 60) . '“ weicht vom Namen ab bei ' . self::produktbeschreibung($asin) . ', die Karte zeigt dessen eigenen Namen'] = 'titel:' . $asin . ':' . md5($titel); $titel = ''; }
                 if ($titel !== '') { self::$neue_namen[$asin] = self::$neue_namen[$asin] ?? $titel; }
-                $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . ($text !== '' ? ' text="' . str_replace(['"', '[', ']'], '', $text) . '"' : '') . ($attr !== '' ? ' ebay="1"' . $attr : '') . ']';
+                $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . ($text !== '' ? ' text="' . str_replace(['"', '[', ']'], '', $text) . '"' : '') . ($attr !== '' ? ' ebay="1"' . $attr : '') . ($rez !== null ? ' rez="1"' . ($rez !== '' ? ' rez_text="' . $rez . '"' : '') : '') . ']';
             }
             self::$karten_n += count($karten);
             return '[amz_karten]' . implode('', $karten) . '[/amz_karten]';
@@ -6836,10 +6863,12 @@ JS;
         foreach ($sp as $ci => $s_) {
             [$asin, $land] = array_values($s_)[0];
             if (!self::tag($land)) { return null; }
-            $titel = ''; $ebay = '';
+            $titel = ''; $ebay = ''; $rez = null;
             foreach ($z as $zs) {
                 $in = preg_replace('#^<t[dh]\b[^>]*>|</t[dh]>$#i', '', $zs[$ci] ?? '');
-                if (preg_match('#\[amz_(?:karte|karten|widget|rezension|startseite)\b#', $in)) { return null; }
+                if (($zr = self::zelle_rez($in, $asin)) === null) { return null; }
+                if ($zr[0] && $rez === null) { $rez = $zr[1]; }
+                if (preg_match('#\[amz_(?:karte|karten|widget|startseite)\b#', $in)) { return null; }
                 if (preg_match('#\[amz_titel\b[^\]]*?\btitel=(["\'])(.*?)\1#', $in, $tm)) { $titel = $titel !== '' ? $titel : trim($tm[2]); }
                 elseif (preg_match('#href=(["\'])(https?://(?:www\.)?(ebay\.[a-z.]+)/sch/[^"\']*)\1[^>]*>(.*?)</a>#is', $in, $e)) {
                     parse_str((string) parse_url(html_entity_decode($e[2]), PHP_URL_QUERY), $q);
@@ -6852,7 +6881,7 @@ JS;
                     if ($x !== '' && mb_strlen($x) <= 140) { $titel = $x; }
                 }
             }
-            $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . $ebay . ']';
+            $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . $ebay . ($rez !== null ? ' rez="1"' . ($rez !== '' ? ' rez_text="' . $rez . '"' : '') : '') . ']';
         }
         return '[amz_karten]' . implode('', $karten) . '[/amz_karten]';
     }

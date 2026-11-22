@@ -2547,4 +2547,13 @@ foreach ([
 $zt = '<p><strong>Titel</strong></p><p>[amz_bild asin="B0EBZ00002"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild leitet zum [amz_link asin="B0EBZ00002"]Angebot bei Amazon[/amz_link].</p><p>Ein ganz normaler langer Absatz ohne eBay, der stehen bleiben muss und mit der Karte nichts zu tun hat.</p>';
 [$oz, $nz] = SAB::paare_zu_einzelkarten($zt);
 ok($nz === 1 && strpos($oz, 'normaler langer Absatz') !== false && strpos($oz, 'ebay="1"') === false, 'Normaler Absatz nach dem Hinweissatz bleibt');
+// ---- 0.92.96: Tabelle mit Rezensionslinks wird Karten mit Rezensions-Link ----
+unset($GLOBALS['opt']['sab_paar_ohne_titel'], $GLOBALS['opt']['sab_paar_titel'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_paar_wahl']);
+$rt = '<table><tbody><tr><td>[amz_bild asin="B0REZ00001"][/amz_bild]</td><td>[amz_bild asin="B0REZ00002"][/amz_bild]</td></tr><tr><td>Zaun Eins</td><td>Zaun Zwei</td></tr><tr><td>[amz_link asin="B0REZ00001"]Zum Angebot[/amz_link]<br>[amz_rezension asin="B0REZ00001"]Rezensionen ansehen[/amz_rezension]</td><td>[amz_link asin="B0REZ00002"]Zum Angebot[/amz_link]<br>[amz_rezension asin="B0REZ00002"]Rezensionen ansehen[/amz_rezension]</td></tr></tbody></table>';
+$rr = SAB::tabelle_zu_karten_platzhalter($rt);
+ok($rr !== null && substr_count($rr, '[amz_karte ') === 2 && substr_count($rr, ' rez="1" rez_text="Rezensionen ansehen"') === 2 && strpos($rr, 'amz_rezension') === false, 'Tabelle mit [amz_rezension]: 2 Karten mit Rezensions-Knopf (' . (string) $rr . ')');
+$rfremd = str_replace('asin="B0REZ00002"]Rezensionen', 'asin="B0REZ00001"]Rezensionen', $rt);
+ok(SAB::tabelle_zu_karten_platzhalter($rfremd) === null, 'Rezensionslink eines anderen Produkts: Tabelle bleibt');
+$rh = SAB::sc_karten([], '[amz_karte asin="B0REZ00001" land="de" rez="1" rez_text="Rezensionen"][amz_karte asin="B0REZ00002" land="de"]');
+ok(substr_count($rh, 'product-reviews/B0REZ00001') === 1 && substr_count($rh, 'sab-karte-rez') === 1 && strpos($rh, 'product-reviews/B0REZ00002') === false, 'Karte mit rez=1 zeigt Rezensions-Link, ohne rez keinen');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
