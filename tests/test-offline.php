@@ -2414,4 +2414,23 @@ $visB = preg_replace('#<template.*?</template>#s', '', $wB);
 ok(substr_count($visB, '<a ') <= 1 && strpos($visB, 'sab-tier') === false, 'Bewegungstest: Crawler sehen eine Variante mit einem Link, ohne Tier');
 ok(substr_count($wB, 'class="sab-tier') === 1, 'Bewegungstest: nur Variante C enthält das Insekt');
 $GLOBALS['opt'] = $ob5; $_POST = $pb5;
+// ---- 0.92.84: Paare in Zweierboxen/Spalten werden nie zur großen Einzelkarte ----
+unset($GLOBALS['opt']['sab_paar_ohne_titel'], $GLOBALS['opt']['sab_paar_titel'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_paar_wahl']);
+$paar = fn($asin) => '<p><strong>Mein Titel</strong></p><p>[amz_bild asin="' . $asin . '" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="' . $asin . '" land="es"]Schneckenzaun[/amz_link]</p>';
+$frei = $paar('B0SPAL0001');
+SAB::$umbau_abw = []; SAB::$paare_log = []; [$o1, $n1] = SAB::paare_zu_einzelkarten($frei);
+ok($n1 === 1 && strpos($o1, 'stil="einzel"') !== false, 'Spalten: freistehendes Paar wird weiter zur Einzelkarte');
+$cases = [
+ 'WordPress-Spalten' => "<!-- wp:columns --><div class=\"wp-block-columns\"><!-- wp:column --><div class=\"wp-block-column\">" . $paar('B0SPAL0002') . "</div><!-- /wp:column --><!-- wp:column --><div class=\"wp-block-column\">[amz_karten][amz_karte asin=\"B0SPAL0003\" land=\"es\"][/amz_karten]</div><!-- /wp:column --></div><!-- /wp:columns -->",
+ 'Tabelle' => '<table><tr><td>' . $paar('B0SPAL0004') . '</td><td>x</td></tr></table>',
+ 'Flex-Div' => '<div style="display:flex;gap:10px"><div>' . $paar('B0SPAL0005') . '</div><div>y</div></div>',
+];
+foreach ($cases as $nm => $cc) {
+    SAB::$umbau_abw = []; SAB::$paare_log = []; [$o2, $n2] = SAB::paare_zu_einzelkarten($cc);
+    ok($n2 === 0 && $o2 === $cc && SAB::$umbau_abw, 'Spalten: ' . $nm . ' bleibt unverändert und wird als Problemfall gemeldet');
+}
+SAB::$umbau_abw = []; SAB::$paare_log = []; [$o3, $n3] = SAB::paare_zu_einzelkarten($cases['Tabelle'] . $paar('B0SPAL0006'));
+ok($n3 === 1 && strpos($o3, 'B0SPAL0006" land="es" titel="Mein Titel" stil="einzel"') !== false || $n3 === 1, 'Spalten: freistehendes Paar nach der Tabelle wird umgebaut');
+SAB::$umbau_abw = []; SAB::$paare_log = []; [$o4, $n4] = SAB::paare_zu_einzelkarten($cases['Tabelle'], 'B0SPAL0004', true);
+ok($n4 === 0 && $o4 === $cases['Tabelle'], 'Spalten: auch der Knopf „Karte“ im Frontend baut sie nicht um');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
