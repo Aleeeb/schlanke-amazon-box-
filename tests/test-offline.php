@@ -2498,4 +2498,14 @@ $gut2 = '<p>Vorher.</p><p>[amz_bild asin="B0LUFT0002" land="es"]<a href="x"><img
 [$ul2] = SAB::umbau_text('<p><strong>Titel</strong></p>' . substr($gut2, 12));
 ok(strpos($ul2, "\n\n[amz_karten]") !== false || strpos($ul2, '[amz_karten]') === false, 'Lesbarer Code: umbau_text setzt Leerzeilen um Karten');
 ok(strpos($stj, 'height:"+h+"px') === false && strpos($stj, 'Steht in Spalten (keine Tabelle)') !== false && strpos($stj, 'x.closest&&!x.closest("td,th")') !== false, 'Frontend: kein großer Platzhalterkasten mehr; Tabellen (Zweierboxen) behalten die Karten-Knöpfe, nur Spalten ohne Tabelle bekommen den Hinweis');
+// ---- 0.92.93: Bewegungstest erzeugt kein Scheinprodukt „BW“ ----
+$ob6 = $GLOBALS['opt']; $pb6 = $_POST;
+$GLOBALS['opt']['sab_ab'] = ['e7a90002' => ['an' => 1, 'et' => 1, 'bw' => 1, 'a' => [], 'b' => [], 'c' => ['bw'], 'ziel' => 1000, 'start' => '2026-11-22']];
+$mAo = new ReflectionMethod('SAB', 'ab_optionen'); $mAo->setAccessible(true);
+ok(($mAo->invoke(null)['e7a90002']['c'] ?? null) === [], 'Bewegungstest: alter Platzhalter „bw“ wird beim Lesen entfernt');
+$mAa = new ReflectionMethod('SAB', 'alle_asins'); $mAa->setAccessible(true); unset($GLOBALS['tr']['sab_alle_asins']);
+ok(!in_array('BW', array_map('strtoupper', $mAa->invoke(null)), true), 'Bewegungstest: kein Scheinprodukt BW in der Produktliste');
+$_POST = ['sab_bw_an' => '1', 'sab_bw_ziel' => '600']; $mBw->invoke(null);
+ok(($GLOBALS['opt']['sab_ab']['e7a90002']['c'] ?? null) === [], 'Bewegungstest: Speichern legt keinen Platzhalter mehr an');
+$GLOBALS['opt'] = $ob6; $_POST = $pb6;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.92
+ * Version: 0.92.93
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.92';
+    const VERSION = '0.92.93';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3656,7 +3656,11 @@ JS;
     private static ?array $ab_ctx = null;
     private static array $ab_gesehen = [];
 
-    private static function ab_optionen(): array { $o = get_option('sab_ab', []); return is_array($o) ? $o : []; }
+    private static function ab_optionen(): array {
+        $o = get_option('sab_ab', []); if (!is_array($o)) { return []; }
+        foreach ($o as $id => $x) { if (is_array($x) && !empty($x['bw']) && !empty($x['c'])) { $o[$id]['c'] = []; } }   // Bewegungstest: früher stand dort ein Platzhalter „bw“, der als Produkt „BW“ in Listen auftauchte
+        return $o;
+    }
 
     private static function ab_editor(): bool { return function_exists('is_user_logged_in') && is_user_logged_in() && current_user_can('edit_posts'); }
 
@@ -3903,9 +3907,9 @@ JS;
     private static function bewegung_speichern(): string {
         $an = !empty($_POST['sab_bw_an']);
         update_option('sab_bewegung', ['an' => $an ? 1 : 0], false);
-        $opt = self::ab_optionen(); $o = $opt[self::BEWEGUNG_ID] ?? ['ziel' => self::AB_ZIEL, 'a' => [], 'b' => [], 'c' => ['bw'], 'et' => 1, 'bw' => 1];
+        $opt = self::ab_optionen(); $o = $opt[self::BEWEGUNG_ID] ?? ['ziel' => self::AB_ZIEL, 'a' => [], 'b' => [], 'c' => [], 'et' => 1, 'bw' => 1];
         if ($an && (empty($o['an']) || empty($o['start']))) { $o['start'] = gmdate('Y-m-d'); }
-        $o['an'] = $an ? 1 : 0; $o['et'] = 1; $o['bw'] = 1; $o['a'] = []; $o['b'] = []; $o['c'] = ['bw'];
+        delete_transient('sab_alle_asins'); $o['an'] = $an ? 1 : 0; $o['et'] = 1; $o['bw'] = 1; $o['a'] = []; $o['b'] = []; $o['c'] = [];
         $o['ziel'] = max(100, (int) ($_POST['sab_bw_ziel'] ?? ($o['ziel'] ?? self::AB_ZIEL)));
         $opt[self::BEWEGUNG_ID] = $o; update_option('sab_ab', $opt, false); delete_transient('sab_alle_asins');
         return $an ? 'Bewegungstest läuft: Buch-Widgets zeigen je zu einem Drittel keine Bewegung, Wackeln mit Glanz oder Insekt auf Blume (Crawler sehen eine Variante pro Tag; wer „Bewegung reduzieren“ eingestellt hat, sieht in jeder Variante keine).' : 'Bewegungstest aus. Die Zahlen bleiben gespeichert.';
@@ -4282,7 +4286,7 @@ JS;
             $out[$id]['s'][$r['pfad']][$v]['k'] = ($out[$id]['s'][$r['pfad']][$v]['k'] ?? 0) + (int) $r['n'];
             $out[$id]['t'][$r['d']][$v]['k'] = ($out[$id]['t'][$r['d']][$v]['k'] ?? 0) + (int) $r['n'];
         }
-        foreach ($out as $id => &$d) { if (!empty($opt[$id]['c'])) { $d['r'] = self::ab_bewerten_n(['A' => [(int) ($d['v']['A']['n'] ?? 0), (int) ($d['v']['A']['k'] ?? 0)], 'B' => [(int) ($d['v']['B']['n'] ?? 0), (int) ($d['v']['B']['k'] ?? 0)], 'C' => [(int) ($d['v']['C']['n'] ?? 0), (int) ($d['v']['C']['k'] ?? 0)]], max(1, (int) ($opt[$id]['ziel'] ?? self::AB_ZIEL)), (string) $id); continue; } $d['r'] = self::ab_bewerten((int) ($d['v']['A']['n'] ?? 0), (int) ($d['v']['A']['k'] ?? 0), (int) ($d['v']['B']['n'] ?? 0), (int) ($d['v']['B']['k'] ?? 0), max(1, (int) ($opt[$id]['ziel'] ?? self::AB_ZIEL))); } unset($d);
+        foreach ($out as $id => &$d) { if (!empty($opt[$id]['c']) || !empty($opt[$id]['bw'])) { $d['r'] = self::ab_bewerten_n(['A' => [(int) ($d['v']['A']['n'] ?? 0), (int) ($d['v']['A']['k'] ?? 0)], 'B' => [(int) ($d['v']['B']['n'] ?? 0), (int) ($d['v']['B']['k'] ?? 0)], 'C' => [(int) ($d['v']['C']['n'] ?? 0), (int) ($d['v']['C']['k'] ?? 0)]], max(1, (int) ($opt[$id]['ziel'] ?? self::AB_ZIEL)), (string) $id); continue; } $d['r'] = self::ab_bewerten((int) ($d['v']['A']['n'] ?? 0), (int) ($d['v']['A']['k'] ?? 0), (int) ($d['v']['B']['n'] ?? 0), (int) ($d['v']['B']['k'] ?? 0), max(1, (int) ($opt[$id]['ziel'] ?? self::AB_ZIEL))); } unset($d);
         return $out;
     }
 
@@ -4345,7 +4349,7 @@ JS;
 
     /** Eine Test-Karte: Produkte beider Paare, Score, Fortschritt, Bereiche, Urteil, Seiten und Verlauf. */
     private static function ab_karte_html(string $id, array $o, array $z, bool $voll): string {
-        if (!empty($o['c'])) { return self::ab_karte_multi_html($id, $o, $z, $voll); }
+        if (!empty($o['c']) || !empty($o['bw'])) { return self::ab_karte_multi_html($id, $o, $z, $voll); }
         $r = $z['r'] ?? self::ab_bewerten(0, 0, 0, 0, max(1, (int) ($o['ziel'] ?? self::AB_ZIEL)));
         [$kl, $titel, $erkl] = self::ab_status_text($r);
         $h = '<div class="sab-ab-karte"><div class="sab-ab-kopf"><strong>Test ' . esc_html($id) . '</strong><span class="sab-ab-badge ' . $kl . '">' . esc_html($titel) . '</span></div>';
@@ -4396,7 +4400,7 @@ JS;
         foreach (['A', 'B', 'C'] as $b) {
             $l = strtolower($b); $x = $r['v'][$b] ?? ['n' => 0, 'k' => 0, 'p' => 0.0, 'se' => 0.0, 'ci' => [0.0, 0.0]];
             $sieg = $r['status'] === 'klar' && $r['sieger'] === $b;
-            $h .= '<div class="sab-ab-paar ' . $l . ($sieg ? ' sieg' : '') . '"><h4>Variante ' . $b . ($sieg ? ' &#127942;' : '') . '</h4>';
+            $h .= '<div class="sab-ab-paar ' . $l . ($sieg ? ' sieg' : '') . '"><h4>' . (!empty($o['bw']) ? ['A' => 'Keine Bewegung (A)', 'B' => 'Wackeln und Glanz (B)', 'C' => 'Insekt auf Blume (C)'][$b] : 'Variante ' . $b) . ($sieg ? ' &#127942;' : '') . '</h4>';
             foreach ((array) ($o[$l] ?? []) as $a) { $h .= self::ab_produkt_html((string) $a); }
             $h .= '<div class="sab-ab-zahl">' . self::ab_pct($x['p']) . '</div><div class="sab-ab-klein">Klickrate: ' . (int) $x['k'] . ' Klicks bei ' . (int) $x['n'] . ' Einblendungen</div>'
                . '<div class="sab-ab-bereich" title="95 %-Bereich der wahren Klickrate"><i class="' . $l . '" style="left:' . round(100 * $x['ci'][0] / $max / 1.05, 1) . '%;width:' . max(1, round(100 * ($x['ci'][1] - $x['ci'][0]) / $max / 1.05, 1)) . '%"></i></div>'
