@@ -2530,4 +2530,6 @@ $slx = '<div class="sm-full sm-dark"><div class="sm-box sm-rec"><p class="sm-kic
 SAB::$umbau_abw = []; SAB::$umbau_info = []; [$osl, $nsl] = SAB::endblock_zu_karten($slx);
 ok($nsl === 2 && substr_count($osl, '[amz_karten]') === 2 && substr_count($osl, '[amz_karte ') === 3 && strpos($osl, 'sm-prod') === false && strpos($osl, 'class="sm-full sm-dark"') !== false && strpos($osl, '<hr><p>Schluss</p>') !== false, 'Endblock Slughelp: sm-pimg optional, Gruppe mit einem Produkt erlaubt, Rahmen bleibt (' . $osl . ')');
 ok(strpos($osl, 'titel="Copper tape | 5 cm wide | 10 m"') !== false && strpos($osl, 'See offer') === false, 'Endblock Slughelp: Titel aus sm-ptitle, Linktext entfällt');
+$ehtml = SAB::sc_karten([], preg_replace('#^.*?(\[amz_karten\].*\[/amz_karten\]).*$#s', '$1', $oe1));
+ok(substr_count($ehtml, 'href="https://www.amazon.es') === 2 && substr_count($ehtml, 'sab-karte-ebay') === 2 && substr_count($ehtml, '<a ') === 4 && strpos($ehtml, 'sab_zeige') === false, 'Endblock-Karten: je Produkt ein Amazon-Anker (direkt zu Amazon, keine eigene Weiterleitung) plus ein eBay-Anker, kein Bild- oder Textlink zusätzlich');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
