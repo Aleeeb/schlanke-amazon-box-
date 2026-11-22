@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.89
+ * Version: 0.92.90
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.89';
+    const VERSION = '0.92.90';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3091,7 +3091,7 @@ JS;
         }
         if ($c2 === null && ($ph_bild || $ph_text)) {   // Bild und Textlink desselben Produkts, auch durch Absatz getrennt: EINE Einzelkarte (Titel, Bild, Satz mit Angebots-Link)
             [$cp, $np] = self::paare_zu_einzelkarten($c, $asin, true);
-            if ($np > 0 && $cp !== $c) { $c2 = $cp; }
+            if ($np > 0 && $cp !== $c) { $c2 = self::karten_luft($cp); }
         }
         $pb = $c2 === null ? self::partner_bereich($c, $pos, strlen($tag), $quelle) : null;
         if ($c2 !== null) { /* Tabelle umgebaut */ }
@@ -7014,7 +7014,7 @@ JS;
         $h4n = 0; if ($nur === '') { [$c, $h4n] = self::h4_zu_fett($c); }
         $c = self::attr_reparieren(strtr($c, $fest));
         $pn = 0; if ($nur === '') { [$c, $pn] = self::paare_zu_einzelkarten($c); }   // getrenntes Bild + Textlink => eine Einzelkarte
-        return [$c, $n + self::$karten_n + $h4n + $pn, $skip];
+        return [self::karten_luft($c), $n + self::$karten_n + $h4n + $pn, $skip];
     }
 
     /** Gehört der Bereich [von, bis) allein zu einem Block (nur Absatz-/Bild-Hüllen drumherum)? @return ?array{0:int,1:int,2:bool} [Start, Ende, mit Block-Kommentaren] */
@@ -7106,6 +7106,13 @@ JS;
         $e = $pe + 4; $s = $ps; $komm = false;
         if (preg_match('#<!--\s*wp:paragraph[^>]*-->\s*$#i', substr($c, max(0, $ps - 120), min(120, $ps)), $m1) && preg_match('#^\s*<!--\s*/wp:paragraph\s*-->#i', substr($c, $e, 60), $m2)) { $s = $ps - strlen($m1[0]); $e += strlen($m2[0]); $komm = true; }
         return [$s, $e, $komm];
+    }
+
+    /** Lesbarer Code: Kartenblöcke stehen mit Leerzeile zu den Nachbarblöcken (für Menschen und Maschinen leichter zu lesen, die Ausgabe auf der Seite ändert sich nicht). */
+    public static function karten_luft(string $c): string {
+        $c = preg_replace('#(</(?:p|h[1-6]|div|figure|table|ul|ol|blockquote)>|-->)[ \t]*(\[amz_karten\b)#i', "$1\n\n$2", $c) ?? $c;
+        $c = preg_replace('#(\[/amz_karten\])[ \t]*(<(?:p|h[1-6]|div|figure|table|ul|ol|blockquote|!--)\b|<!--)#i', "$1\n\n$2", $c) ?? $c;
+        return $c;
     }
 
     /** Beginnt der Text mit dem Hinweissatz „Klick auf das Bild führt zum …“ (DE, ES, FR, IT, EN)? */
@@ -9042,9 +9049,11 @@ JS;
             $bild = fn(string $t) => self::vorschau_rahmen(do_shortcode(wpautop($t)));
             $grafisch = $i <= 12;
             $code = '<details style="margin-top:6px"><summary style="cursor:pointer;color:#2271b1">HTML-Code zeigen</summary>';
-            $zeilen[] = '<tr><td colspan="2" style="background:#f6f7f7"><strong>' . esc_html($titelz) . '</strong></td></tr><tr><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($abm) . $code . $kurz($ab, $la) . '</details>' : $kurz($ab, $la)) . '</td><td style="width:50%;vertical-align:top">' . ($grafisch ? $bild($nabm) . $code . $kurz($nab, $lb) . '</details>' : $kurz($nab, $lb)) . '</td></tr>';
+            $zeilen[] = '<tr><td style="background:#f6f7f7"><strong>' . esc_html($titelz) . '</strong></td></tr>'
+                . '<tr><td style="vertical-align:top"><div style="font-weight:700;color:#1a7f37;margin-bottom:4px">NACHHER (so würde es aussehen)</div>' . ($grafisch ? $bild($nabm) . $code . $kurz($nab, $lb) . '</details>' : $kurz($nab, $lb)) . '</td></tr>'
+                . '<tr><td style="vertical-align:top"><div style="font-weight:700;color:#8a2424;margin-bottom:4px">VORHER (so steht es jetzt im Artikel)</div>' . ($grafisch ? $bild($abm) . $code . $kurz($ab, $la) . '</details>' : $kurz($ab, $la)) . '</td></tr>';
         }
-        $h .= '' . self::vorschau_css() . '<style>.sab-umb-bild img{max-width:100%;height:auto}</style><p><strong>Abschnitte, die sich ändern (' . count($zeilen) . '):</strong> links vorher, rechts nachher, so wie Besucher es sehen (bei den ersten 12 Abschnitten als Bild im Aussehen der Webseite, den HTML-Code gibt es per Klick). Die Vorher-Seite zeigt, was jetzt im Artikel steht.</p><table class="widefat striped"><thead><tr><th>Vorher</th><th>Nachher</th></tr></thead><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td colspan="2">Nichts.</td></tr>') . '</tbody></table>';
+        $h .= '' . self::vorschau_css() . '<style>.sab-umb-bild img{max-width:100%;height:auto}</style><p><strong>Abschnitte, die sich ändern (' . count($zeilen) . '):</strong> zuerst nachher, darunter vorher, so wie Besucher es sehen (bei den ersten 12 Abschnitten als Bild im Aussehen der Webseite, den HTML-Code gibt es per Klick). Die Vorher-Seite zeigt, was jetzt im Artikel steht.</p><table class="widefat striped"><tbody>' . ($zeilen ? implode('', $zeilen) : '<tr><td>Nichts.</td></tr>') . '</tbody></table>';
         $rest = [];
         if (preg_match_all('#<a\b[^>]*>.*?</a>#is', preg_replace('#\[amz_(bild|produkt|link)\b[^\]]*\].*?\[/amz_\1\]#is', '', $neu), $m)) {
             foreach ($m[0] as $a) { if (preg_match('#href=(["\'])(.*?)\1#is', $a, $hh) && preg_match('#amazon\.|amzn\.|a\.co/|link\.amazon#i', $hh[2])) { $rest[] = '<li><code style="word-break:break-all">' . esc_html(mb_substr($a, 0, 300)) . '</code></li>'; } }

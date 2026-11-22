@@ -2490,4 +2490,11 @@ ok(strpos($bj, 'sabBalken') !== false && strpos($bj, 'vorschau|alle_vorschau') !
 $_GET = ['page' => 'edit']; ob_start(); SAB::balken_admin(); $bn = ob_get_clean();
 ok($bn === '', 'Balken: auf fremden Admin-Seiten nichts');
 $_GET = $get0; $GLOBALS['admin'] = $adm0;
+// ---- 0.92.90: lesbarer Code um Karten ----
+$kl_in = '<p>Vorher.</p>[amz_karten][amz_karte asin="B0LUFT0001" land="es" stil="einzel"][/amz_karten]<p>Danach.</p>';
+ok(SAB::karten_luft($kl_in) === "<p>Vorher.</p>\n\n[amz_karten][amz_karte asin=\"B0LUFT0001\" land=\"es\" stil=\"einzel\"][/amz_karten]\n\n<p>Danach.</p>", 'Lesbarer Code: Karten stehen mit Leerzeile zu den Nachbarblöcken');
+ok(SAB::karten_luft(SAB::karten_luft($kl_in)) === SAB::karten_luft($kl_in), 'Lesbarer Code: zweimal angewendet ändert nichts mehr');
+$gut2 = '<p>Vorher.</p><p>[amz_bild asin="B0LUFT0002" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0LUFT0002" land="es"]Angebot[/amz_link]</p><p><strong>Titel</strong></p>';
+[$ul2] = SAB::umbau_text('<p><strong>Titel</strong></p>' . substr($gut2, 12));
+ok(strpos($ul2, "\n\n[amz_karten]") !== false || strpos($ul2, '[amz_karten]') === false, 'Lesbarer Code: umbau_text setzt Leerzeilen um Karten');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
