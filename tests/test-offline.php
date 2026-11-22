@@ -1327,7 +1327,7 @@ if (!function_exists('is_singular')) { function is_singular() { return true; } }
 $GLOBALS['admin'] = true; $GLOBALS['loggedin'] = true; ob_start(); SAB::stellen_skript(); $stj = ob_get_clean(); $GLOBALS['admin'] = false; $GLOBALS['loggedin'] = false;
 ok(strpos($stj, 'bearbeiten') !== false && strpos($stj, 'Im Bestand suchen') !== false && strpos($stj, 'action=edit') !== false, 'Frontend-Tauschfenster: Bestandssuche und Bearbeiten-Knopf');
 ok(strpos($stj, 'a[href]') !== false && strpos($stj, 'cn[as]') !== false, 'Frontend: auch fest eingetragene Textlinks bekommen Tauschen/Bearbeiten');
-ok(strpos($stj, 'Vorschau: was kommt in die Karte?') !== false && strpos($stj, 'So groß wird die Karte') !== false, 'Frontend: Vorschau zeigt, was in die Karte kommt und wie groß sie wird');
+ok(strpos($stj, 'Vorschau: was kommt in die Karte?') !== false && strpos($stj, 'Die Karte wird ca.') !== false, 'Frontend: Vorschau zeigt, was in die Karte kommt und wie groß sie wird (kompakt, ohne großen Kasten)');
 $kcss = (new ReflectionClassConstant('SAB', 'KARTE_CSS'))->getValue();
 ok(strpos($kcss, 'sab-karten-einzel') !== false && strpos($kcss, ':has(.sab-karte-einzel)') !== false, 'CSS: einzelne Einzelkarte wird nicht auf 300 px begrenzt');
 $tmpj = tempnam(sys_get_temp_dir(), 'sj'); file_put_contents($tmpj . '.js', preg_replace('#^<script>|</script>$#', '', trim($stj))); exec('node --check ' . escapeshellarg($tmpj . '.js') . ' 2>&1', $nout, $nrc);
@@ -2497,4 +2497,5 @@ ok(SAB::karten_luft(SAB::karten_luft($kl_in)) === SAB::karten_luft($kl_in), 'Les
 $gut2 = '<p>Vorher.</p><p>[amz_bild asin="B0LUFT0002" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0LUFT0002" land="es"]Angebot[/amz_link]</p><p><strong>Titel</strong></p>';
 [$ul2] = SAB::umbau_text('<p><strong>Titel</strong></p>' . substr($gut2, 12));
 ok(strpos($ul2, "\n\n[amz_karten]") !== false || strpos($ul2, '[amz_karten]') === false, 'Lesbarer Code: umbau_text setzt Leerzeilen um Karten');
+ok(strpos($stj, 'height:"+h+"px') === false && strpos($stj, 'Steht in einer Zweierbox') !== false && strpos($stj, 'function sp(x)') !== false, 'Frontend: kein großer Platzhalterkasten mehr, Zweierboxen bekommen Hinweis statt Einzel-Kartenknopf');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
