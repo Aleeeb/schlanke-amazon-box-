@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.88
+ * Version: 0.92.89
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.88';
+    const VERSION = '0.92.89';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3307,17 +3307,21 @@ JS;
     /** Kleiner Fortschrittsbalken mit Sekundenzähler, damit man bei langen Abläufen sieht, dass nichts hängt. JS-Funktion sabBalken(text) liefert die Funktion zum Entfernen. */
     private static function balken_js(): string {
         return <<<'JS'
-function sabBalken(txt){var s=document.getElementById("sab-bal-css");if(!s){s=document.createElement("style");s.id="sab-bal-css";s.textContent="@keyframes sabbal{from{background-position:0 0}to{background-position:40px 0}}#sab-bal{position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:100001;background:#fff;color:#222;border:1px solid #c3c4c7;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.25);padding:10px 14px;font:600 13px/1.3 sans-serif;min-width:240px;max-width:90vw}#sab-bal i{display:block;height:6px;margin-top:8px;border-radius:4px;background:repeating-linear-gradient(45deg,#2271b1 0 10px,#72aee6 10px 20px);background-size:40px 100%;animation:sabbal .8s linear infinite}";document.head.appendChild(s)}var o=document.getElementById("sab-bal");if(o){o.remove()}var b=document.createElement("div");b.id="sab-bal";var l=document.createElement("span");b.appendChild(l);b.appendChild(document.createElement("i"));document.body.appendChild(b);var t0=Date.now();function u(){l.textContent=txt+" … "+Math.round((Date.now()-t0)/1000)+" s. Es läuft, bitte warten."}u();var iv=setInterval(u,500);return function(){clearInterval(iv);b.remove()}}
+function sabBalken(txt){var s=document.getElementById("sab-bal-css");if(!s){s=document.createElement("style");s.id="sab-bal-css";s.textContent="@keyframes sabbal{from{background-position:0 0}to{background-position:40px 0}}#sab-bal{position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:100001;background:#fff;color:#222;border:1px solid #c3c4c7;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.25);padding:10px 14px;font:600 13px/1.3 sans-serif;min-width:240px;max-width:90vw}#sab-bal i{display:block;height:6px;margin-top:8px;border-radius:4px;background:repeating-linear-gradient(45deg,#2271b1 0 10px,#72aee6 10px 20px);background-size:40px 100%;animation:sabbal .8s linear infinite}";document.head.appendChild(s)}var o=document.getElementById("sab-bal");if(o){o.remove()}var b=document.createElement("div");b.id="sab-bal";var l=document.createElement("span");b.appendChild(l);b.appendChild(document.createElement("i"));document.body.appendChild(b);var t0=Date.now(),bi=b.lastChild,av=0;try{av=parseFloat(localStorage.getItem("sabbal:"+txt))||0}catch(e){}function u(){var e=(Date.now()-t0)/1000;l.textContent=txt+" … "+Math.round(e)+" s. Es läuft, bitte warten."+(av>0?(e<av?" Noch etwa "+Math.max(1,Math.round(av-e))+" s.":" Dauert etwas länger als sonst."):"");if(av>0){bi.style.width=Math.min(95,Math.round(100*e/av))+"%"}}u();var iv=setInterval(u,500);return function(){clearInterval(iv);try{var d=(Date.now()-t0)/1000;localStorage.setItem("sabbal:"+txt,String(av>0?Math.round((av+d)/2*10)/10:Math.round(d*10)/10))}catch(e){}b.remove()}}
 JS;
     }
 
     /** Auf der Plugin-Seite im Verwaltungsbereich: Zeigt nach dem Absenden eines Formulars (Tauschen, Umbauen, …) nach kurzem Warten den Fortschrittsbalken, bis die Seite neu geladen ist. */
     public static function balken_admin(): void {
-        if ((string) ($_GET['page'] ?? '') !== 'sab' || !current_user_can('manage_options')) { return; }
+        if (strpos((string) ($_GET['page'] ?? ''), 'sab') !== 0 || !current_user_can('manage_options')) { return; }
         echo '<script>(function(){' . self::balken_js()
+           . 'function lern(){try{var r=JSON.parse(sessionStorage.getItem("sabbal")||"null");sessionStorage.removeItem("sabbal");if(r&&r[0]&&Date.now()-r[1]<300000){var d=(Date.now()-r[1])/1000,o=parseFloat(localStorage.getItem("sabbal:"+r[0]))||0;localStorage.setItem("sabbal:"+r[0],String(o>0?Math.round((o+d)/2*10)/10:Math.round(d*10)/10))}}catch(e){}}lern();'
+           . 'function los(t){try{sessionStorage.setItem("sabbal",JSON.stringify([t,Date.now()]))}catch(e){}setTimeout(function(){sabBalken(t)},300)}'
            . 'document.addEventListener("submit",function(e){var f=e.target;if(!f||String(f.method).toLowerCase()!=="post"||f.target==="_blank"||f.hasAttribute("data-sab-kein")){return}'
-           . 'var b=e.submitter,t=(b&&(b.textContent||b.value)||"").replace(/\s+/g," ").trim();t=t?t.replace(/[.…]+$/,""):"Arbeitet";'
-           . 'setTimeout(function(){sabBalken(t)},400)})})();</script>';
+           . 'var b=e.submitter,t=(b&&(b.textContent||b.value)||"").replace(/\s+/g," ").trim();t=t?t.replace(/[.…]+$/,""):"Arbeitet";los(t)});'
+           . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[href]");if(!a||a.target==="_blank"||e.defaultPrevented||e.button||e.ctrlKey||e.metaKey||e.shiftKey){return}'
+           . 'var h=a.getAttribute("href")||"";if(h.indexOf("page=sab")<0||!/[?&](vorschau|alle_vorschau|entzerren|wied|ab)=/.test(h)){return}'
+           . 'var t=(a.textContent||"").replace(/\s+/g," ").trim().replace(/[.…]+$/,"");los(t?t.slice(0,60):"Lade Vorschau")})})();</script>';
     }
 
     public static function stellen_skript(): void {

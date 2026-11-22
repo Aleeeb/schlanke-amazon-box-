@@ -2483,4 +2483,11 @@ ok($nl === 1 && strpos($ol, 'amz_link') === false, 'Hinweissatz: langer „Clic 
 $reintext = '<p><strong>Mein Titel</strong></p><p>[amz_bild asin="B0LANG0002" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Wir haben dieses Produkt im Garten über viele Wochen getestet und können es nach den Erfahrungen in feuchten Nächten wirklich uneingeschränkt weiterempfehlen, siehe [amz_link asin="B0LANG0002" land="es"]hier[/amz_link]</p>';
 SAB::$umbau_abw = []; SAB::$paare_log = []; [$or, $nr] = SAB::paare_zu_einzelkarten($reintext);
 ok($nr === 0 && $or === $reintext, 'Hinweissatz: normaler langer Satz mit Textlink bleibt unberührt');
+// ---- 0.92.89: Fortschrittsbalken auf allen Plugin-Seiten, auch bei Vorschau-Links, mit Restzeit ----
+$get0 = $_GET; $adm0 = $GLOBALS['admin']; $GLOBALS['admin'] = true; $_GET = ['page' => 'sab-umbau'];
+ob_start(); SAB::balken_admin(); $bj = ob_get_clean();
+ok(strpos($bj, 'sabBalken') !== false && strpos($bj, 'vorschau|alle_vorschau') !== false && strpos($bj, 'Noch etwa') !== false, 'Balken: erscheint auch auf Unterseiten wie Umbau, bei Vorschau-Links und zeigt die Restzeit');
+$_GET = ['page' => 'edit']; ob_start(); SAB::balken_admin(); $bn = ob_get_clean();
+ok($bn === '', 'Balken: auf fremden Admin-Seiten nichts');
+$_GET = $get0; $GLOBALS['admin'] = $adm0;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
