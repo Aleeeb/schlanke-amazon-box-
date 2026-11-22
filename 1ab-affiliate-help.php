@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.108
+ * Version: 0.92.109
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.108';
+    const VERSION = '0.92.109';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7404,7 +7404,8 @@ JS;
                     elseif ($eigen !== '') { $titel_asin[$asin] = $eigen; }
                     if ($eigen !== '') { $karte = str_replace(' stil="einzel"', ' titel="' . esc_attr($eigen) . '" stil="einzel"', $karte); }
                     if ($klein) { $karte = str_replace(' stil="einzel"', '', $karte); }
-                    if (!$alt && $eigen === '' && !$erzwingen && get_option('sab_paar_ohne_titel', '0') !== '1' && !self::umbau_ok('paar:' . $asin)) {   // kein Titel erkannt: nicht raten, Redakteur entscheidet in der Vorschau
+                    if ($eigen === '' && !$alt && trim((string) (self::produkte()[$asin] ?? '')) !== '') { self::$umbau_info[] = 'Kein Titel über dem Bild bei ' . $asin . ': die Karte zeigt den Kurznamen aus der Produktliste („' . mb_substr(trim((string) self::produkte()[$asin]), 0, 60) . '“)'; }   // Kurzname aus „Produkte und Ersatzlisten“ (Handdaten) ersetzt den fehlenden Titel; die Karte folgt späteren Änderungen am Kurznamen
+                    if (!$alt && $eigen === '' && !$erzwingen && get_option('sab_paar_ohne_titel', '0') !== '1' && !self::umbau_ok('paar:' . $asin) && trim((string) (self::produkte()[$asin] ?? '')) === '') {   // kein Titel erkannt: nicht raten, Redakteur entscheidet in der Vorschau
                         $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ': über dem Bild wurde kein Titel erkannt, nicht umgewandelt. Unten den Titel eintragen oder bestätigen.';
                         self::$umbau_keys[self::$umbau_abw[] = $msg] = 'paar:' . $asin; self::$paare_log[$asin] = ['titel_fehlt', '', $text];
                         continue 2;
