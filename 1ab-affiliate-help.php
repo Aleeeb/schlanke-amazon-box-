@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.110
+ * Version: 0.92.112
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.110';
+    const VERSION = '0.92.112';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6883,7 +6883,18 @@ JS;
         ksort($sp);   // Spaltenreihenfolge: links vor rechts, auch wenn das erste Produkt erst in einer späteren Zeile erkannt wird
         if ($anz < 1 || count($sp) !== $anz) { return null; }
         $alle = [];
-        foreach ($sp as $s_) { if (count($s_) !== 1) { return null; } $alle[] = array_values($s_)[0][0]; }
+        foreach ($sp as $ci_ => $s_) {
+            if (count($s_) > 1) {   // zwei Produkte in einer Spalte: das Bild bestimmt das Produkt, ein abweichender Textlink/eBay-Link wird ignoriert (Karte nimmt das Bildprodukt)
+                $ba = [];
+                foreach ($z as $zs_) { if (preg_match_all('#\[amz_bild\b[^\]]*\basin="([A-Za-z0-9]{10})"#i', (string) ($zs_[$ci_] ?? ''), $bm_)) { foreach ($bm_[1] as $b_) { $ba[strtoupper($b_)] = 1; } } }
+                if (count($ba) !== 1) { return null; }
+                $bk = (string) array_key_first($ba);
+                $sp[$ci_] = $s_ = array_filter($s_, fn($u_) => strtoupper((string) $u_[0]) === $bk);
+                if (count($s_) !== 1) { return null; }
+                self::$umbau_info[] = 'Tabelle: in einer Spalte standen zwei verschiedene Produkte; das Bild bestimmt das Produkt (' . $bk . '), der abweichende Link wird nicht übernommen';
+            }
+            $alle[] = array_values($s_)[0][0];
+        }
         if (count($alle) !== count(array_unique($alle))) { return null; }
         $karten = [];
         foreach ($sp as $ci => $s_) {
@@ -7125,6 +7136,14 @@ JS;
         $rest = trim(html_entity_decode(strip_tags($rest)));
         if (mb_strlen($rest) > 60 || mb_strlen(trim(html_entity_decode(strip_tags($in)))) > 110) { return null; }
         return [strlen($m[0]), $e[0][1], $e[0][2]];
+    }
+
+    /** Kurzlink (amzn.to, link.amazon …) in der Tabelle um $pos, den das Plugin nicht auflösen konnte; sonst ''. */
+    private static function tabelle_kurzlink(string $c, int $pos): string {
+        $a1 = strripos(substr($c, 0, $pos), '<table'); if ($a1 === false) { return ''; }
+        $e = stripos($c, '</table>', $pos); $blk = substr($c, $a1, ($e === false ? strlen($c) : $e) - $a1);
+        if (preg_match_all('#<a\b[^>]*href=(["\'])(https?://(?:amzn\.to|amzn\.eu|a\.co|link\.amazon)/[^"\']*)\1#i', $blk, $m)) { foreach ($m[2] as $u) { if (!self::kurz_ok($u) && !self::umbau_url($u, true)) { return html_entity_decode($u); } } }
+        return '';
     }
 
     /** Steht im selben Tabellenzeilen- oder Spaltenblock wie $pos noch ein anderes Produkt (Karte, Bild oder Textlink mit anderer ASIN)? */
@@ -7383,6 +7402,7 @@ JS;
                             if (self::umbau_ok('satz:' . $asin)) { continue 2; }
                             $ctx = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags(preg_replace('#\[amz_link\b[^\]]*\](.*?)\[/amz_link\]#is', '»$1«', substr($c, max(0, $boff - 140), 300))))));
                             $grund = $as_ === null ? 'Das Bild steht nicht allein in seinem Absatz oder Block (z. B. Text oder andere Elemente direkt daneben)' : self::paar_grund($c, $boff, $bend, false);
+                            if (($kl_ = self::tabelle_kurzlink($c, $aoff)) !== '') { $grund = 'Die Tabelle enthält einen Kurzlink (' . preg_replace('#^https?://#', '', $kl_) . '), den das Plugin nicht auflösen kann; deshalb kann sie nicht zu Karten werden. Bitte den Kurzlink durch ASIN oder vollen Amazon-Link ersetzen, dann wird die ganze Tabelle zu Karten und ein eigenes Foto in der Spalte bleibt erhalten'; }
                             $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ' stehen getrennt und lassen sich nicht sicher zusammenführen: ' . $grund . '.';
                             self::$umbau_keys[self::$umbau_abw[] = $msg] = 'satz:' . $asin; self::$paare_log[$asin] = ['schwierig', '', $text, $ctx, $grund, $msg];
                             continue 2;
