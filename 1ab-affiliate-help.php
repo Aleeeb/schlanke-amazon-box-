@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.84
+ * Version: 0.92.85
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.84';
+    const VERSION = '0.92.85';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3837,6 +3837,8 @@ JS;
 
     /** Laufender Test für diese ASIN: ['id' => …, 'b' => ASIN] oder null. */
     const ETIKETT_ID = 'e7a90001';
+    /** Partnernetzwerke (Nicht-Amazon, nicht eBay), deren Links der Reiter Partnerlinks zählt; dazu jeder externe Link mit rel=sponsored. */
+    const PARTNER_NETZE = 'awin1\\.com|(?:^|\\.)awin\\.com|zenaps\\.com|tradedoubler|adcell|belboon|partnerize|prf\\.hn|effiliation|webgains|digistore24|tarifcheck|financeads|ad\\.zanox';
     const BEWEGUNG_ID = 'e7a90002';
     private static string $bw_var = '';
     const ETIKETT_TEXTE = ['de' => 'Empfehlung', 'es' => 'Recomendado', 'fr' => 'Recommandé', 'it' => 'Consigliato', 'co.uk' => 'Recommended', 'com' => 'Recommended', 'ca' => 'Recommended', 'com.au' => 'Recommended'];
@@ -4651,6 +4653,12 @@ JS;
         if (isset($d['hm'])) { self::heat_speichern($d); return new WP_REST_Response(null, 204); }
         if (isset($d['pv'])) {   // Seitenaufruf mit Produkten: nur Summe je Seite und Tag, ohne Besucherkennung
             $wpdb->query($wpdb->prepare("INSERT INTO " . self::seiten_tabelle() . " (tag, pfad, n) VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE n = n + 1", gmdate('Y-m-d'), self::pfad_sauber((string) ($d['pfad'] ?? ''))));
+        } elseif (isset($d['pl'])) {   // Klick auf einen Partnerlink (Awin u. a.): nur Zähler je Seite und Zielhost, ohne Besucherkennung
+            $host = substr(preg_replace('/[^a-z0-9.-]/', '', strtolower((string) $d['pl'])), 0, 60); $pf = self::pfad_sauber((string) ($d['pfad'] ?? ''));
+            if ($host !== '' && $pf !== '') {
+                $z = (array) get_option('sab_pl_klicks', []);
+                if (isset($z[$pf][$host]) || count($z) < 600) { $z[$pf][$host] = ['n' => (int) ($z[$pf][$host]['n'] ?? 0) + 1, 'zuletzt' => gmdate('Y-m-d')]; update_option('sab_pl_klicks', $z, false); }
+            }
         } elseif (isset($d['s'])) {
             $sek = (int) $d['s'];
             if ($sek > 0 && $sek <= 3 * HOUR_IN_SECONDS) {
@@ -4727,7 +4735,8 @@ JS;
 
     /** Kleines Skript, nur auf Seiten mit Produkten. Misst Klick und die Zeit bis zur Rückkehr in den Tab. */
     public static function messskript(): void {
-        if (!self::$genutzt || (function_exists('is_user_logged_in') && is_user_logged_in() && current_user_can('edit_posts'))) { return; }   // angemeldete Redakteure werden nicht gemessen
+        if (function_exists('is_user_logged_in') && is_user_logged_in() && current_user_can('edit_posts')) { return; }   // angemeldete Redakteure werden nicht gemessen
+        if (!self::$genutzt && !(function_exists('is_singular') && is_singular() && self::partner_links((string) get_post_field('post_content', get_the_ID())))) { return; }   // nur Seiten mit Produkten oder Partnerlinks
         $url = esc_url_raw(rest_url('sab/v1/m'));
         echo '<script>(function(){var U=' . wp_json_encode($url) . ',p=null;'
            . 'function S(o){try{navigator.sendBeacon(U,new Blob([JSON.stringify(o)],{type:"text/plain"}))}catch(e){}}'
@@ -4738,6 +4747,8 @@ JS;
            . 'function Z(){var o={id:Math.random().toString(36).slice(2,10),pv:1,pfad:location.pathname};if(window.sabAB&&window.sabAB.length){o.ab=window.sabAB}S(o)}'
            . 'function W(){(window.requestIdleCallback||function(f){setTimeout(f,1500)})(Z)}'
            . 'if(document.readyState==="complete"){W()}else{addEventListener("load",W)}'
+           . 'var NR=new RegExp(' . wp_json_encode(self::PARTNER_NETZE) . ',"i");'
+           . 'document.addEventListener("click",function(e){var q=e.target.closest&&e.target.closest("a[href]");if(q&&!q.hasAttribute("data-sab-asin")&&q.hostname&&q.hostname!==location.hostname&&!/amazon\\.|amzn\\.|ebay\\.|(^|\\.)a\\.co$/i.test(q.hostname)&&(NR.test(q.hostname)||/sponsored/.test(q.rel||""))){S({id:Math.random().toString(36).slice(2,10),pl:q.hostname,pfad:location.pathname})}},true);'
            . 'document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-sab-asin]");if(!a)return;'
            . 'var id=Math.random().toString(36).slice(2,10),c=a.classList;'
            . 'S({id:id,asin:a.getAttribute("data-sab-asin"),slot:a.getAttribute("data-sab-slot")||"",var:a.getAttribute("data-sab-var")||"",typ:(e.target.closest&&e.target.closest(".sab-karte-btn,.sab-karte-titel,.sab-karte-cta"))?"text":c.contains("sab-bild")?"bild":c.contains("sab-link")?"box":"text",pfad:location.pathname,anker:H(a),z:a.getAttribute("data-sab-z")||"",h:L(),zl:(a.href.match(/amazon\.(co\.uk|com\.au|com|ca|de|fr|it|es)\//i)||[0,""])[1].toLowerCase(),za:((a.href.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})/)||[0,""])[1]).toUpperCase()});'
@@ -9469,6 +9480,48 @@ JS;
     }
 
     /** Reiter „Rotation“: feste Plätze, automatische Top-Produkte, Sperrliste. */
+    /** Partnerlinks (Nicht-Amazon, nicht eBay) in einem Text: Liste aus Host und Adresse. Eigene Domain und Plugin-Links zählen nicht. */
+    public static function partner_links(string $c): array {
+        $out = []; $eigen = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+        if (!preg_match_all('#<a\b([^>]*)\bhref=(["\'])(.*?)\2([^>]*)>#is', $c, $m, PREG_SET_ORDER)) { return $out; }
+        foreach ($m as $x) {
+            $u = html_entity_decode($x[3]); $h = strtolower((string) wp_parse_url($u, PHP_URL_HOST));
+            if ($h === '' || $h === $eigen || preg_match('#amazon\.|amzn\.|ebay\.|(?:^|\.)a\.co$#i', $h)) { continue; }
+            if (preg_match('#(?:' . self::PARTNER_NETZE . ')#i', $h) || preg_match('#\brel=["\'][^"\']*sponsored#i', $x[1] . ' ' . $x[4])) { $out[] = ['host' => $h, 'url' => $u]; }
+        }
+        return $out;
+    }
+
+    /** Reiter Partnerlinks: wie viele Awin- und andere Partnerlinks stehen in den Artikeln, und wie oft werden sie geklickt (Zähler ab Einspielen dieser Version). */
+    private static function partner_html(): string {
+        global $wpdb;
+        $kl = (array) get_option('sab_pl_klicks', []);
+        $rows = isset($wpdb) ? (array) $wpdb->get_results("SELECT ID, post_title, post_content FROM {$wpdb->posts} WHERE post_status IN ('publish','future') AND post_type IN ('post','page') AND post_content LIKE '%href%' ORDER BY ID LIMIT 2000", ARRAY_A) : [];
+        $art = []; $hosts = [];
+        foreach ($rows as $r) {
+            $pl = self::partner_links((string) $r['post_content']); if (!$pl) { continue; }
+            $pf = self::pfad_sauber((string) get_permalink((int) $r['ID'])); $k = 0; $hh = [];
+            foreach ($kl[$pf] ?? [] as $hn => $z) { $k += (int) ($z['n'] ?? 0); }
+            foreach ($pl as $l) { $hh[$l['host']] = ($hh[$l['host']] ?? 0) + 1; $hosts[$l['host']]['links'] = ($hosts[$l['host']]['links'] ?? 0) + 1; $hosts[$l['host']]['art'][$r['ID']] = 1; }
+            $art[] = ['id' => (int) $r['ID'], 't' => (string) ($r['post_title'] ?: 'Beitrag ' . $r['ID']), 'n' => count($pl), 'h' => $hh, 'k' => $k];
+        }
+        foreach ($kl as $pf => $hs) { foreach ($hs as $hn => $z) { $hosts[$hn]['k'] = ($hosts[$hn]['k'] ?? 0) + (int) ($z['n'] ?? 0); } }
+        usort($art, fn($a, $b) => [$b['k'], $b['n']] <=> [$a['k'], $a['n']]);
+        $sum_l = array_sum(array_column($art, 'n')); $sum_k = array_sum(array_column($art, 'k'));
+        $h = '<h2>Partnerlinks (Awin und andere, ohne Amazon und eBay)</h2><p class="description">Zählt Links zu Partnernetzwerken wie Awin und jeden externen Link mit <code>rel="sponsored"</code> in veröffentlichten Artikeln. Klicks werden ohne Cookie und ohne IP als Zähler je Seite und Zielseite gezählt, und zwar ab dem Einspielen dieser Version.</p>'
+            . '<p><strong>' . count($art) . '</strong> Artikel mit zusammen <strong>' . (int) $sum_l . '</strong> Partnerlinks · <strong>' . (int) $sum_k . '</strong> Klicks bisher.</p>';
+        if (!$art) { return $h . '<p>Keine Partnerlinks gefunden.</p>'; }
+        $h .= '<h3>Nach Zielseite</h3><table class="widefat striped" style="max-width:700px"><thead><tr><th>Zielseite</th><th>Links</th><th>Artikel</th><th>Klicks</th></tr></thead><tbody>';
+        uasort($hosts, fn($a, $b) => [(int) ($b['k'] ?? 0), (int) ($b['links'] ?? 0)] <=> [(int) ($a['k'] ?? 0), (int) ($a['links'] ?? 0)]);
+        foreach ($hosts as $hn => $x) { $h .= '<tr><td>' . esc_html((string) $hn) . '</td><td>' . (int) ($x['links'] ?? 0) . '</td><td>' . count((array) ($x['art'] ?? [])) . '</td><td>' . (int) ($x['k'] ?? 0) . '</td></tr>'; }
+        $h .= '</tbody></table><h3>Nach Artikel</h3><table class="widefat striped sab-sort2" style="max-width:1000px"><thead><tr><th>Artikel</th><th>Links</th><th>Zielseiten</th><th>Klicks</th></tr></thead><tbody>';
+        foreach ($art as $a) {
+            $hs = []; foreach ($a['h'] as $hn => $n) { $hs[] = esc_html((string) $hn) . ' ×' . (int) $n; }
+            $h .= '<tr><td><a href="' . esc_url((string) get_permalink($a['id'])) . '" target="_blank" rel="noopener">' . esc_html($a['t']) . '</a> <small><a href="' . esc_url(admin_url('post.php?post=' . $a['id'] . '&action=edit')) . '" target="_blank" rel="noopener">Bearbeiten ↗</a></small></td><td>' . (int) $a['n'] . '</td><td>' . implode(', ', $hs) . '</td><td>' . (int) $a['k'] . '</td></tr>';
+        }
+        return $h . '</tbody></table>';
+    }
+
     private static function rot_html(): string {
         $fest = self::rot_fest(); $sperre = array_values(array_unique(array_map('strtoupper', array_map('strval', (array) get_option('sab_rot_sperre', [])))));
         $st = get_option('sab_uebersicht_stand_' . self::land('')); $items = is_array($st) ? (array) ($st['items'] ?? []) : [];
@@ -9701,6 +9754,7 @@ JS;
         'helfer'        => 'Helferaufgaben',
         'laender'       => 'Länder',
         'rotation'      => 'Rotation',
+        'partner'       => 'Partnerlinks',
         'lernen'        => 'Lernen',
         'scan'          => 'Seite scannen',
         'kartendesign'  => 'Kartendesign',
@@ -10586,6 +10640,8 @@ JS;
             echo self::score_html();
         } elseif ($tab === 'austausch') {
             echo self::austausch_html();
+        } elseif ($tab === 'partner') {
+            echo self::partner_html();
         } elseif ($tab === 'rotation') {
             echo self::rot_html();
         } elseif ($tab === 'laender') {

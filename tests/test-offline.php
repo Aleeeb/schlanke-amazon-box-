@@ -379,7 +379,7 @@ ok(true, 'Lauf mit fehlendem Produkt ohne Absturz');
 
 // ---- 0.21.0: Seitenleiste ----
 $GLOBALS['menu'] = []; SAB::menue();
-ok(count($GLOBALS['menu']) === 20 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und achtzehn Untermenüs');
+ok(count($GLOBALS['menu']) === 21 && $GLOBALS['menu'][0] === ['top', 'sab'], 'Menü: ein Hauptpunkt und neunzehn Untermenüs');
 ok(in_array(['sub', 'sab-vorschau'], $GLOBALS['menu'], true) && in_array(['sub', 'sab'], $GLOBALS['menu'], true), 'Menü: Untermenü Vorschau und Übersicht');
 $GLOBALS['admin'] = true; unset($_GET['tab']); $_GET['page'] = 'sab-hilfe'; $_POST = [];
 ob_start(); SAB::seite(); $h = ob_get_clean();
@@ -2433,4 +2433,21 @@ SAB::$umbau_abw = []; SAB::$paare_log = []; [$o3, $n3] = SAB::paare_zu_einzelkar
 ok($n3 === 1 && strpos($o3, 'B0SPAL0006" land="es" titel="Mein Titel" stil="einzel"') !== false || $n3 === 1, 'Spalten: freistehendes Paar nach der Tabelle wird umgebaut');
 SAB::$umbau_abw = []; SAB::$paare_log = []; [$o4, $n4] = SAB::paare_zu_einzelkarten($cases['Tabelle'], 'B0SPAL0004', true);
 ok($n4 === 0 && $o4 === $cases['Tabelle'], 'Spalten: auch der Knopf „Karte“ im Frontend baut sie nicht um');
+// ---- 0.92.85: Reiter Partnerlinks ----
+$pc1 = '<p><a href="https://www.awin1.com/cread.php?awinmid=1&awinaffid=2&ued=x">Shop</a> <a href="https://www.amazon.es/dp/B0AAAAAAA1?tag=x">A</a> <a href="https://www.ebay.es/itm/1?mkcid=1">E</a> <a href="https://andere.example/x" rel="nofollow sponsored">S</a> <a href="https://example.org/ohne">N</a></p>';
+$pl = SAB::partner_links($pc1);
+ok(count($pl) === 2 && $pl[0]['host'] === 'www.awin1.com' && $pl[1]['host'] === 'andere.example', 'Partnerlinks: Awin und rel=sponsored gezählt, Amazon, eBay und normale Links nicht');
+$mPh = new ReflectionMethod('SAB', 'partner_html'); $mPh->setAccessible(true);
+$wpdb_p = $GLOBALS['wpdb'] ?? null; $GLOBALS['pc'] = $pc1;
+$GLOBALS['wpdb'] = new class($pc1) { public $posts = 'wp_posts'; private $c; function __construct($c) { $this->c = $c; } function get_results($q, $o = null) { return [['ID' => 41, 'post_title' => 'Awin-Artikel', 'post_content' => $this->c]]; } function prepare($q, ...$a) { return $q; } };
+$ph = $mPh->invoke(null);
+ok(strpos($ph, 'Awin-Artikel') !== false && strpos($ph, '2</strong> Partnerlinks') !== false, 'Partnerlinks: Reiter zeigt Artikel und Zahl der Links');
+$GLOBALS['wpdb'] = $wpdb_p; unset($GLOBALS['pc']);
+if (!class_exists('WP_REST_Response')) { class WP_REST_Response { function __construct(public $d = null, public $s = 200) {} } }
+$GLOBALS['wpdb'] = new class { public $posts = 'wp_posts'; public $prefix = 'wp_'; function query($q) { return 1; } function insert($t, $d) { return 1; } function prepare($q, ...$a) { return $q; } function get_results($q, $o = null) { return []; } };
+$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 Firefox';
+$rq = new class { function get_body() { return json_encode(['id' => 'abcd1234', 'pl' => 'www.awin1.com', 'pfad' => '/artikel/']); } };
+unset($GLOBALS['opt']['sab_pl_klicks']); SAB::messen($rq); SAB::messen($rq);
+ok(($GLOBALS['opt']['sab_pl_klicks']['/artikel/']['www.awin1.com']['n'] ?? 0) === 2, 'Partnerlinks: Klicks werden je Seite und Zielseite gezählt');
+$GLOBALS['wpdb'] = $wpdb_p; unset($GLOBALS['opt']['sab_pl_klicks']);
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
