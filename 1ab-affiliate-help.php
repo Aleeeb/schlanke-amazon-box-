@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.104
+ * Version: 0.92.108
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.104';
+    const VERSION = '0.92.108';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7126,14 +7126,16 @@ JS;
     /** Steht im selben Tabellenzeilen- oder Spaltenblock wie $pos noch ein anderes Produkt (Karte, Bild oder Textlink mit anderer ASIN)? */
     private static function nachbar_produkt(string $c, int $pos, string $asin): bool {
         $vor = substr($c, 0, $pos); $s = 0; $e = strlen($c);
-        $a1 = max((int) strripos($vor, '<tr'), (int) strripos($vor, '<!-- wp:columns'));
-        if ($a1 === 0 && stripos($vor, '<tr') !== 0 && stripos($vor, '<!-- wp:columns') !== 0) { return false; }
-        $s = $a1; $m = preg_match('#</tr>|<!--\s*/wp:columns\s*-->#i', $c, $x, PREG_OFFSET_CAPTURE, $pos);
+        $a1 = max((int) strripos($vor, '<table'), (int) strripos($vor, '<!-- wp:columns'));   // ganze Tabelle bzw. alle Spalten (nicht nur die Zeile): Nachbar kann in einer anderen Zeile stehen
+        if ($a1 === 0 && stripos($vor, '<table') !== 0 && stripos($vor, '<!-- wp:columns') !== 0) { return false; }
+        $s = $a1; $m = preg_match('#</table>|<!--\s*/wp:columns\s*-->#i', $c, $x, PREG_OFFSET_CAPTURE, $pos);
         if ($m) { $e = $x[0][1]; }
         $blk = substr($c, $s, $e - $s);
-        if (!preg_match_all('#\[amz_(?:karte|bild|link)\b[^\]]*\basin="([A-Za-z0-9]{10})"#i', $blk, $mm)) { return false; }
-        foreach ($mm[1] as $x1) { if (strtoupper($x1) !== strtoupper($asin)) { return true; } }
-        return false;
+        if (preg_match_all('#\[amz_(?:karte|bild|link)\b[^\]]*\basin="([A-Za-z0-9]{10})"#i', $blk, $mm)) {
+            foreach ($mm[1] as $x1) { if (strtoupper($x1) !== strtoupper($asin)) { return true; } }
+        }
+        $ohne = preg_replace('#\[amz_(?:karte|bild|link)\b[^\]]*\basin="' . preg_quote($asin, '#') . '"[^\]]*\](?:.*?\[/amz_(?:bild|link)\])?#is', '', $blk);
+        return (bool) preg_match('#<a\b[^>]*href=["\'][^"\']*(?:amazon\.|amzn\.|a\.co/|link\.amazon)#i', (string) $ohne);   // Nachbar ist noch ein fester Amazon-Link (Kurzlink)
     }
 
     /** Steht die Stelle $pos in einer Spalte neben einem anderen Inhalt (WordPress-Spalten, Tabellenzelle, Flex-/Grid-Gruppe, Kartenreihe)? Dann würde eine große Einzelkarte das Layout sprengen. @return string Klartext-Grund oder '' */
@@ -7316,7 +7318,9 @@ JS;
             $fett = preg_match('#<(?:strong|b)\b#i', $inner) === 1;
             $mitte = preg_match('#text-align\s*:\s*center|has-text-align-center|aligncenter#i', (string) ($m[3][0] ?? '')) === 1;
             if (!$fett && !$mitte) { return null; }
-            if (mb_strlen($t) > 100 || preg_match('/[.:;]$/u', $t)) { return null; }
+            if (mb_strlen($t) > 100 || preg_match('/[.;]$/u', $t)) { return null; }
+            $t = rtrim($t, " \t:");   // „Selbstklebendes Kupferband:“ ist ein Titel; der Doppelpunkt gehört nicht in den Kartentitel
+            if ($t === '') { return null; }
         }
         return [$fenster + $m[0][1], $t];
     }
@@ -7689,8 +7693,9 @@ JS;
 
     /** Suchfeld + Knopf „Bei Amazon suchen“ (neuer Tab): Begriff aus dem Text direkt vor dem Kurzlink, sonst der Linktext; steht eine ASIN im Eingabefeld darunter, wird nach ihr gesucht. */
     private static function kurzlink_suche_html(string $vor, string $linktext): string {
-        $teile = preg_split('/(?<=[.!?:;])\s+/u', trim($vor)); $frag = trim((string) end($teile), " .!?:;–-");
-        $w = array_values(array_filter(preg_split('/\s+/u', $frag)));
+        $vor = function_exists('mb_scrub') ? mb_scrub($vor) : $vor;   // abgeschnittene Mehrbyte-Zeichen (Umlaute) am Anfang des Textstücks lassen preg_split mit /u sonst scheitern
+        $teile = (array) preg_split('/(?<=[.!?:;])\s+/u', trim($vor)); $frag = trim((string) end($teile), " .!?:;–-");
+        $w = array_values(array_filter((array) preg_split('/\s+/u', $frag)));
         $term = count($w) >= 2 ? implode(' ', array_slice($w, -8)) : '';
         if ($term === '' && $linktext !== '' && !self::generischer_linktext($linktext)) { $term = $linktext; }
         $base = 'https://' . self::LAENDER[self::land('')][0] . '/s?k=';
