@@ -2497,5 +2497,5 @@ ok(SAB::karten_luft(SAB::karten_luft($kl_in)) === SAB::karten_luft($kl_in), 'Les
 $gut2 = '<p>Vorher.</p><p>[amz_bild asin="B0LUFT0002" land="es"]<a href="x"><img src="a.jpg"></a>[/amz_bild]</p><p>Klick auf das Bild zum [amz_link asin="B0LUFT0002" land="es"]Angebot[/amz_link]</p><p><strong>Titel</strong></p>';
 [$ul2] = SAB::umbau_text('<p><strong>Titel</strong></p>' . substr($gut2, 12));
 ok(strpos($ul2, "\n\n[amz_karten]") !== false || strpos($ul2, '[amz_karten]') === false, 'Lesbarer Code: umbau_text setzt Leerzeilen um Karten');
-ok(strpos($stj, 'height:"+h+"px') === false && strpos($stj, 'Steht in einer Zweierbox') !== false && strpos($stj, 'function sp(x)') !== false, 'Frontend: kein großer Platzhalterkasten mehr, Zweierboxen bekommen Hinweis statt Einzel-Kartenknopf');
+ok(strpos($stj, 'height:"+h+"px') === false && strpos($stj, 'Steht in Spalten (keine Tabelle)') !== false && strpos($stj, 'x.closest&&!x.closest("td,th")') !== false, 'Frontend: kein großer Platzhalterkasten mehr; Tabellen (Zweierboxen) behalten die Karten-Knöpfe, nur Spalten ohne Tabelle bekommen den Hinweis');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
