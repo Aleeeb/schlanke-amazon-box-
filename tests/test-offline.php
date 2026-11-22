@@ -2524,4 +2524,10 @@ $fremd = '<div class="sm-box"><div class="sm-prods">' . $prod1 . '<p>Fremder Tex
 ok($ne4 === 0 && $oe4 === $fremd, 'Endblock: fremder Inhalt neben den Produktkästen: nichts wird geraten');
 SAB::$umbau_abw = []; [$ou, $nu] = SAB::umbau_text('<p>Text.</p>' . $endb);
 ok($nu >= 1 && strpos($ou, 'sm-prod') === false && strpos($ou, '[amz_karte asin="B0ENDB0002"') !== false, 'Endblock: umbau_text (Vorschau, Umbau, Stufen) baut ihn um');
+$sl1 = '<div class="sm-prod"><div class="sm-pimg">[amz_bild asin="B01I1XNY1E" land="co.uk"][/amz_bild]</div><p class="sm-ptitle">Copper tape | 5 cm wide | 10 m</p><p class="sm-pbtns">[amz_link asin="B01I1XNY1E" land="co.uk" class="sm-btn"]See offer on Amazon[/amz_link]</p></div>';
+$sl2 = '<div class="sm-prod">[amz_bild asin="B0822QM4B5" land="co.uk"][/amz_bild]<p class="sm-ptitle">Garden cloches | 3 pack</p><p class="sm-pbtns">[amz_link asin="B0822QM4B5" land="co.uk" class="sm-btn"]See offer on Amazon[/amz_link]</p></div>';
+$slx = '<div class="sm-full sm-dark"><div class="sm-box sm-rec"><p class="sm-kicker">Recommendations</p><div class="sm-prods">' . $sl1 . $sl2 . '</div></div><div class="sm-box sm-rec"><div class="sm-prods">' . $sl1 . '</div></div></div><hr><p>Schluss</p>';
+SAB::$umbau_abw = []; SAB::$umbau_info = []; [$osl, $nsl] = SAB::endblock_zu_karten($slx);
+ok($nsl === 2 && substr_count($osl, '[amz_karten]') === 2 && substr_count($osl, '[amz_karte ') === 3 && strpos($osl, 'sm-prod') === false && strpos($osl, 'class="sm-full sm-dark"') !== false && strpos($osl, '<hr><p>Schluss</p>') !== false, 'Endblock Slughelp: sm-pimg optional, Gruppe mit einem Produkt erlaubt, Rahmen bleibt (' . $osl . ')');
+ok(strpos($osl, 'titel="Copper tape | 5 cm wide | 10 m"') !== false && strpos($osl, 'See offer') === false, 'Endblock Slughelp: Titel aus sm-ptitle, Linktext entfällt');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
