@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.93
+ * Version: 0.92.94
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.93';
+    const VERSION = '0.92.94';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -3089,6 +3089,7 @@ JS;
                 break;
             }
         }
+        if ($c2 === null) { [$ce, $ne] = self::endblock_zu_karten($c, $asin); if ($ne > 0 && $ce !== $c) { $c2 = self::karten_luft($ce); } }   // Endblock: die ganze Produktgruppe
         if ($c2 === null && ($ph_bild || $ph_text)) {   // Bild und Textlink desselben Produkts, auch durch Absatz getrennt: EINE Einzelkarte (Titel, Bild, Satz mit Angebots-Link)
             [$cp, $np] = self::paare_zu_einzelkarten($c, $asin, true);
             if ($np > 0 && $cp !== $c) { $c2 = self::karten_luft($cp); }
@@ -6945,7 +6946,8 @@ JS;
     }
 
     public static function umbau_text(string $c, string $nur = ''): array {
-        $fest = [];
+        $fest = []; $enb = 0;
+        if ($nur === '') { [$c, $enb] = self::endblock_zu_karten($c); }   // Endblock zuerst, solange Bilder, Titel und Knöpfe noch beieinander stehen
         // bereits vorhandene Plugin-Platzhalter schützen
         $c_orig = $c;
         $c = preg_replace_callback('#\[amz_(bild|produkt|link|ebay)\b[^\]]*\].*?\[/amz_\1\]#is', function ($m) use (&$fest) {
@@ -7019,7 +7021,7 @@ JS;
         $h4n = 0; if ($nur === '') { [$c, $h4n] = self::h4_zu_fett($c); }
         $c = self::attr_reparieren(strtr($c, $fest));
         $pn = 0; if ($nur === '') { [$c, $pn] = self::paare_zu_einzelkarten($c); }   // getrenntes Bild + Textlink => eine Einzelkarte
-        return [self::karten_luft($c), $n + self::$karten_n + $h4n + $pn, $skip];
+        return [self::karten_luft($c), $n + self::$karten_n + $h4n + $pn + $enb, $skip];
     }
 
     /** Gehört der Bereich [von, bis) allein zu einem Block (nur Absatz-/Bild-Hüllen drumherum)? @return ?array{0:int,1:int,2:bool} [Start, Ende, mit Block-Kommentaren] */
@@ -7111,6 +7113,71 @@ JS;
         $e = $pe + 4; $s = $ps; $komm = false;
         if (preg_match('#<!--\s*wp:paragraph[^>]*-->\s*$#i', substr($c, max(0, $ps - 120), min(120, $ps)), $m1) && preg_match('#^\s*<!--\s*/wp:paragraph\s*-->#i', substr($c, $e, 60), $m2)) { $s = $ps - strlen($m1[0]); $e += strlen($m2[0]); $komm = true; }
         return [$s, $e, $komm];
+    }
+
+    /** Position des passenden </div> für ein offenes <div>, dessen Inhalt bei $von beginnt (verschachtelte Divs werden mitgezählt). */
+    private static function div_ende(string $c, int $von): ?int {
+        $tiefe = 1; $pos = $von;
+        while (preg_match('#<(/?)div\b[^>]*>#i', $c, $m, PREG_OFFSET_CAPTURE, $pos)) {
+            $tiefe += $m[1][0] === '/' ? -1 : 1;
+            if ($tiefe === 0) { return $m[0][1]; }
+            $pos = $m[0][1] + strlen($m[0][0]);
+        }
+        return null;
+    }
+
+    /** Eine Gruppe „sm-prods“ des Endblocks: jeder Kasten „sm-prod“ (Bild, Titel, Knöpfe, eBay) wird eine Karte. @return ?array{0:string,1:string[]} [Kartenblock, ASINs] oder null, wenn der Aufbau nicht eindeutig ist */
+    private static function endblock_karten(string $inner): ?array {
+        $karten = []; $alle = []; $off = 0; $rest = '';
+        while (preg_match('#<div\b[^>]*\bclass=(["\'])(?:[^"\']*\s)?sm-prod(?:\s[^"\']*)?\1[^>]*>#i', $inner, $m, PREG_OFFSET_CAPTURE, $off)) {
+            $s0 = $m[0][1]; $i0 = $s0 + strlen($m[0][0]); $e0 = self::div_ende($inner, $i0);
+            if ($e0 === null) { return null; }
+            $rest .= substr($inner, $off, $s0 - $off); $off = $e0 + 6;
+            $p = substr($inner, $i0, $e0 - $i0);
+            $as = []; $land = '';
+            if (preg_match_all('#\[amz_(?:bild|link|produkt)\b[^\]]*\basin="([A-Za-z0-9]{10})"([^\]]*)\]#i', $p, $mm, PREG_SET_ORDER)) {
+                foreach ($mm as $x) { $as[strtoupper($x[1])] = 1; if ($land === '' && preg_match('#\bland="([a-z.]+)"#i', $x[2], $lm)) { $land = strtolower($lm[1]); } }
+            }
+            if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1#is', $p, $hh)) {
+                foreach ($hh[2] as $u) { $r = self::umbau_url($u, true); if ($r) { $as[$r[1]] = 1; if ($land === '') { $land = $r[0]; } } }
+            }
+            if (count($as) !== 1) { self::$umbau_abw[] = 'Endblock: ein Produktkasten hat ' . (count($as) ?: 'kein') . ' erkennbare Produkte, der Endblock wird nicht umgebaut'; return null; }
+            $asin = (string) array_key_first($as); $alle[] = $asin;
+            if (!self::tag($land !== '' ? $land : self::land(''))) { return null; }
+            $titel = preg_match('#<p\b[^>]*\bclass=(["\'])[^"\']*\bsm-ptitle\b[^"\']*\1[^>]*>(.*?)</p>#is', $p, $tm) ? trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($tm[2]), ENT_QUOTES, 'UTF-8'))) : '';
+            $ebay = '';
+            if (preg_match('#\[amz_ebay\b([^\]]*)\](.*?)\[/amz_ebay\]#is', $p, $e)) {
+                $at = array_change_key_case((array) shortcode_parse_atts(trim($e[1])), CASE_LOWER);
+                $ebay = ' ebay="1"' . (!empty($at['host']) ? ' host="' . esc_attr((string) $at['host']) . '"' : '') . (!empty($at['campid']) ? ' campid="' . preg_replace('/\D/', '', (string) $at['campid']) . '"' : '') . (!empty($at['suche']) ? ' suche="' . str_replace(['"', '[', ']'], '', (string) $at['suche']) . '"' : '');
+            } elseif (preg_match('#<a\b[^>]*href=(["\'])(https?://(?:www\.)?(ebay\.[a-z.]+)/[^"\']*)\1[^>]*>#i', $p, $e)) {
+                parse_str((string) wp_parse_url(html_entity_decode($e[2]), PHP_URL_QUERY), $q);
+                $ebay = ' ebay="1" host="www.' . strtolower($e[3]) . '"' . (!empty($q['campid']) ? ' campid="' . preg_replace('/\D/', '', (string) $q['campid']) . '"' : '') . (!empty($q['_nkw']) ? ' suche="' . str_replace(['"', '[', ']'], '', trim((string) $q['_nkw'])) . '"' : '');
+            }
+            $karten[] = '[amz_karte asin="' . $asin . '"' . ($land !== '' && $land !== self::land('') ? ' land="' . $land . '"' : '') . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', mb_substr($titel, 0, 120)) . '"' : '') . $ebay . ']';
+        }
+        $rest .= substr($inner, $off);
+        if (!$karten || trim(preg_replace('#<!--.*?-->#s', '', $rest)) !== '') { return null; }   // fremder Inhalt neben den Produktkästen: nicht raten
+        return ['[amz_karten]' . implode('', $karten) . '[/amz_karten]', $alle];
+    }
+
+    /**
+     * Endblock am Artikelende: jede Produktgruppe „sm-prods“ (Kästen „sm-prod“ mit Bild, Titel, Knopf und eBay-Link) wird als Ganzes zu EINEM Kartenblock ([amz_karten] mit je einer [amz_karte]). Der Rahmen „sm-box“ und die Artikel-Empfehlungen bleiben.
+     * @param string $nur nur die Gruppe, die dieses Produkt enthält (Klick auf „Karte“ im Frontend)
+     * @return array{0:string,1:int} [neuer Text, Zahl der umgebauten Gruppen]
+     */
+    public static function endblock_zu_karten(string $c, string $nur = ''): array {
+        if (stripos($c, 'sm-prod') === false || get_option('sab_endblock_umbauen', '1') === '0') { return [$c, 0]; }
+        $n = 0; $off = 0;
+        while (preg_match('#<div\b[^>]*\bclass=(["\'])(?:[^"\']*\s)?sm-prods(?:\s[^"\']*)?\1[^>]*>#i', $c, $m, PREG_OFFSET_CAPTURE, $off)) {
+            $s0 = $m[0][1]; $i0 = $s0 + strlen($m[0][0]); $e0 = self::div_ende($c, $i0);
+            if ($e0 === null) { break; }
+            $off = $e0 + 6;
+            $r = self::endblock_karten(substr($c, $i0, $e0 - $i0));
+            if ($r === null || ($nur !== '' && !in_array(strtoupper($nur), $r[1], true))) { continue; }
+            $c = substr($c, 0, $s0) . $r[0] . substr($c, $e0 + 6); $n++; $off = $s0 + strlen($r[0]);
+            self::$umbau_info[] = 'Endblock: Produktgruppe mit ' . count($r[1]) . ' Produkten (' . implode(', ', $r[1]) . ') wird als Ganzes zu Karten, mit Titel und eBay-Link';
+        }
+        return [$c, $n];
     }
 
     /** Lesbarer Code: Kartenblöcke stehen mit Leerzeile zu den Nachbarblöcken (für Menschen und Maschinen leichter zu lesen, die Ausgabe auf der Seite ändert sich nicht). */
@@ -7669,7 +7736,7 @@ JS;
             if (microtime(true) - $t0 > 30) { $rest++; continue; }
             self::$paare_log = []; self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_weg = []; self::$umbau_keys = []; self::$kurz_offen = 0; self::$neue_namen = [];
             $titel = (string) ($r['post_title'] ?: 'Beitrag ' . $id);
-            try { [, $n] = self::paare_zu_einzelkarten((string) $r['post_content']); } catch (\Throwable $e) { continue; }
+            try { [$cc0, $ne0] = self::endblock_zu_karten((string) $r['post_content']); [, $n] = self::paare_zu_einzelkarten($cc0); $n += $ne0; } catch (\Throwable $e) { continue; }
             $fehlt = 0; $schw = 0; foreach (self::$paare_log as $pl) { if ($pl[0] === 'titel_fehlt') { $fehlt++; } elseif ($pl[0] === 'schwierig') { $schw++; } }
             if (!$n && !$fehlt && !$schw) { continue; }   // nichts zu tun (schon erledigt)
             if ($fehlt || $schw) { $l['probleme'][$id] = ['t' => $titel, 'm' => [$fehlt ? 'Titel über dem Bild fehlt (' . $fehlt . ')' : 'Textlink mitten im Satz (' . $schw . ')']]; continue; }
@@ -9082,7 +9149,7 @@ JS;
         $z = []; $sum = [0, 0, 0];
         foreach ($rows as $r) {
             self::$paare_log = []; self::$umbau_abw = []; self::$umbau_info = []; self::$umbau_keys = [];
-            try { [, $n] = self::paare_zu_einzelkarten((string) $r['post_content']); } catch (\Throwable $e) { continue; }
+            try { [$cc0, $ne0] = self::endblock_zu_karten((string) $r['post_content']); [, $n] = self::paare_zu_einzelkarten($cc0); $n += $ne0; } catch (\Throwable $e) { continue; }
             $fehlt = 0; $schw = 0; foreach (self::$paare_log as $l) { if ($l[0] === 'titel_fehlt') { $fehlt++; } elseif ($l[0] === 'schwierig') { $schw++; } }
             if (!$n && !$fehlt && !$schw) { continue; }
             $sum[0] += $n; $sum[1] += $fehlt; $sum[2] += $schw;

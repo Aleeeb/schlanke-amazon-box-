@@ -2508,4 +2508,20 @@ ok(!in_array('BW', array_map('strtoupper', $mAa->invoke(null)), true), 'Bewegung
 $_POST = ['sab_bw_an' => '1', 'sab_bw_ziel' => '600']; $mBw->invoke(null);
 ok(($GLOBALS['opt']['sab_ab']['e7a90002']['c'] ?? null) === [], 'Bewegungstest: Speichern legt keinen Platzhalter mehr an');
 $GLOBALS['opt'] = $ob6; $_POST = $pb6;
+// ---- 0.92.94: Endblock (sm-box / sm-prods / sm-prod) als Ganzes zu Karten ----
+$GLOBALS['opt']['sab_partner_tag_es'] = $GLOBALS['opt']['sab_partner_tag_es'] ?? '';
+$prod1 = '<div class="sm-prod">[amz_bild asin="B0ENDB0001" land="es"]<a class="sm-pimg" href="x"><img src="a.jpg"></a>[/amz_bild]<p class="sm-ptitle">Schneckenzaun Komplettset | 14-teilig</p><p class="sm-pbtns">[amz_link asin="B0ENDB0001" land="es"]Zum Angebot[/amz_link] [amz_ebay asin="B0ENDB0001" host="www.ebay.es" suche="schneckenzaun"]eBay[/amz_ebay]</p></div>';
+$prod2 = '<div class="sm-prod"><a class="sm-pimg" href="https://www.amazon.es/dp/B0ENDB0002?tag=x"><img src="b.jpg"></a><p class="sm-ptitle">Schneckenkragen &amp; mehr</p><p class="sm-pbtns"><a class="sm-btn" href="https://www.amazon.es/dp/B0ENDB0002?tag=x">Zum Angebot</a> <a href="https://www.ebay.es/sch/i.html?_nkw=kragen&campid=5338619899">eBay</a></p></div>';
+$endb = '<div class="sm-box sm-rec"><p class="sm-kicker">Empfehlungen</p><div class="sm-prods">' . $prod1 . $prod2 . '</div><p class="sm-hint">Achtsamer Konsum</p></div>';
+SAB::$umbau_abw = []; SAB::$umbau_info = []; [$oe1, $ne1] = SAB::endblock_zu_karten($endb);
+ok($ne1 === 1 && strpos($oe1, '[amz_karten][amz_karte asin="B0ENDB0001"') !== false && substr_count($oe1, '[amz_karte ') === 2 && strpos($oe1, 'sm-prod') === false && strpos($oe1, 'class="sm-box sm-rec"') !== false && strpos($oe1, 'Achtsamer Konsum') !== false, 'Endblock: beide Produktkästen werden EIN Kartenblock, Rahmen und Hinweis bleiben (' . $oe1 . ')');
+ok(strpos($oe1, 'titel="Schneckenzaun Komplettset | 14-teilig"') !== false && strpos($oe1, 'titel="Schneckenkragen & mehr"') !== false, 'Endblock: Titel bleibt der des Artikels');
+ok(strpos($oe1, 'ebay="1" host="www.ebay.es" suche="schneckenzaun"') !== false && strpos($oe1, 'campid="5338619899"') !== false, 'Endblock: eBay-Link (Platzhalter und fester Link) wandert in die Karte');
+[$oe2, $ne2] = SAB::endblock_zu_karten($endb, 'B0ENDB0002'); [$oe3, $ne3] = SAB::endblock_zu_karten($endb, 'B0ANDERE99');
+ok($ne2 === 1 && $ne3 === 0 && $oe3 === $endb, 'Endblock: Knopf „Karte“ baut nur die Gruppe mit dem Produkt um');
+$fremd = '<div class="sm-box"><div class="sm-prods">' . $prod1 . '<p>Fremder Text</p></div></div>';
+[$oe4, $ne4] = SAB::endblock_zu_karten($fremd);
+ok($ne4 === 0 && $oe4 === $fremd, 'Endblock: fremder Inhalt neben den Produktkästen: nichts wird geraten');
+SAB::$umbau_abw = []; [$ou, $nu] = SAB::umbau_text('<p>Text.</p>' . $endb);
+ok($nu >= 1 && strpos($ou, 'sm-prod') === false && strpos($ou, '[amz_karte asin="B0ENDB0002"') !== false, 'Endblock: umbau_text (Vorschau, Umbau, Stufen) baut ihn um');
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);
