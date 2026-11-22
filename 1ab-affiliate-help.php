@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.112
+ * Version: 0.92.113
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.112';
+    const VERSION = '0.92.113';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7341,7 +7341,7 @@ JS;
             $fett = preg_match('#<(?:strong|b)\b#i', $inner) === 1;
             $mitte = preg_match('#text-align\s*:\s*center|has-text-align-center|aligncenter#i', (string) ($m[3][0] ?? '')) === 1;
             if (!$fett && !$mitte) { return null; }
-            if (mb_strlen($t) > 100 || preg_match('/[.;]$/u', $t)) { return null; }
+            if (mb_strlen($t) > 100 || (preg_match('/[.;]$/u', $t) && !preg_match('/\b(?:etc|usw|bzw|ca|inkl|ggf|z\. ?B)\.$/iu', $t) && strpos($t, '|') === false)) { return null; }   // Satz mit Punkt ist kein Titel; „… für Kleinmeisen etc.“ oder ein Titel mit senkrechtem Strich schon
             $t = rtrim($t, " \t:");   // „Selbstklebendes Kupferband:“ ist ein Titel; der Doppelpunkt gehört nicht in den Kartentitel
             if ($t === '') { return null; }
         }
