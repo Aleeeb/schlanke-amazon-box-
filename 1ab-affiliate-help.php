@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.109
+ * Version: 0.92.110
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.109';
+    const VERSION = '0.92.110';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6823,6 +6823,7 @@ JS;
                 foreach ($cs[0] as $ci => $cell) { $zellen[$ri][$ci] = $cell; foreach (self::zelle_asins($cell) as $k => $u) { $spalten[$ci][$k] = $u; } }
             }
             $anz = max(array_map('count', $zellen) ?: [0]);
+            ksort($spalten);   // Spaltenreihenfolge links vor rechts
             if ($anz < 1 || count($spalten) !== $anz) { return $t[0]; }
             foreach ($spalten as $sp) { if (count($sp) !== 1) { return $t[0]; } }
             $karten = []; $alle = [];
@@ -6834,9 +6835,10 @@ JS;
                 if ($nur !== '' && $asin !== $nur) { return $t[0]; }
                 if (!self::tag($land)) { return $t[0]; }
                 if (!self::umbau_ok('weg:' . $asin) && self::asin_weg($asin, $land) && !self::weg_umbauen($asin)) { self::$umbau_keys[self::$umbau_abw[] = 'Produkt ' . $asin . ' ist bei Amazon nicht mehr bekannt, Tabelle nicht umgebaut (erst tauschen)'] = 'weg:' . $asin; self::$umbau_weg[$asin] = 1; return $t[0]; }
-                $titel = ''; $attr = ''; $text = ''; $rez = null;
+                $titel = ''; $attr = ''; $text = ''; $rez = null; $eigen_bild = '';
                 foreach ($zellen as $ri => $zs) {
                     $cell = $zs[$ci] ?? ''; $in = preg_replace('#^<t[dh]\b[^>]*>|</t[dh]>$#i', '', $cell);
+                    if ($eigen_bild === '' && stripos($in, '[amz_bild') === false && !preg_match('#<a\b[^>]*href=["\'][^"\']*(?:amazon\.|amzn\.|a\.co/|link\.amazon)#i', $in) && preg_match('#<img\b[^>]*\bsrc=(["\'])(https?://[^"\'\s<>]+)\1#i', $in, $im_)) { $eigen_bild = html_entity_decode($im_[2]); }   // eigenes Produktfoto in der Spalte (kein Amazon-Bild): bleibt als Kartenbild
                     if (($zr = self::zelle_rez($in, $asin)) === null) { self::$umbau_abw[] = 'Tabelle: ein Rezensionslink in der Spalte gehört zu einem anderen Produkt als das Bild (' . $asin . '), Tabelle nicht umgebaut'; return $t[0]; }
                     if ($zr[0] && $rez === null) { $rez = $zr[1]; }
                     if (strpos($in, '[') !== false && stripos($in, '[amz_') !== false) { return $t[0]; }
@@ -6859,7 +6861,7 @@ JS;
                 }
                 if ($titel !== '' && !self::umbau_ok('titel:' . $asin . ':' . md5($titel)) && self::titel_passt_nicht($asin, $land, $titel)) { self::$umbau_keys[self::$umbau_info[] = 'Bild bestimmt den Titel: „' . mb_substr($titel, 0, 60) . '“ weicht vom Namen ab bei ' . self::produktbeschreibung($asin) . ', die Karte zeigt dessen eigenen Namen'] = 'titel:' . $asin . ':' . md5($titel); $titel = ''; }
                 if ($titel !== '') { self::$neue_namen[$asin] = self::$neue_namen[$asin] ?? $titel; }
-                $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . ($text !== '' ? ' text="' . str_replace(['"', '[', ']'], '', $text) . '"' : '') . ($attr !== '' ? ' ebay="1"' . $attr : '') . ($rez !== null ? ' rez="1"' . ($rez !== '' ? ' rez_text="' . $rez . '"' : '') : '') . ']';
+                $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . ($text !== '' ? ' text="' . str_replace(['"', '[', ']'], '', $text) . '"' : '') . ($attr !== '' ? ' ebay="1"' . $attr : '') . ($rez !== null ? ' rez="1"' . ($rez !== '' ? ' rez_text="' . $rez . '"' : '') : '') . ($eigen_bild !== '' ? ' eigenbild="' . esc_attr($eigen_bild) . '"' : '') . ']';
             }
             self::$karten_n += count($karten);
             return '[amz_karten]' . implode('', $karten) . '[/amz_karten]';
@@ -6878,6 +6880,7 @@ JS;
             foreach ($cs[0] as $ci => $cell) { $z[$ri][$ci] = $cell; foreach (self::zelle_asins($cell) as $k => $u) { $sp[$ci][$k] = $u; } }
         }
         $anz = max(array_map('count', $z) ?: [0]);
+        ksort($sp);   // Spaltenreihenfolge: links vor rechts, auch wenn das erste Produkt erst in einer späteren Zeile erkannt wird
         if ($anz < 1 || count($sp) !== $anz) { return null; }
         $alle = [];
         foreach ($sp as $s_) { if (count($s_) !== 1) { return null; } $alle[] = array_values($s_)[0][0]; }
@@ -6886,9 +6889,10 @@ JS;
         foreach ($sp as $ci => $s_) {
             [$asin, $land] = array_values($s_)[0];
             if (!self::tag($land)) { return null; }
-            $titel = ''; $ebay = ''; $rez = null;
+            $titel = ''; $ebay = ''; $rez = null; $eigen_bild = '';
             foreach ($z as $zs) {
                 $in = preg_replace('#^<t[dh]\b[^>]*>|</t[dh]>$#i', '', $zs[$ci] ?? '');
+                if ($eigen_bild === '' && stripos($in, '[amz_bild') === false && !preg_match('#<a\b[^>]*href=["\'][^"\']*(?:amazon\.|amzn\.|a\.co/|link\.amazon)#i', $in) && preg_match('#<img\b[^>]*\bsrc=(["\'])(https?://[^"\'\s<>]+)\1#i', $in, $im_)) { $eigen_bild = html_entity_decode($im_[2]); }   // eigenes Produktfoto in der Spalte bleibt als Kartenbild
                 if (($zr = self::zelle_rez($in, $asin)) === null) { return null; }
                 if ($zr[0] && $rez === null) { $rez = $zr[1]; }
                 if (preg_match('#\[amz_(?:karte|karten|widget|startseite)\b#', $in)) { return null; }
@@ -6904,7 +6908,7 @@ JS;
                     if ($x !== '' && mb_strlen($x) <= 140) { $titel = $x; }
                 }
             }
-            $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . $ebay . ($rez !== null ? ' rez="1"' . ($rez !== '' ? ' rez_text="' . $rez . '"' : '') : '') . ']';
+            $karten[] = '[amz_karte asin="' . $asin . '" land="' . $land . '"' . ($titel !== '' ? ' titel="' . str_replace(['"', '[', ']'], '', $titel) . '"' : '') . $ebay . ($rez !== null ? ' rez="1"' . ($rez !== '' ? ' rez_text="' . $rez . '"' : '') : '') . ($eigen_bild !== '' ? ' eigenbild="' . esc_attr($eigen_bild) . '"' : '') . ']';
         }
         return '[amz_karten]' . implode('', $karten) . '[/amz_karten]';
     }
