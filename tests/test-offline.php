@@ -2556,4 +2556,16 @@ $rfremd = str_replace('asin="B0REZ00002"]Rezensionen', 'asin="B0REZ00001"]Rezens
 ok(SAB::tabelle_zu_karten_platzhalter($rfremd) === null, 'Rezensionslink eines anderen Produkts: Tabelle bleibt');
 $rh = SAB::sc_karten([], '[amz_karte asin="B0REZ00001" land="de" rez="1" rez_text="Rezensionen"][amz_karte asin="B0REZ00002" land="de"]');
 ok(substr_count($rh, 'product-reviews/B0REZ00001') === 1 && substr_count($rh, 'sab-karte-rez') === 1 && strpos($rh, 'product-reviews/B0REZ00002') === false, 'Karte mit rez=1 zeigt Rezensions-Link, ohne rez keinen');
+// ---- 0.92.97: dasselbe Produkt steht kurz danach noch einmal ----
+unset($GLOBALS['opt']['sab_paar_ohne_titel'], $GLOBALS['opt']['sab_paar_titel'], $GLOBALS['opt']['sab_umbau_ok'], $GLOBALS['opt']['sab_paar_wahl']);
+$blk = fn($t) => '<hr /><p style="text-align: center;"><strong>' . $t . '</strong></p><p style="text-align: center;">[amz_bild asin="B00OCCJ00I" land="de" breite="360"][/amz_bild]</p><p style="text-align: center;">Klick auf das Bild leitet zum [amz_link asin="B00OCCJ00I" land="de"]Angebot bei Amazon[/amz_link].</p>';
+foreach (['zweimal' => $blk('Schneckenzaun als Rolle | Beliebig erweiterbar') . '<p>Etwas Text dazwischen.</p>' . str_replace('<hr /><p style="text-align: center;"><strong>Schneckenzaun als Rolle</strong></p>', '<hr />', $blk('Schneckenzaun als Rolle')), 'Text-Link davor' => '<p>Mehr dazu: [amz_link asin="B00OCCJ00I" land="de"]Schneckenzaun[/amz_link].</p>' . $blk('Schneckenzaun als Rolle')] as $nm => $dd) {
+    SAB::$umbau_abw = []; SAB::$umbau_info = []; SAB::$paare_log = []; [$od, $nd] = SAB::paare_zu_einzelkarten($dd);
+    ok($nd === ($nm === 'zweimal' ? 2 : 1), 'Dasselbe Produkt nah beieinander (' . $nm . '): ' . $nd . ' Karten | ' . implode(' / ', SAB::$umbau_abw) . ' | ' . $od);
+}
+$sv_tags = $GLOBALS['opt']['sab_tags']; $GLOBALS['opt']['sab_tags'] = "es=t-21\nde=t-21";
+$tk = '<p>Davor.</p><table><tbody><tr><td>Kupferband</td><td>Maschendraht</td></tr><tr><td>[amz_bild asin="B0D86YQH7H" land="de"][/amz_bild]</td><td>[amz_bild asin="B0FLXZ8BQH" land="de"][/amz_bild]</td></tr><tr><td>[amz_link asin="B0D86YQH7H" land="de"]Angebot bei Amazon[/amz_link]</td><td>[amz_link asin="B0FLXZ8BQH" land="de"]Angebot bei Amazon[/amz_link]</td></tr><tr><td>[amz_link asin="B0D86YQH7H" land="de"]Rezensionen bei Amazon[/amz_link]</td><td>[amz_link asin="B0FLXZ8BQH" land="de"]Rezensionen bei Amazon[/amz_link]</td></tr></tbody></table><p>Danach.</p>';
+SAB::$umbau_abw = []; SAB::$umbau_info = []; [$otk, $ntk] = SAB::umbau_text($tk);
+ok($ntk >= 1 && substr_count($otk, '[amz_karte ') === 2 && substr_count($otk, ' rez="1" rez_text="Rezensionen bei Amazon"') === 2 && strpos($otk, '<table') === false && strpos($otk, 'amz_link') === false, 'Umbau: Tabelle mit Textlinks und „Rezensionen bei Amazon“ wird zu 2 Karten mit Rezensions-Knopf (' . $otk . ' | ' . implode(' / ', SAB::$umbau_abw) . ')');
+$GLOBALS['opt']['sab_tags'] = $sv_tags;
 echo $fail ? "\n$fail FEHLER\n" : "\nAlles bestanden\n"; exit($fail ? 1 : 0);

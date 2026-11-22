@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.96
+ * Version: 0.92.97
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.96';
+    const VERSION = '0.92.97';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -6718,7 +6718,7 @@ JS;
             foreach ($hs[2] as $h) { $u = self::umbau_url($h); if ($u) { $out[$u[1] . '|' . $u[0]] = [$u[1], $u[0]]; } }
         }
         if (preg_match_all('#\[(?:aawp|amazon|amz_(?:bild|produkt|link))\b[^\]]*?(?:fields|asin|box)=(?:"|\'|&\#34;|&quot;)?([A-Za-z0-9]{10})\b[^\]]*\]#i', $cell, $ms)) {
-            foreach ($ms[1] as $a) { $a = strtoupper($a); $l = self::land(''); $out[$a . '|' . $l] = [$a, $l]; }
+            foreach ($ms[1] as $mi => $a) { $a = strtoupper($a); $l = preg_match('#\bland=["\']?([a-z.]+)#i', $ms[0][$mi], $lm) && isset(self::LAENDER[strtolower($lm[1])]) ? strtolower($lm[1]) : self::land(''); $out[$a . '|' . $l] = [$a, $l]; }
         }
         return $out;
     }
@@ -6772,6 +6772,14 @@ JS;
             foreach ($m as $x) {
                 if (!preg_match('#\basin=(["\'])([A-Za-z0-9]{10})\1#i', $x[1], $am) || strtoupper($am[2]) !== $asin) { return null; }
                 $fund = true; if ($text === '') { $text = trim(html_entity_decode(strip_tags($x[2]))); }
+                $in = str_replace($x[0], '', $in);
+            }
+        }
+        if (preg_match_all('#\[amz_link\b([^\]]*)\](.*?)\[/amz_link\]#is', $in, $m, PREG_SET_ORDER)) {   // Textlink, dessen Text auf Rezensionen verweist („Rezensionen bei Amazon“)
+            foreach ($m as $x) {
+                $tx = trim(html_entity_decode(strip_tags($x[2])));
+                if (!preg_match('/rezension|reviews?\b|avis\b|reseñas|recensioni|opiniones/iu', $tx) || !preg_match('#\basin=([\"\'])([A-Za-z0-9]{10})\1#i', $x[1], $am) || strtoupper($am[2]) !== $asin) { continue; }
+                $fund = true; if ($text === '') { $text = $tx; }
                 $in = str_replace($x[0], '', $in);
             }
         }
@@ -7208,6 +7216,20 @@ JS;
      * @return array{0:string,1:int} [neuer Text, Zahl der umgebauten Gruppen]
      */
     public static function endblock_zu_karten(string $c, string $nur = ''): array {
+        $nt = 0;
+        if ($nur === '' && stripos($c, '<table') !== false && stripos($c, '[amz_') !== false && get_option('sab_karten_umbau') !== '0') {   // Produkttabellen mit Plugin-Platzhaltern (Bild, Titel, Textlink, Rezensionen, eBay): je Spalte eine Karte, solange Bild und Textlink noch beieinander stehen
+            $c = preg_replace_callback('#<table\b.*?</table>#is', function ($t) use (&$nt) {
+                if (stripos($t[0], '[amz_') === false) { return $t[0]; }
+                $neu = self::tabelle_zu_karten_platzhalter($t[0]);
+                if ($neu === null) { return $t[0]; }
+                $nt++; self::$umbau_info[] = 'Produkttabelle mit Platzhaltern wird zu Karten (je Spalte eine Karte)'; return $neu;
+            }, $c) ?? $c;
+        }
+        [$c, $ng] = self::endblock_gruppen($c, $nur);
+        return [$c, $ng + $nt];
+    }
+
+    private static function endblock_gruppen(string $c, string $nur = ''): array {
         if (stripos($c, 'sm-prod') === false || get_option('sab_endblock_umbauen', '1') === '0') { return [$c, 0]; }
         $n = 0; $off = 0;
         while (preg_match('#<div\b[^>]*\bclass=(["\'])(?:[^"\']*\s)?sm-prods(?:\s[^"\']*)?\1[^>]*>#i', $c, $m, PREG_OFFSET_CAPTURE, $off)) {
@@ -7270,7 +7292,7 @@ JS;
      */
     public static function paare_zu_einzelkarten(string $c, string $nur = '', bool $erzwingen = false): array {   // $nur: nur dieses Produkt (Klick auf „Karte“ im Frontend), $erzwingen: auch ohne erkannten Titel und bei Textlink im Satz
         if (get_option('sab_paare_umbauen', '1') === '0' || stripos($c, '[amz_link') === false || stripos($c, '[amz_bild') === false) { return [$c, 0]; }
-        $n = 0; $versucht = [];
+        $n = 0; $versucht = []; $titel_asin = [];
         for ($runde = 0; $runde < 60; $runde++) {
             if (!preg_match_all('#\[amz_bild\b([^\]]*)\basin="([A-Za-z0-9]{10})"([^\]]*)\].*?\[/amz_bild\]#is', $c, $A, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { break; }
             if (!preg_match_all('#\[amz_link\b[^\]]*\basin="([A-Za-z0-9]{10})"[^\]]*\](.*?)\[/amz_link\]#is', $c, $B, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) { break; }
@@ -7287,7 +7309,7 @@ JS;
                         if ($gtt !== '' && mb_strlen($gtt) <= 120) { $gt = $gtt; }
                     }
                     if ($gt === null && ($boff - $aend > 1500 || preg_match('#<hr|<h[1-6]\b|\[amz_(?:karte|karten|produkt|bild)\b|\[/amz_karten#i', $lueck))) { break; }
-                    $sig = md5($a[0][0] . $b[0][0]);
+                    $sig = md5($a[0][0] . $b[0][0]) . ":" . $aoff;
                     if (isset($versucht[$sig])) { break; }
                     $versucht[$sig] = 1;
                     if (($sp = self::in_spalten($c, $aoff)) !== '' && !self::umbau_ok('spalte:' . $asin)) {   // große Einzelkarte nur, wenn das Produkt allein steht: in Zweierboxen bleibt es, wie es ist
@@ -7334,6 +7356,8 @@ JS;
                     $eigen = trim((string) (((array) get_option('sab_paar_titel', []))[$asin] ?? ''));
                     if ($eigen === '' && $gt !== null) { $eigen = $gt; }
                     if ($eigen === '' && $alt) { $eigen = (string) $alt[1]; }   // der Titel, der über dem Bild stand, ist der Kartentitel (kein automatisch erzeugter)
+                    if ($eigen === '' && isset($titel_asin[$asin])) { $eigen = $titel_asin[$asin]; self::$umbau_info[] = 'Dasselbe Produkt ' . $asin . ' steht noch einmal ohne Titel: die Karte nimmt den Titel der ersten Stelle („' . mb_substr($eigen, 0, 50) . '“)'; }
+                    elseif ($eigen !== '') { $titel_asin[$asin] = $eigen; }
                     if ($eigen !== '') { $karte = str_replace(' stil="einzel"', ' titel="' . esc_attr($eigen) . '" stil="einzel"', $karte); }
                     if (!$alt && $eigen === '' && !$erzwingen && get_option('sab_paar_ohne_titel', '0') !== '1' && !self::umbau_ok('paar:' . $asin)) {   // kein Titel erkannt: nicht raten, Redakteur entscheidet in der Vorschau
                         $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ': über dem Bild wurde kein Titel erkannt, nicht umgewandelt. Unten den Titel eintragen oder bestätigen.';
