@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.116
+ * Version: 0.92.118
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.116';
+    const VERSION = '0.92.118';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7255,11 +7255,14 @@ JS;
             $rest .= substr($inner, $off, $s0 - $off); $off = $e0 + 6;
             $p = substr($inner, $i0, $e0 - $i0);
             $as = []; $land = '';
-            if (preg_match_all('#\[amz_(?:bild|link|produkt)\b[^\]]*\basin="([A-Za-z0-9]{10})"([^\]]*)\]#i', $p, $mm, PREG_SET_ORDER)) {
+            if (preg_match_all('#\[amz_(?:bild|link|produkt|karte)\b[^\]]*\basin="([A-Za-z0-9]{10})"([^\]]*)\]#i', $p, $mm, PREG_SET_ORDER)) {   // auch eine schon gesetzte Karte im Produktkasten gilt als Produkt (halb umgebauter Endblock)
                 foreach ($mm as $x) { $as[strtoupper($x[1])] = 1; if ($land === '' && preg_match('#\bland="([a-z.]+)"#i', $x[2], $lm)) { $land = strtolower($lm[1]); } }
             }
             if (preg_match_all('#<a\b[^>]*href=(["\'])(.*?)\1#is', $p, $hh)) {
                 foreach ($hh[2] as $u) { $r = self::umbau_url($u, true); if ($r) { $as[$r[1]] = 1; if ($land === '') { $land = $r[0]; } } }
+            }
+            if (count($as) > 1 && preg_match_all('#\[amz_karte\b[^\]]*\basin="([A-Za-z0-9]{10})"#i', $p, $kk_) && count(array_unique(array_map('strtoupper', $kk_[1]))) === 1) {   // der Kasten enthält schon eine Karte: sie bestimmt das Produkt, ein abweichender Link darin wird ignoriert
+                $as = [strtoupper($kk_[1][0]) => 1]; self::$umbau_info[] = 'Endblock: Produktkasten mit Karte ' . strtoupper($kk_[1][0]) . ' und abweichendem Link: die Karte bestimmt das Produkt';
             }
             if (count($as) !== 1) { self::$umbau_abw[] = 'Endblock: ein Produktkasten hat ' . (count($as) ?: 'kein') . ' erkennbare Produkte, der Endblock wird nicht umgebaut'; return null; }
             $asin = (string) array_key_first($as); $alle[] = $asin;
