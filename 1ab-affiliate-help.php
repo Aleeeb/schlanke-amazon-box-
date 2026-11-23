@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.115
+ * Version: 0.92.116
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.115';
+    const VERSION = '0.92.116';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -7342,9 +7342,10 @@ JS;
         if (!preg_match($re, $vor, $m, PREG_OFFSET_CAPTURE)) { return null; }
         $kopf = ($m[2][0] ?? '') !== '';
         $inner = $kopf ? $m[2][0] : ($m[4][0] ?? '');
-        if (stripos($inner, '<a ') !== false || stripos($inner, '[amz_') !== false || stripos($inner, '<img') !== false) { return null; }
+        if (preg_match('#<a\b[^>]*href=["\'][^"\']*(?:amazon\.|amzn\.|a\.co/|link\.amazon|ebay\.)#i', $inner) || stripos($inner, '[amz_') !== false || stripos($inner, '<img') !== false) { return null; }   // Link auf eine eigene Seite im Titel („Slug Collars | …“, nur ein Teil verlinkt) ist erlaubt, ein Amazon-/eBay-Link nicht
         $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($inner), ENT_QUOTES, 'UTF-8')));
         if ($t === '' || mb_strlen($t) > 120) { return null; }
+        if (stripos($inner, '<a ') !== false) { self::$umbau_info[] = 'Der alte Titel „' . mb_substr($t, 0, 50) . '“ enthielt einen Link auf eine eigene Seite; mit dem alten Titel über der Karte entfällt dieser Link (bitte bei Bedarf an anderer Stelle im Text verlinken)'; }
         if ($kopf && in_array(strtolower((string) $m[1][0]), ['h2', 'h3'], true)) {   // h2/h3 gliedern den Artikel: nur als Titel nehmen, wenn sie zum Produkt passen (sonst bliebe die Gliederung nicht stehen)
             $norm = static function (string $x): array { return array_values(array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($x)), static function ($w) { return mb_strlen($w) > 2; })); };
             $tw = $norm($t); $ok = false;
@@ -7360,6 +7361,19 @@ JS;
             if ($t === '') { return null; }
         }
         return [$fenster + $m[0][1], $t];
+    }
+
+    /** Steht über dem Bild noch ein Text, der wie ein Titel aussieht (Überschrift, fette oder zentrierte kurze Zeile), den titel_davor() nicht als Titel genommen hat? Dann würde die Karte einen zweiten Titel bekommen. @return string der verdächtige Text oder '' */
+    private static function titel_verdacht(string $c, int $pos): string {
+        $fenster = max(0, $pos - 600); $vor = substr($c, $fenster, $pos - $fenster);
+        $re = '#(?:<!--\s*wp:(?:heading|paragraph)[^>]*-->\s*)?(?:<(h[2-6])\b[^>]*>((?:(?!</h[1-6]>).)*?)</\1>|<p\b([^>]*)>((?:(?!</?p\b).)*?)</p>)\s*(?:<!--\s*/wp:(?:heading|paragraph)\s*-->\s*)?$#is';
+        if (!preg_match($re, $vor, $m)) { return ''; }
+        $kopf = ($m[2] ?? '') !== ''; $inner = $kopf ? $m[2] : ($m[4] ?? '');
+        if (stripos($inner, '[amz_') !== false || stripos($inner, '<img') !== false) { return ''; }
+        $t = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($inner), ENT_QUOTES, 'UTF-8')));
+        if ($t === '' || mb_strlen($t) > 140) { return ''; }
+        if (!$kopf && preg_match('#<(?:strong|b)\b#i', $inner) !== 1 && preg_match('#text-align\s*:\s*center|has-text-align-center|aligncenter#i', (string) ($m[3] ?? '')) !== 1) { return ''; }
+        return $t;
     }
 
     /**
@@ -7443,6 +7457,11 @@ JS;
                     if ($eigen !== '') { $karte = str_replace(' stil="einzel"', ' titel="' . esc_attr($eigen) . '" stil="einzel"', $karte); }
                     if ($klein) { $karte = str_replace(' stil="einzel"', '', $karte); }
                     if ($eigen === '' && !$alt && trim((string) (self::produkte()[$asin] ?? '')) !== '') { self::$umbau_info[] = 'Kein Titel über dem Bild bei ' . $asin . ': die Karte zeigt den Kurznamen aus der Produktliste („' . mb_substr(trim((string) self::produkte()[$asin]), 0, 60) . '“)'; }   // Kurzname aus „Produkte und Ersatzlisten“ (Handdaten) ersetzt den fehlenden Titel; die Karte folgt späteren Änderungen am Kurznamen
+                    if (!$alt && $gt === null && !$erzwingen && !self::umbau_ok('paar:' . $asin) && ($vd_ = self::titel_verdacht($c, $as_[0])) !== '') {   // über dem Bild steht ein Titel, der nicht erkannt wurde: nicht still einen zweiten Titel in die Karte setzen
+                        $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ': über dem Bild steht „' . mb_substr($vd_, 0, 60) . '“, das wie ein Titel aussieht, aber nicht als Titel erkannt wurde. Die Karte würde einen zweiten Titel bekommen, deshalb nicht umgewandelt. Unten den Titel eintragen oder bestätigen.';
+                        self::$umbau_keys[self::$umbau_abw[] = $msg] = 'paar:' . $asin; self::$paare_log[$asin] = ['titel_fehlt', '', $text];
+                        continue 2;
+                    }
                     if (!$alt && $eigen === '' && !$erzwingen && get_option('sab_paar_ohne_titel', '0') !== '1' && !self::umbau_ok('paar:' . $asin) && trim((string) (self::produkte()[$asin] ?? '')) === '') {   // kein Titel erkannt: nicht raten, Redakteur entscheidet in der Vorschau
                         $msg = 'Bild und Textlink („' . $text . '“) zu ' . $asin . ': über dem Bild wurde kein Titel erkannt, nicht umgewandelt. Unten den Titel eintragen oder bestätigen.';
                         self::$umbau_keys[self::$umbau_abw[] = $msg] = 'paar:' . $asin; self::$paare_log[$asin] = ['titel_fehlt', '', $text];
