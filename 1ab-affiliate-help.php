@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 1AB Affiliate Help
  * Description: Kleiner Ersatz für AAWP. Zeigt Amazon-Produktbilder, Namen und Textlinks über die Creators API. Bilder kommen vom eigenen Server. Erkennt ausgefallene Produkte und setzt den nächsten Ersatz aus einer Liste ein.
- * Version: 0.92.118
+ * Version: 0.93.1
  * Requires at least: 5.0
  * Requires PHP: 7.4
  */
@@ -54,7 +54,7 @@ final class SAB {
     const TTL      = DAY_IN_SECONDS;      // Amazon: Bilder und Links höchstens 1 Tag zwischenspeichern
     const BILD_MAX = DAY_IN_SECONDS + HOUR_IN_SECONDS; // Amazon-Regel: Bilder höchstens 1 Tag; ältere werden nie gezeigt (1 h Puffer für den Cron)
 
-    const VERSION = '0.92.118';
+    const VERSION = '0.93.1';
     const NAME = '1AB Affiliate Help';   // Anzeigename (Menü, Überschrift, Mails); Ordner, Slug und Update-Weg bleiben bei „schlanke-amazon-box“, damit die Auto-Updates weiterlaufen
     const FAV_TEXT = ['de' => 'Unsere Empfehlung', 'es' => 'Nuestra elección', 'fr' => 'Notre choix', 'it' => 'La nostra scelta', 'co.uk' => 'Our pick', 'com' => 'Our pick'];
     const PREIS_STAND = ['de' => 'Stand', 'es' => 'a fecha', 'fr' => 'au', 'it' => 'al', 'co.uk' => 'as of', 'com' => 'as of'];
@@ -588,6 +588,14 @@ final class SAB {
         update_option('sab_lern_w', ['w' => $w, 'runden' => $runden, 'log' => array_slice($log, -200)], false);
     }
 
+    /** Erledigte Testprodukte (bei „passt“ gespeichert), eingeklappt unten im Reiter. */
+    private static function lernen_erledigt_html(array $namen): string {
+        $dn = (array) get_option('sab_lern_done', []); if (!$dn) { return ''; }
+        $h = '<details style="margin:12px 0"><summary><strong>Erledigt (' . count($dn) . ')</strong></summary><ul style="margin:6px 0 6px 18px;list-style:disc">';
+        foreach (array_reverse($dn, true) as $a => $z) { $h .= '<li>' . esc_html(($namen[$a] ?? '') ?: (string) $a) . ' <code>' . esc_html((string) $a) . '</code> · ' . esc_html((string) ($z['t'] ?? '')) . ' · passend: ' . esc_html(implode(', ', array_map(fn($q) => ($namen[$q] ?? '') ?: (string) $q, (array) ($z['n'] ?? [])))) . '</li>'; }
+        return $h . '</ul><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_done_leer"><button class="button button-small">Liste leeren</button></form></details>';
+    }
+
     /** Reiter „Lernen“: Statistik, Gewichte, Ausfallsimulation. */
     private static function lernen_html(): string {
         $ld = self::lern_daten(); $w = $ld['w']; $land = self::land(''); $d = (array) self::uebersicht_daten($land, false); $namen = self::produkte();
@@ -601,24 +609,69 @@ final class SAB {
             . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_import"><textarea name="sab_lern_json" rows="3" class="large-text code" placeholder="Lerndatei der anderen Seite hier einfügen"></textarea><p><button class="button">Importieren</button></p></form>'
             . '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_repo"><p><label><input type="checkbox" name="sab_lern_repo" value="1"' . (get_option('sab_lern_repo') ? ' checked' : '') . '> Gemeinsame Lerndatei aus dem Repo täglich abrufen (reiner Download, es werden keine Daten gesendet)</label> <button class="button">Speichern</button> <button class="button" name="sab_jetzt" value="1">Jetzt abrufen</button></p></form>';
         $fm = function (string $form, array $extra = [], string $text = '', string $klasse = 'button') { $i = ''; foreach ($extra as $k => $v) { $i .= '<input type="hidden" name="' . esc_attr($k) . '" value="' . esc_attr((string) $v) . '">'; } return '<form method="post" style="display:inline">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="' . $form . '">' . $i . '<button class="' . $klasse . '">' . esc_html($text) . '</button></form> '; };
-        if (empty($sim['alt'])) { return $h . '<p>' . $fm('lernen_start', [], 'Ausfall simulieren', 'button button-primary button-hero') . '</p>'; }
-        $alt = (string) $sim['alt']; $liste = (array) $sim['liste']; $pos = (int) ($sim['pos'] ?? 0);
-        $h .= '<div style="border:2px solid #2271b1;background:#fff;padding:8px 16px;margin:12px 0"><h3>Angenommen, dieses Produkt fällt aus:</h3><p><strong>' . esc_html(self::anzeige_name($alt, $d, [])) . '</strong> <code>' . esc_html($alt) . '</code>' . (isset($d['items'][$alt]['preis']) ? ' · ' . esc_html((string) $d['items'][$alt]['preis']) : '') . '</p><div style="display:flex;flex-wrap:wrap;gap:12px">';
-        $gezeigt = 0;
-        foreach (array_slice($liste, $pos, 4, true) as $i => $c) {
-            $a = (string) $c['asin']; $x = (array) ($d['items'][$a] ?? []); $gezeigt++;
-            $h .= '<div style="border:1px solid #c3c4c7;padding:8px;width:260px"><div style="display:flex;gap:8px;align-items:center">' . self::mini_bild($a, $x) . '<span><strong>' . esc_html(($namen[$a] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''))) . '</strong><br><small>Score ' . (int) ($c['score'] ?? 0) . ' · ' . esc_html((string) ($x['preis'] ?? '')) . ' · <code>' . esc_html($a) . '</code></small></span></div><p style="margin:6px 0 0">' . $fm('lernen_passt', ['sab_rang' => $i], 'passt', 'button button-primary') . '</p></div>';
+        // Gewichte von Hand einstellen (Alexander 24.11.): Standard bleibt, das Lernen verschiebt sie weiter
+        $gf = '<h3>Gewichte von Hand einstellen</h3><p class="description">Wie wichtig ist was bei der Frage „passt dieses Produkt als Ersatz?“ (Titelähnlichkeit, Produktart, Preisnähe) und bei der Reihenfolge der Vorschläge (Score, Provision, Lieferung/Prime)? 0 bis 3, größer = wichtiger.</p><form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_gewichte"><p>';
+        foreach (self::LERN_NAMEN as $k => $nm) { $gf .= '<label style="display:inline-block;margin:0 12px 6px 0">' . esc_html($nm) . ' <input type="number" step="0.1" min="0" max="3" style="width:70px" name="sab_lw[' . esc_attr($k) . ']" value="' . esc_attr((string) round((float) $w[$k], 2)) . '"></label>'; }
+        $h .= $gf . '<button class="button">Gewichte speichern</button></p></form>';
+        if (empty($sim['alt'])) {
+            $schw = self::lern_schwelle(); $trotz = (array) get_option('sab_trotz', []); $sc = [];
+            foreach (self::alle_asins() as $a) { if (isset($d['items'][$a])) { $sc[$a] = (int) self::score(array_merge($d['items'][$a], ['trotz' => isset($trotz[$a])]))[0]; } }
+            $fertig = (array) get_option('sab_lern_done', []); asort($sc); $schwach = array_keys(array_filter($sc, fn($v, $k) => $v < $schw && !isset($fertig[$k]), ARRAY_FILTER_USE_BOTH)); $fund = self::fundstellen($schwach);
+            $h .= '<h3>Produkte mit schwachem Score</h3><form method="post" style="margin:6px 0">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_schwelle"><label>Zeige Produkte mit Score unter <input type="number" min="1" max="100" style="width:70px" name="sab_lern_schwelle" value="' . (int) $schw . '"></label> <button class="button">Übernehmen</button></form>';
+            if (!$schwach) { return $h . '<p><em>Keine offenen Produkte unter dieser Schwelle.</em></p>' . self::lernen_erledigt_html($namen); }
+            $h .= '<p class="description">' . count($schwach) . ' Produkte, schwächste zuerst. „Testen“ zeigt das Produkt groß und dazu bis zu 12 Ersatzvorschläge; es wird nichts geändert.</p><table class="widefat striped" style="max-width:1100px"><thead><tr><th></th><th>Produkt</th><th>Score</th><th>Daten</th><th>Seiten</th><th></th></tr></thead><tbody>';
+            foreach (array_slice($schwach, 0, 40) as $a) {
+                $x = (array) $d['items'][$a];
+                $h .= '<tr><td style="width:72px">' . self::mini_bild($a, $x) . '</td><td><strong>' . esc_html(self::anzeige_name($a, $d, [])) . '</strong><br><code>' . esc_html($a) . '</code></td><td><strong>' . (int) $sc[$a] . '</strong></td><td><small>' . self::lern_datenzeile($x) . '</small></td><td>' . count((array) ($fund[$a] ?? [])) . '</td><td>' . $fm('lernen_start', ['sab_alt' => $a], 'Testen', 'button button-primary') . '</td></tr>';
+            }
+            return $h . '</tbody></table>' . (count($schwach) > 40 ? '<p class="description">Die ersten 40 sind gezeigt; Schwelle senken, um die schlechtesten zuerst zu sehen.</p>' : '') . self::lernen_erledigt_html($namen);
         }
-        $h .= '</div><p>' . ($gezeigt ? $fm('lernen_keiner', ['sab_pos' => $pos], 'keiner davon passt, weitere zeigen') : '<em>Keine weiteren Vorschläge.</em> ') . $fm('lernen_ende', [], 'Simulation beenden') . '</p></div>';
+        $alt = (string) $sim['alt']; $liste = (array) $sim['liste']; $pos = (int) ($sim['pos'] ?? 0); $xa = (array) ($d['items'][$alt] ?? []); $trotz = (array) get_option('sab_trotz', []);
+        $sca = $xa ? (int) self::score(array_merge($xa, ['trotz' => isset($trotz[$alt])]))[0] : 0;
+        $h .= '<div style="border:2px solid #b32d2e;background:#fff8f8;padding:12px 16px;margin:12px 0"><h3 style="margin-top:0">Dieses Produkt soll ersetzt werden:</h3><div style="display:flex;gap:16px;align-items:center">' . self::mini_bild($alt, $xa, 140) . '<div><p style="font-size:15px;margin:0 0 4px"><strong>' . esc_html(self::anzeige_name($alt, $d, [])) . '</strong> <code>' . esc_html($alt) . '</code></p><p style="margin:0 0 4px">Score <strong>' . $sca . '</strong>' . (isset($xa['preis']) && $xa['preis'] !== '' ? ' · ' . esc_html((string) $xa['preis']) : '') . '</p><p style="margin:0"><small>' . self::lern_datenzeile($xa) . '</small></p></div></div></div>';
+        $h .= '<div style="border:2px solid #2271b1;background:#fff;padding:8px 16px;margin:12px 0"><h3>Welcher Vorschlag passt als Ersatz?</h3><div style="display:flex;flex-wrap:wrap;gap:12px">';
+        $gezeigt = 0;
+        $kachel = function (string $t, string $v) { return '<span style="flex:1 1 90px;min-width:90px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:6px;padding:4px 6px;text-align:center"><span style="display:block;font-size:11px;color:#50575e">' . esc_html($t) . '</span><span style="display:block;font-size:18px;font-weight:700">' . esc_html($v) . '</span></span>'; };
+        $h .= '<form method="post">' . wp_nonce_field('sab_speichern', '_wpnonce', true, false) . '<input type="hidden" name="sab_tab" value="lernen"><input type="hidden" name="sab_form" value="lernen_passt"><div style="display:flex;flex-wrap:wrap;gap:12px">';
+        foreach (array_slice($liste, $pos, self::LERN_ANZAHL, true) as $i => $c) {
+            $a = (string) $c['asin']; $x = (array) ($d['items'][$a] ?? []); $f = (array) ($c['f'] ?? []); $gezeigt++;
+            $pc = function (string $k) use ($f) { return round(100 * (float) ($f[$k] ?? 0)) . ' %'; };
+            $st = isset($x['sterne']) && $x['sterne'] !== null ? '★ ' . str_replace('.', ',', (string) $x['sterne']) : '★ –';
+            $an = isset($x['anzahl']) && $x['anzahl'] !== null ? (string) (int) $x['anzahl'] : '–';
+            $lt = isset($x['liefertage']) && $x['liefertage'] !== null ? 'Ø ' . str_replace('.', ',', (string) round((float) $x['liefertage'], 1)) . ' Tage' : '–';
+            $h .= '<div style="border:1px solid #c3c4c7;padding:10px;flex:1 1 320px;max-width:100%;box-sizing:border-box"><div style="display:flex;gap:10px;align-items:center">' . self::mini_bild($a, $x) . '<span style="flex:1;min-width:0"><strong>' . esc_html(($namen[$a] ?? '') ?: self::kurzname_aus_titel((string) ($x['titel'] ?? ''))) . '</strong><br><small>' . esc_html((string) ($x['preis'] ?? '')) . ' · <code>' . esc_html($a) . '</code></small></span><span style="text-align:center;flex:none"><span style="display:block;font-size:34px;line-height:1;font-weight:800;color:#2271b1">' . (int) ($c['score'] ?? 0) . '</span><small>Score</small></span></div>'
+                . '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">' . $kachel('Titel', $pc('titel')) . $kachel('Produktart', $pc('art')) . $kachel('Preis', $pc('preis')) . $kachel('Provision', $pc('prov')) . $kachel('Lieferung/Prime', $pc('liefer')) . '</div>'
+                . '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">' . $kachel('Sterne', $st) . $kachel('Bewertungen', $an) . $kachel('Lieferzeit', $lt) . '</div>'
+                . '<p style="margin:4px 0"><small>' . self::lern_datenzeile($x) . '</small></p>'
+                . '<label style="display:block;font-size:16px;font-weight:600;padding:6px 0"><input type="checkbox" name="sab_rang[]" value="' . (int) $i . '" style="width:22px;height:22px;margin-right:8px"> passt</label></div>';
+        }
+        $h .= '</div>' . ($gezeigt ? '<p><button class="button button-primary button-large">Auswahl speichern (alle angehakten passen)</button></p>' : '') . '</form>';
+        $h .= '<p>' . ($gezeigt ? $fm('lernen_keiner', ['sab_pos' => $pos], 'keiner davon passt') : '<em>Keine weiteren Vorschläge.</em> ') . $fm('lernen_ende', [], 'Simulation beenden') . '</p></div>' . self::lernen_erledigt_html($namen);
         return $h;
+    }
+
+    const LERN_ANZAHL = 12;   // Ersatzvorschläge je Test (Alexander 24.11.: 8 bis 12)
+
+    /** Schwelle für „schwacher Score“ im Reiter Lernen (Standard 40). */
+    public static function lern_schwelle(): int { return max(1, min(100, (int) get_option('sab_lern_schwelle', 40))); }
+
+    /** Kurze Datenzeile eines Produkts wie in der Übersicht: Sterne, Prime, Lieferzeit, Versand, Provision. */
+    private static function lern_datenzeile(array $x): string {
+        $t = [];
+        $t[] = isset($x['sterne']) && $x['sterne'] !== null ? '&#9733; ' . esc_html(str_replace('.', ',', (string) $x['sterne'])) . ' (' . (int) ($x['anzahl'] ?? 0) . ')' : 'Sterne fehlen';
+        $t[] = self::prime_zeichen($x['prime'] ?? null, !empty($x['prime_unsicher']));
+        $t[] = isset($x['liefertage']) && $x['liefertage'] !== null ? '&#128666; ' . esc_html(str_replace('.', ',', (string) round((float) $x['liefertage'], 1))) . ' T' : 'Lieferzeit fehlt';
+        $t[] = isset($x['lieferkosten']) && $x['lieferkosten'] !== null ? ((float) $x['lieferkosten'] <= 0 ? 'Versand gratis' : 'Versand ' . esc_html(str_replace('.', ',', (string) $x['lieferkosten']))) : 'Versand ?';
+        $pv = self::provision_satz($x); $t[] = $pv !== null ? esc_html(str_replace('.', ',', (string) $pv)) . ' % Prov.' : 'Provision fehlt';
+        return implode(' · ', $t);
     }
 
     const ERSATZ_SCORE = 50;   // darunter gilt ein oft verwendetes Produkt als Kandidat für gezielte Ersatzsuche
 
     /** Produkte, die auf mehr als einer Seite stehen und einen niedrigen Score haben (schwächste zuerst). @param array<string,int> $scores @param array<string,int> $seiten @return string[] */
-    public static function ersatz_auftraege(array $scores, array $seiten, int $schwelle = self::ERSATZ_SCORE): array {
+    public static function ersatz_auftraege(array $scores, array $seiten, int $schwelle = self::ERSATZ_SCORE, int $min_seiten = 2): array {
         $o = [];
-        foreach ($scores as $a => $sc) { if (($seiten[$a] ?? 0) >= 2 && $sc < $schwelle) { $o[(string) $a] = (int) $sc; } }
+        foreach ($scores as $a => $sc) { if (($seiten[$a] ?? 0) >= $min_seiten && $sc < $schwelle) { $o[(string) $a] = (int) $sc; } }
         asort($o);
         return array_keys($o);
     }
@@ -628,13 +681,13 @@ final class SAB {
         $land = self::land(''); $trotz = (array) get_option('sab_trotz', []); $namen = self::produkte(); $sc = []; $alle = self::alle_asins();
         foreach ($alle as $a) { if (isset($d['items'][$a])) { $sc[$a] = (int) self::score(array_merge($d['items'][$a], ['trotz' => isset($trotz[$a])]))[0]; } }
         $fund = self::fundstellen(array_keys($sc)); $seiten = []; foreach ($fund as $a => $f) { $seiten[$a] = count($f); }
-        $liste = self::ersatz_auftraege($sc, $seiten);
-        if (!$liste) { return '<p class="description">Gezielte Ersatzsuche: keine Produkte auf mehr als einer Seite mit Score unter ' . self::ERSATZ_SCORE . '.</p>'; }
+        $schw = self::lern_schwelle(); $liste = self::ersatz_auftraege($sc, $seiten, $schw, 1);   // alle Produkte unter der Schwelle aus dem Reiter Lernen, auch wenn sie nur auf einer Seite stehen
+        if (!$liste) { return '<p class="description">Gezielte Ersatzsuche: keine Produkte mit Score unter ' . $schw . '.</p>'; }
         $host = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST))); $dat = gmdate('Y-m-d');
-        $p = "Aufgabe: Suche bei Amazon (" . self::LAENDER[$land][0] . ") für die folgenden Produkte der Seite $host je 3 bis 5 Ersatzprodukte gleicher Produktart, die besser sind (mehr Sterne, mehr Bewertungen, Prime oder schnelle Lieferung, niedrige Lieferkosten, hohe Provision). Regeln: mindestens ca. 4 Sterne und 30 Bewertungen, lieferbar, keine tötenden oder verletzenden Produkte (keine Netze, Fallen, Gift, Kieselgur, Eierschalen), möglichst auch in UK/USA (ggf. CA/AU) erhältlich. Lies für jeden Ersatz die Handdaten und die Provision (SiteStripe) aus.\n\n"
+        $p = "Aufgabe: Suche bei Amazon (" . self::LAENDER[$land][0] . ") für die folgenden Produkte der Seite $host je 8 bis 12 Ersatzprodukte, möglichst fast dasselbe Produkt (ähnlicher Titel, gleiche Produktart, ähnlicher Preis), die besser sind (mehr Sterne, mehr Bewertungen, Prime oder schnelle Lieferung, niedrige Lieferkosten, hohe Provision). Regeln: mindestens ca. 4 Sterne und 30 Bewertungen, lieferbar, keine tötenden oder verletzenden Produkte (keine Netze, Fallen, Gift, Kieselgur, Eierschalen), möglichst auch in UK/USA (ggf. CA/AU) erhältlich. Lies für jeden Ersatz die Handdaten und die Provision (SiteStripe) aus.\n\n"
            . "Ausgabe 1 (Ersatz-Datenbank), je Ersatz eine Zeile: `Produktart | $land | ASIN | neu | $dat | Quelle`. Produktart = die ALTE ASIN des Produkts unten.\nAusgabe 2 (Handdaten), je Ersatz eine Zeile: `ASIN | Sterne | Anzahl | Prime ja/nein | Lieferzeit je Stadt | $dat | Provision % | Lieferkosten (Betrag, 0 oder gratis)`.\nNichts live ändern; die Zeilen gehen an den Plugin-Thread.\n\nProdukte (" . count($liste) . "):\n";
         foreach (array_slice($liste, 0, 40) as $i => $a) { $p .= ($i + 1) . '. ' . $a . ' | ' . trim(preg_replace('/\s+/', ' ', ($namen[$a] ?? '') ?: mb_substr((string) ($d['items'][$a]['titel'] ?? ''), 0, 90))) . ' | Score ' . $sc[$a] . ' | auf ' . $seiten[$a] . " Seiten\n"; }
-        return '<h4>Gezielte Ersatzsuche (' . count($liste) . ' Produkte)</h4><p class="description">Produkte, die auf mehr als einer Seite stehen und einen Score unter ' . self::ERSATZ_SCORE . ' haben. Auftrag für die PC-/Mac-Sitzung, zum Kopieren:</p><textarea readonly rows="8" class="large-text code">' . esc_textarea($p) . '</textarea>';
+        return '<h4>Gezielte Ersatzsuche (' . count($liste) . ' Produkte)</h4><p class="description">Produkte mit einem Score unter ' . $schw . ' (Schwelle im Reiter Lernen). Auftrag für die PC-/Mac-Sitzung, zum Kopieren:</p><textarea readonly rows="8" class="large-text code">' . esc_textarea($p) . '</textarea>';
     }
 
     /** Übersicht der Ersatz-Datenbank: Score und Handdaten je Eintrag, Knopf „geprüft“, und Lücken (Produktarten mit weniger als zwei Ersatzprodukten im Land dieser Webseite). */
@@ -8847,8 +8900,9 @@ JS;
     }
 
     /** Kleines Bild (Admin-Bereich, direkt von Amazon bzw. aus dem eigenen Bildspeicher) für Austausch-Zeilen. */
-    private static function mini_bild(string $asin, array $x): string {
+    private static function mini_bild(string $asin, array $x, int $px = 64): string {
         $u = !empty($x['bilder'][0]) ? (string) $x['bilder'][0] : '';
+        if ($px !== 64) { $h_ = self::mini_bild($asin, $x); return str_replace(['width:64px;height:64px', 'width:64px; height:64px'], ['width:' . $px . 'px;height:' . $px . 'px', 'width:' . $px . 'px;height:' . $px . 'px'], $h_); }
         if ($u === '') { $u2 = wp_upload_dir(); $pfad = self::bild_pfad(self::land(''), $asin, 0); if (is_file($pfad)) { $u = rtrim((string) $u2['baseurl'], '/') . '/sab/' . basename($pfad); } }
         return $u !== '' ? '<img src="' . esc_url($u) . '" alt="" loading="lazy" style="width:64px;height:64px;object-fit:contain;background:#fff;border:1px solid #e3e6e6;border-radius:4px;flex:none">' : '<span style="width:64px;height:64px;flex:none;display:inline-flex;align-items:center;justify-content:center;background:#f6f7f7;border:1px dashed #c3c4c7;border-radius:4px;font-size:10px;color:#888;text-align:center">kein Bild</span>';
     }
@@ -10916,29 +10970,45 @@ JS;
             } elseif ($form === 'lernen_ende') {
                 delete_option('sab_lern_sim'); $meldung = 'Simulation beendet.';
             } elseif ($form === 'lernen_start') {
-                $d = (array) self::uebersicht_daten(self::land(''), false); $trotz = (array) get_option('sab_trotz', []); $as = array_values(array_filter(self::alle_asins(), fn($a) => isset($d['items'][$a]))); shuffle($as); $gef = false;
-                foreach (array_slice($as, 0, 12) as $alt) {
-                    $fund = self::fundstellen([$alt]); $k = self::austausch_kandidaten($alt, self::anzeige_name($alt, $d, $fund), $d, $trotz, $fund, 12)['liste']; $l = [];
+                $d = (array) self::uebersicht_daten(self::land(''), false); $trotz = (array) get_option('sab_trotz', []); $alt = self::asin((string) ($_POST['sab_alt'] ?? '')); $gef = false;
+                if ($alt && isset($d['items'][$alt])) {   // das Produkt wählt jetzt der Mensch (vorher Zufall, daher passten die Vorschläge oft nicht)
+                    $fund = self::fundstellen([$alt]); $k = self::austausch_kandidaten($alt, self::anzeige_name($alt, $d, $fund), $d, $trotz, $fund, self::LERN_ANZAHL)['liste']; $l = [];
                     foreach ($k as $c) { if (!empty($c['x']) && !empty($c['f'])) { $l[] = ['asin' => $c['asin'], 'f' => $c['f'], 'lern' => (float) $c['lern'], 'score' => (int) ($c['score'] ?? 0)]; } }
-                    if (count($l) >= 3) { usort($l, fn($p, $q) => $q['lern'] <=> $p['lern']); update_option('sab_lern_sim', ['alt' => $alt, 'liste' => $l, 'pos' => 0], false); $gef = true; break; }
+                    if (count($l) >= 1) { usort($l, fn($p, $q) => $q['lern'] <=> $p['lern']); update_option('sab_lern_sim', ['alt' => $alt, 'liste' => array_slice($l, 0, self::LERN_ANZAHL), 'pos' => 0], false); $gef = true; }
                 }
-                $meldung = $gef ? '' : 'Kein Produkt mit mindestens drei Vorschlägen gefunden. Bitte erst den Ersatzpool füllen oder später noch einmal versuchen.';
+                $meldung = $gef ? '' : 'Für dieses Produkt gibt es noch keine Vorschläge. Bitte erst den Ersatzpool füllen (Reiter Score, gezielte Ersatzsuche).';
+            } elseif ($form === 'lernen_schwelle') {
+                update_option('sab_lern_schwelle', max(1, min(100, (int) ($_POST['sab_lern_schwelle'] ?? 40))), false); $meldung = 'Schwelle gespeichert.';
+            } elseif ($form === 'lernen_gewichte') {
+                $ld = self::lern_daten(); $w2 = $ld['w'];
+                foreach ($w2 as $k => $g) { $v = str_replace(',', '.', (string) wp_unslash($_POST['sab_lw'][$k] ?? '')); if (is_numeric($v)) { $w2[$k] = max(0.0, min(3.0, (float) $v)); } }
+                self::lern_speichern($w2, $ld['runden'], $ld['log']); $meldung = 'Gewichte gespeichert.';
+            } elseif ($form === 'lernen_done_leer') {
+                delete_option('sab_lern_done'); $meldung = 'Liste geleert.';
             } elseif ($form === 'lernen_passt') {
-                $sim = (array) get_option('sab_lern_sim', []); $r = (int) ($_POST['sab_rang'] ?? -1); $l = (array) ($sim['liste'] ?? []);
-                if (!isset($l[$r])) { $meldung = 'Keine laufende Simulation.'; }
+                $sim = (array) get_option('sab_lern_sim', []); $l = (array) ($sim['liste'] ?? []);
+                $ra = array_values(array_unique(array_filter(array_map('intval', (array) ($_POST['sab_rang'] ?? [])), fn($r) => isset($l[$r])))); sort($ra);
+                if (!$l) { $meldung = 'Keine laufende Simulation.'; }
+                elseif (!$ra) { $meldung = 'Bitte mindestens einen Vorschlag mit „passt“ anhaken (oder „keiner davon passt“).'; }
                 else {
-                    $ld = self::lern_daten(); $abg = $r > 0 ? array_column(array_slice($l, 0, $r), 'f') : array_column(array_slice($l, 1, 2), 'f');
-                    $w2 = self::lern_schritt($ld['w'], (array) $l[$r]['f'], $abg, $r > 0 ? self::LERN_RATE : self::LERN_RATE / 2);
-                    $log = $ld['log']; $log[] = ['t' => gmdate('Y-m-d'), 'p' => $r + 1];
-                    self::lern_speichern($w2, $ld['runden'] + 1, $log); delete_option('sab_lern_sim');
-                    $meldung = 'Gemerkt (Platz ' . ($r + 1) . ' gewählt). Das Plugin hat seine Gewichte angepasst.';
+                    $ld = self::lern_daten(); $w2 = $ld['w']; $rate = self::LERN_RATE / count($ra);   // mehrere Treffer teilen sich einen Schritt
+                    foreach ($ra as $r) {
+                        $abg = []; foreach ($l as $j => $q) { if ($j < $r && !in_array($j, $ra, true)) { $abg[] = $q['f']; } }
+                        $voll = (bool) $abg; if (!$abg) { foreach ($l as $j => $q) { if ($j > $r && !in_array($j, $ra, true) && count($abg) < 2) { $abg[] = $q['f']; } } }
+                        $w2 = self::lern_schritt($w2, (array) $l[$r]['f'], $abg, $voll ? $rate : $rate / 2);
+                    }
+                    $log = $ld['log']; $log[] = ['t' => gmdate('Y-m-d'), 'p' => $ra[0] + 1];
+                    self::lern_speichern($w2, $ld['runden'] + 1, $log);
+                    $fertig = (array) get_option('sab_lern_done', []); $fertig[(string) $sim['alt']] = ['t' => gmdate('Y-m-d'), 'n' => array_map(fn($r) => (string) $l[$r]['asin'], $ra)]; update_option('sab_lern_done', array_slice($fertig, -200, null, true), false);
+                    delete_option('sab_lern_sim');
+                    $meldung = 'Gemerkt (' . count($ra) . ' passend). Das Plugin hat seine Gewichte angepasst; das Produkt steht unter „Erledigt“.';
                 }
             } elseif ($form === 'lernen_keiner') {
                 $sim = (array) get_option('sab_lern_sim', []); $pos = (int) ($_POST['sab_pos'] ?? 0); $l = (array) ($sim['liste'] ?? []);
                 if ($l) {
-                    $ld = self::lern_daten(); $w2 = self::lern_ablehnen($ld['w'], array_column(array_slice($l, $pos, 4), 'f'));
-                    if ($pos + 4 >= count($l)) { $log = $ld['log']; $log[] = ['t' => gmdate('Y-m-d'), 'p' => 0]; self::lern_speichern($w2, $ld['runden'] + 1, $log); delete_option('sab_lern_sim'); $meldung = 'Keiner passte; das ist gemerkt.'; }
-                    else { $sim['pos'] = $pos + 4; update_option('sab_lern_sim', $sim, false); self::lern_speichern($w2, $ld['runden'], $ld['log']); }
+                    $ld = self::lern_daten(); $w2 = self::lern_ablehnen($ld['w'], array_column(array_slice($l, $pos, self::LERN_ANZAHL), 'f'));
+                    if ($pos + self::LERN_ANZAHL >= count($l)) { $log = $ld['log']; $log[] = ['t' => gmdate('Y-m-d'), 'p' => 0]; self::lern_speichern($w2, $ld['runden'] + 1, $log); delete_option('sab_lern_sim'); $meldung = 'Keiner passte; das ist gemerkt.'; }
+                    else { $sim['pos'] = $pos + self::LERN_ANZAHL; update_option('sab_lern_sim', $sim, false); self::lern_speichern($w2, $ld['runden'], $ld['log']); }
                 }
             } elseif ($form === 'ersatz_pruef') {
                 [$txt, $ch] = self::ersatz_status_setzen((string) get_option('sab_ersatz', ''), sanitize_text_field(wp_unslash($_POST['sab_art'] ?? '')), self::land_schluessel((string) ($_POST['sab_land'] ?? '')), self::asin((string) ($_POST['sab_asin'] ?? '')), ($_POST['sab_status'] ?? '') === 'geprüft' ? 'geprüft' : 'neu');
